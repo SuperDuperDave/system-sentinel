@@ -55,7 +55,7 @@ These prompts are designed for use with Claude, ChatGPT, or any capable LLM. Fee
 
 ### Prerequisites
 
-- Python 3.10+
+- Python 3.10+ (`python3` on Linux/WSL — install `python3-venv` if missing: `sudo apt install python3-venv`)
 - Node.js 18+
 - Windows 10/11 (for full hardware data collection; backend runs on Linux/WSL with mock data)
 
@@ -73,7 +73,7 @@ This creates a Python venv, installs dependencies, and launches both backend (po
 **Backend:**
 ```bash
 cd backend
-python -m venv venv
+python3 -m venv venv
 source venv/bin/activate  # or venv\Scripts\activate on Windows
 pip install -r requirements.txt
 uvicorn main:app --host 0.0.0.0 --port 8000 --reload
