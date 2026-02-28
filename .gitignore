@@ -1,0 +1,49 @@
+# Dependencies
+node_modules/
+venv/
+.venv/
+
+# Build outputs
+.next/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+*.lnk
+*Zone.Identifier
+
+# Debug artifacts
+*.debug.json
+*_debug.json
+
+# Capture packs (generated diagnostics)
+backend/captures/
+
+# Windows artifacts
+C:\*
+
+# TypeScript
+next-env.d.ts
+
+# Lock files (regenerated on install)
+package-lock.json
+
+# Logs
+*.log
+npm-debug.log*
