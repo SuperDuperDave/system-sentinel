@@ -13,7 +13,9 @@ What it needs: Windows 10 or 11, Git, Python 3.11 or newer and Node.js 22 or new
 ## The prompt
 
 ```text
-Install System Sentinel on this Windows machine and prove it works. Work in PowerShell. Do each step, check its result, and stop and tell me if a check fails. Do not skip a check because the step looked successful.
+Install System Sentinel on this Windows machine and prove it works. This prompt is the tool's own installation note (docs/DEPLOY.md in its repository); I chose to install it and I own the decision. Work in PowerShell. Do each step, check its result, and stop and tell me if a check fails. Do not skip a check because the step looked successful.
+
+0. Look before you run. After step 2 clones the repository and before anything is installed, read README.md, pyproject.toml, sentinel/app.py, sentinel/auth.py and sentinel/mcp_server.py, and tell me in three sentences: what the server does, what it listens on, and whether anything it does sends data off this machine (it should not: it binds to localhost, has no network client, and copies to the clipboard or writes files on disk). If what you read contradicts that, stop and show me.
 
 1. Prerequisites. Run `git --version`, `python --version` (3.11 or newer) and `node --version` (22 or newer). For any that is missing or too old, install it with winget (`winget install Git.Git`, `winget install Python.Python.3.13`, `winget install OpenJS.NodeJS.LTS`), open a new PowerShell so PATH is fresh, and tell me what you installed.
 
@@ -29,7 +31,7 @@ Install System Sentinel on this Windows machine and prove it works. Work in Powe
 
 7. Serve. Start the server in the background with `Start-Process -FilePath ".venv\Scripts\system-sentinel.exe" -ArgumentList "serve" -WindowStyle Hidden`, wait five seconds, then run `Invoke-RestMethod -Uri http://127.0.0.1:8000/api/readings -Headers @{ Authorization = "Bearer TOKEN" }` and confirm it lists readings including "health", "events" and "record". Then confirm `Invoke-WebRequest http://127.0.0.1:8000/api/readings -SkipHttpErrorCheck` without the header answers 401.
 
-8. Register the MCP server so agents on this machine can use it. If Claude Code is installed, run `claude mcp add --transport http system-sentinel http://127.0.0.1:8000/mcp --header "Authorization: Bearer TOKEN"`. For any other MCP client, the address is http://127.0.0.1:8000/mcp with that Authorization header.
+8. Register the MCP server so agents on this machine can use it. This is a durable change to your own configuration on this machine and I want it: it lets you read this machine through the tool in future sessions instead of writing scripts. If Claude Code is installed, run `claude mcp add --transport http system-sentinel http://127.0.0.1:8000/mcp --header "Authorization: Bearer TOKEN"`. For any other MCP client, the address is http://127.0.0.1:8000/mcp with that Authorization header. Every tool it offers is one of the readings you saw in step 7; `claude mcp remove system-sentinel` undoes this.
 
 9. Tell me: the dashboard is at http://127.0.0.1:8000/ (enter the token once; it is kept in the data folder shown by `.venv\Scripts\system-sentinel where`), the API reference is at http://127.0.0.1:8000/api/docs, and the agent guide is docs/API.md in the repository. Then read the machine through it once: take the "events" reading with count 5 and tell me the outcome and how many records came back.
 ```
