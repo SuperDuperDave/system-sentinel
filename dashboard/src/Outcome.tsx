@@ -1,0 +1,88 @@
+import { useState } from 'react';
+import { Reading } from './api';
+import { Taken } from './useReading';
+import styles from './Outcome.module.css';
+
+const NOT_OBSERVED: Record<string, string> = {
+  failed: 'Windows or PowerShell reported an error',
+  unavailable: 'the bridge to Windows was not there',
+  denied: 'Windows refused',
+  timeout: 'the query did not finish in time',
+};
+
+export const clock = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+
+function seconds(ms: number): string {
+  return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(ms < 10000 ? 1 : 0)} s`;
+}
+
+/**
+ * The line under a view's title: what was asked, what came back, and whether the machine was observed.
+ * A failure reads as a failure; an empty result reads as a finding; both name the method on request.
+ */
+export function OutcomeLine<T>({ taken, noun = 'records', emptyText }: { taken: Taken<T>; noun?: string; emptyText?: string }) {
+  const [showMethod, setShowMethod] = useState(false);
+  const r = taken.reading;
+
+  if (taken.state === 'lost') {
+    return <p className={`${styles.line} readout`}><Glyph kind="warn" /> The dashboard could not reach the API: {taken.problem}. <button className={styles.action} onClick={taken.retake}>Try again</button></p>;
+  }
+  if (!r) {
+    return <p className={`${styles.line} readout`}>{taken.state === 'taking' ? 'Taking the reading…' : ''}</p>;
+  }
+
+  const when = clock.format(new Date(r.asked_at));
+  const cost = seconds(r.took_ms);
+  let body: React.ReactNode;
+  if (r.outcome === 'ok') {
+    body = <>{r.count ?? ''} {noun} · taken {when} · {cost}</>;
+  } else if (r.outcome === 'empty') {
+    body = <>{emptyText ?? `No ${noun}`} · taken {when} · {cost}</>;
+  } else {
+    body = (
+      <>
+        <Glyph kind="warn" /> Not observed: {NOT_OBSERVED[r.outcome] ?? r.outcome}
+        {r.error?.detail ? <span className={styles.detail}> · {firstLine(r.error.detail)}</span> : null}
+      </>
+    );
+  }
+
+  return (
+    <div className={styles.block}>
+      <p className={`${styles.line} readout`}>
+        {body}
+        {taken.state === 'taking' ? <span className={styles.taking}> · taking again…</span> : null}
+        <span className={styles.sep} />
+        <button className={styles.action} onClick={taken.retake} disabled={taken.state === 'taking'}>Take again</button>
+        <button className={styles.action} onClick={() => setShowMethod((v) => !v)} aria-expanded={showMethod}>{showMethod ? 'Hide method' : 'Method'}</button>
+      </p>
+      {showMethod ? <Method reading={r} /> : null}
+    </div>
+  );
+}
+
+function Method({ reading }: { reading: Reading }) {
+  return (
+    <div className={styles.method}>
+      <p className="label">How this was read · {reading.method.kind}{reading.redacted.length ? ` · redacted: ${reading.redacted.join(', ')}` : ''}</p>
+      <pre className={`${styles.query} readout`}>{reading.method.query}</pre>
+      {reading.warnings.length ? <pre className={`${styles.query} readout`}>{reading.warnings.join('\n')}</pre> : null}
+    </div>
+  );
+}
+
+export function Glyph({ kind }: { kind: 'critical' | 'error' | 'warning' | 'info' | 'warn' }) {
+  const k = kind === 'warn' ? 'warning' : kind;
+  return (
+    <svg className={styles.glyph} viewBox="0 0 10 10" aria-hidden="true">
+      {k === 'critical' && <path d="M5 1.2 9.2 8.8H.8z" />}
+      {k === 'error' && <circle cx="5" cy="5" r="3.6" />}
+      {k === 'warning' && <circle cx="5" cy="5" r="3.2" fill="none" strokeWidth="1.3" />}
+      {k === 'info' && <circle cx="5" cy="5" r="1.6" />}
+    </svg>
+  );
+}
+
+export function firstLine(s: string): string {
+  return s.split('\n')[0];
+}

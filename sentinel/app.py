@@ -113,8 +113,10 @@ def create_app(state: State | None = None, mcp: bool = True) -> FastAPI:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         return envelope(result, unredacted)
 
-    if mcp:
-        app.mount("/mcp", mcp_app)
+    if mcp_app is not None:
+        # The MCP route joins the main router at exactly /mcp. A mounted sub-app would match
+        # only /mcp/, and the static mount at / would answer /mcp with 405 first.
+        app.router.routes.extend(mcp_app.routes)
 
     if STATIC.is_dir():
         app.mount("/", StaticFiles(directory=STATIC, html=True), name="dashboard")

@@ -77,4 +77,4 @@ def build_mcp(state: "State") -> Starlette:
     server = Server("system-sentinel", version=__version__, instructions=INSTRUCTIONS, on_list_tools=on_list_tools, on_call_tool=on_call_tool)
     # The token is the boundary; host-header checks would only refuse the tailnet name a phone uses.
     security = TransportSecuritySettings(enable_dns_rebinding_protection=False)
-    return server.streamable_http_app(streamable_http_path="/", stateless_http=True, json_response=True, transport_security=security)
+    return server.streamable_http_app(streamable_http_path="/mcp", stateless_http=True, json_response=True, transport_security=security)

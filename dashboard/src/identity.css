@@ -1,0 +1,112 @@
+/*
+ * The identity, direction A, Instrument. Values are owned by
+ * docs/design/IDENTITY-DIRECTIONS-2026-09-20.md; change them there first.
+ * The phosphor is light only: the trace, the glow, one lit word. Text stays ink.
+ */
+
+@font-face {
+  font-family: 'Azeret Mono';
+  font-style: normal;
+  font-weight: 200 500;
+  font-display: swap;
+  src: url(/fonts/azeret-mono-latin.woff2) format('woff2');
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 400 500;
+  font-display: swap;
+  src: url(/fonts/jetbrains-mono-latin.woff2) format('woff2');
+}
+@font-face {
+  font-family: 'DM Sans';
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url(/fonts/dm-sans-latin.woff2) format('woff2');
+}
+
+:root {
+  --field: #0b1a16;
+  --lit: #163429;
+  --deep: #06100d;
+  --ink: #eaf3ee;
+  --body: #c3d6cd;
+  --muted: #8fb0a3;
+  --rule: rgba(234, 243, 238, 0.14);
+  --rule-soft: rgba(234, 243, 238, 0.08);
+  --phosphor-core: #c9ffe1;
+  --phosphor: #6ff0a8;
+  --phosphor-deep: #1e8f5e;
+  --graticule: #9cffc4;
+
+  --font-display: 'Azeret Mono', Menlo, Consolas, monospace;
+  --font-readout: 'JetBrains Mono', Menlo, Consolas, monospace;
+  --font-text: 'DM Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+
+  --gutter: 16px;
+  --rail: 208px;
+  --measure: 1120px;
+
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+html, body { margin: 0; min-height: 100%; }
+
+body {
+  background: var(--field);
+  color: var(--body);
+  font: 400 15px/1.5 var(--font-text);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overflow-x: hidden;
+}
+
+::selection { background: var(--phosphor); color: var(--deep); }
+
+a { color: var(--ink); text-decoration-color: var(--rule); text-underline-offset: 0.15em; }
+a:hover { text-decoration-color: var(--muted); }
+
+button, input, textarea, select { font: inherit; color: inherit; }
+
+button {
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+button:focus-visible, a:focus-visible, input:focus-visible, [tabindex]:focus-visible {
+  outline: 1px solid var(--phosphor);
+  outline-offset: 2px;
+}
+
+/* Readouts: times, IDs, counts, providers. */
+.readout {
+  font-family: var(--font-readout);
+  font-size: 12.5px;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A label above a group: muted, small, tracked. */
+.label {
+  font-family: var(--font-readout);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* The display face for titles. */
+.display {
+  font-family: var(--font-display);
+  font-weight: 300;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}

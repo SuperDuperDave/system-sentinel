@@ -1,0 +1,17 @@
+.tile { fill: var(--field); }
+.gratLine { stroke: var(--graticule); stroke-opacity: 0.13; stroke-width: 1; }
+.gratTick { stroke: var(--graticule); stroke-opacity: 0.35; stroke-width: 1; }
+.glow { fill: none; stroke: var(--phosphor); stroke-width: 7; stroke-linecap: round; opacity: 0.55; }
+.trace { fill: none; stroke: var(--phosphor-core); stroke-width: 2.4; stroke-linecap: round; }
+.dotGlow { fill: var(--phosphor); opacity: 0.6; }
+.dot { fill: var(--phosphor-core); }
+
+.lockup { display: inline-flex; align-items: center; gap: 0.75rem; color: inherit; --mark-size: 2.25rem; }
+.mark { display: block; width: var(--mark-size); height: var(--mark-size); flex: none; }
+.wordmark {
+  font: 400 0.875rem/1 var(--font-display);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--ink);
+}

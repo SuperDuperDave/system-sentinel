@@ -50,7 +50,7 @@ def main(argv: list[str] | None = None) -> int:
 def _serve(host: str, port: int, reload: bool) -> int:
     import uvicorn
 
-    token = load_or_create_token()
+    load_or_create_token()
     print(f"System Sentinel {__version__}")
     print(f"  dashboard  http://{host}:{port}/")
     print(f"  api        http://{host}:{port}/api/docs")
@@ -58,6 +58,7 @@ def _serve(host: str, port: int, reload: bool) -> int:
     print(f"  token      {token_path()}")
     if host not in ("127.0.0.1", "localhost"):
         print("  listening beyond this machine: every /api and /mcp request still needs the token")
+    sys.stdout.flush()
     uvicorn.run("sentinel.app:create_app", factory=True, host=host, port=port, reload=reload, log_level="info")
     return 0
 

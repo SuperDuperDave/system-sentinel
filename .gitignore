@@ -50,3 +50,6 @@ npm-debug.log*
 
 # Python packaging
 *.egg-info/
+
+# Built dashboard (dashboard/ builds into it)
+sentinel/static/
