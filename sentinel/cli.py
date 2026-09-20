@@ -1,8 +1,10 @@
-"""``system-sentinel``: serve, token, check.
+"""``system-sentinel``: serve, token, check, launch.
 
 ``serve`` runs the API on 127.0.0.1:8000 and prints where it is and where the
-token lives. ``token`` prints the token for an agent to read. ``check`` takes the
-health reading without starting the server and exits non-zero unless the bridge
+token lives. ``launch`` is the same server for someone who did not open a
+terminal: it opens the dashboard already signed in and sits in the tray.
+``token`` prints the token for an agent to read. ``check`` takes the health
+reading without starting the server and exits non-zero unless the bridge
 answered, so a deploy prompt can prove the install before anyone opens a page.
 """
 
@@ -28,6 +30,7 @@ def main(argv: list[str] | None = None) -> int:
     serve.add_argument("--port", type=int, default=8000)
     serve.add_argument("--reload", action="store_true", help="development: restart on source change")
 
+    sub.add_parser("launch", help="run the tray launcher: serve, open the dashboard signed in, sit in the tray")
     sub.add_parser("token", help="print the access token")
     sub.add_parser("check", help="take the health reading and exit 0 only if the bridge answered")
     sub.add_parser("where", help="print the data directory")
@@ -35,6 +38,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.command == "serve":
         return _serve(args.host, args.port, args.reload)
+    if args.command == "launch":
+        from .launcher import main as launch
+
+        return launch()
     if args.command == "token":
         print(load_or_create_token())
         return 0

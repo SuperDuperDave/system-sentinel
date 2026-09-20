@@ -48,3 +48,10 @@ npm-debug.log*
 
 # Built dashboard (dashboard/ builds into it)
 sentinel/static/
+
+# Windows launcher build (build/windows/build.ps1)
+.venv-win/
+dist/
+build/windows/work/
+build/windows/SystemSentinel.ico
+/*.spec

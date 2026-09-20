@@ -7,16 +7,17 @@ The built dashboard is served from ``sentinel/static`` at ``/`` when present.
 from __future__ import annotations
 
 import contextlib
+import time
 from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from pydantic import BaseModel
 from starlette.staticfiles import StaticFiles
 
 from . import __version__, capture, readings  # noqa: F401  (readings registers the catalog)
-from .auth import TokenMiddleware, clear_session_cookie, load_or_create_token, matches, session_cookie
+from .auth import CODE_TTL, TokenMiddleware, clear_session_cookie, code_valid, load_or_create_token, matches, session_cookie
 from .bridge import Bridge
 from .reading import REGISTRY, Reading, take
 from .readings.health import learn_identity
@@ -85,6 +86,25 @@ class State:
         self.facts: dict[str, Any] = {}
         self.stack = Stack()
         self.prompts = Prompts()
+        self.spent_codes: dict[str, float] = {}
+
+    def is_local(self, request: Request) -> bool:
+        """Whether the request came from this machine. A method so a test can say otherwise."""
+        client = request.client
+        return client is not None and client.host in ("127.0.0.1", "::1")
+
+    def spend_code(self, code: str) -> bool:
+        """Accept a launcher's one-time code once: minted from this token, unexpired, unspent.
+
+        Spent codes are remembered only as long as an unspent one could still be worth anything,
+        so the dict stays the size of one double-click rather than growing with the session.
+        """
+        now = time.time()
+        self.spent_codes = {spent: until for spent, until in self.spent_codes.items() if until > now}
+        if not code or code in self.spent_codes or not code_valid(self.token, code, now):
+            return False
+        self.spent_codes[code] = now + CODE_TTL
+        return True
 
     def learn(self) -> None:
         self.identity, self.facts = learn_identity(self.bridge)
@@ -139,6 +159,17 @@ def create_app(state: State | None = None, mcp: bool = True) -> FastAPI:
         if not matches(state.token, session.token):
             return JSONResponse({"error": "unauthorized"}, status_code=401)
         response = JSONResponse({"ok": True})
+        session_cookie(response, state.token, secure=request.url.scheme == "https")
+        return response
+
+    @app.get("/api/session/open", tags=["session"])
+    def open_session_by_code(request: Request, code: str = "") -> Response:
+        """The launcher's door: spend a one-time code minted on this machine for the session cookie
+        and land on the dashboard. A person who double-clicks the tool never holds the token; a
+        caller from anywhere else is refused before the code is spent, so it survives for its owner."""
+        if not state.is_local(request) or not state.spend_code(code):
+            return JSONResponse({"error": "unauthorized"}, status_code=401)
+        response = RedirectResponse("/", status_code=303)
         session_cookie(response, state.token, secure=request.url.scheme == "https")
         return response
 

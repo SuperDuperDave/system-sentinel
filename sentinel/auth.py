@@ -9,10 +9,12 @@ Nothing else is authenticated because nothing else carries machine data.
 
 from __future__ import annotations
 
+import hashlib
 import hmac
 import os
 import secrets
 import stat
+import time
 from pathlib import Path
 
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -24,7 +26,8 @@ from .paths import data_dir
 COOKIE = "sentinel_session"
 TOKEN_FILE = "token"
 PROTECTED_PREFIXES = ("/api/", "/mcp")
-OPEN_PATHS = ("/api/session",)
+OPEN_PATHS = ("/api/session", "/api/session/open")
+CODE_TTL = 60.0
 
 
 def token_path() -> Path:
@@ -55,6 +58,34 @@ def presented_token(request: Request) -> str | None:
 
 def matches(expected: str, presented: str | None) -> bool:
     return presented is not None and hmac.compare_digest(expected.encode(), presented.encode())
+
+
+def mint_code(token: str, now: float | None = None) -> str:
+    """A one-time code the launcher spends at ``GET /api/session/open``, so the person never sees
+    the token.
+
+    Signed with the token rather than stored, so any process that can read the token — the launcher
+    starting the server, or a second double-click finding it already running — can mint one, and the
+    server needs no shared state to trust it. Whether a code has been spent is the serving process's
+    to remember; this side only says what a valid, unexpired code looks like.
+    """
+    body = f"{int((time.time() if now is None else now) + CODE_TTL)}.{secrets.token_urlsafe(12)}"
+    return f"{body}.{_signature(token, body)}"
+
+
+def code_valid(token: str, code: str, now: float | None = None) -> bool:
+    """Whether this code was minted from this token and has not run out. Not whether it was spent."""
+    body, _, signature = code.rpartition(".")
+    expires, _, nonce = body.partition(".")
+    if not nonce or not expires.isdigit():
+        return False
+    if int(expires) < (time.time() if now is None else now):
+        return False
+    return hmac.compare_digest(_signature(token, body), signature)
+
+
+def _signature(token: str, body: str) -> str:
+    return hmac.new(token.encode(), body.encode(), hashlib.sha256).hexdigest()
 
 
 class TokenMiddleware(BaseHTTPMiddleware):
