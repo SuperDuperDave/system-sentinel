@@ -1,6 +1,12 @@
-# Installing System Sentinel with your agent
+# Installing System Sentinel
 
-Copy the block below and paste it to the agent running on the Windows machine you want to read (Claude Code, Codex or any agent with a shell). It installs the tool, proves the bridge to Windows works, starts the server and registers it as an MCP server, so the agent can read the machine through the tool instead of writing its own scripts. It is safe to run twice: every step checks before it acts.
+## By hand: double-click
+
+`SystemSentinel.exe` is the whole tool in one file: the server, the dashboard and the decoder. Put it on a local disk (it will not start from a network or `\\wsl.localhost` path), double-click it, and within a few seconds your browser opens on the dashboard already signed in; the mark sits in the system tray with *Open dashboard*, *Copy address for agents*, *Start with Windows* and *Quit*. Double-clicking again opens the dashboard. It creates its token and keeps its stack and captures under `%LOCALAPPDATA%\SystemSentinel\`. Build it from the repository with `build\windows\build.ps1` (Windows Python 3.11 or newer and Node 22 or newer; about five minutes the first time), or use a release when one is published.
+
+## With your agent
+
+Copy the block below and paste it to the agent running on the Windows machine you want to read (Claude Code, Codex or any agent with a shell). It installs the tool from source, proves the bridge to Windows works, starts the server and registers it as an MCP server, so the agent can read the machine through the tool instead of writing its own scripts. It is safe to run twice: every step checks before it acts.
 
 What it needs: Windows 10 or 11, Git, Python 3.11 or newer and Node.js 22 or newer. The block installs the last three with `winget` if they are missing and says so. What it does not do: it sends nothing off the machine, opens no port beyond localhost, and installs no service; running at logon and reaching the machine from a phone are the two optional steps at the end.
 

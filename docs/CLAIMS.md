@@ -70,6 +70,8 @@ Every claim the page at mainthread.ai/work/system-sentinel/ could make about the
 | A test suite: unit tests through a fake bridge, host tests against the real event log | `tests/`; check: `./.venv/bin/python -m pytest` |
 | `system-sentinel check` proves the bridge before anything is asked of it | `sentinel/cli.py` (`_check`) |
 | Installable by pasting one prompt to your agent | `docs/DEPLOY.md`; its "tested on" section records the run |
+| Double-click and it runs: one file, the browser opens on the dashboard already signed in, the mark in the tray with Open dashboard, Copy address for agents, Start with Windows and Quit; the person never sees the token | `sentinel/launcher.py`, `build/windows/build.ps1`; observed 2026-09-20 on the Windows side from a local disk: the dashboard answered within seconds, nineteen readings, the decoder present inside the bundle, 401 without the token, a second launch opened the dashboard and exited, no listener after Quit |
+| The browser is let in by a one-time code signed with the token and spent once, only from this machine | `sentinel/auth.py` (`mint_code`, `code_valid`), `sentinel/app.py` (`GET /api/session/open`); `tests/test_launcher.py` |
 | Reaching it from a phone is a transport in front of the token boundary; Tailscale recommended, a tunnel documented | `docs/DEPLOY.md` ("Optional: reach it from your phone"); `_sessions/PLANNING.md` ("The remote path") |
 
 ## Deliberate absences, unchanged
@@ -78,7 +80,7 @@ No live telemetry as a service, no prediction, no crash-dump decoding (the dump 
 
 ## Pending this session
 
-The double-click launcher and the single-file Windows executable (in progress); the deploy prompt's "tested on" record. Each joins this list when it is observed.
+The deploy prompt's "tested on" record joins this list when the run is observed.
 
 ## The screens
 
