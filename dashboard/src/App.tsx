@@ -1,5 +1,5 @@
 import { FormEvent, ReactElement, useEffect, useState } from 'react';
-import { openSession, take } from './api';
+import { catalog, openSession } from './api';
 import { Lockup, Mark } from './Mark';
 import { Live } from './Live';
 import { useApp, VIEWS, ViewId } from './store';
@@ -28,10 +28,10 @@ export function App() {
   const session = useApp((s) => s.session);
   const setSession = useApp((s) => s.setSession);
 
-  // One cheap request decides whether a session exists; the health reading is that request.
+  // One cheap request decides whether a session exists: the catalog, which touches no PowerShell.
   useEffect(() => {
     if (session !== 'unknown') return;
-    take('health').then(() => setSession('open')).catch(() => setSession('closed'));
+    catalog().then(() => setSession('open')).catch(() => setSession('closed'));
   }, [session, setSession]);
 
   if (session === 'closed') return <SignIn />;

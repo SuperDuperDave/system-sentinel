@@ -1,30 +1,42 @@
 """The redaction policy, applied at the boundary.
 
 By default nothing that leaves the API carries a serial number, the computer name,
-a user account name or a MAC address, and a path under a user profile reads
-``C:\\Users\\<user>\\...``. Message text is kept: it is the evidence. Device
-instance identifiers are kept: they are how PCIe endpoints are told apart.
+a user account name, a MAC address or a network address, and a path under a user
+profile reads ``C:\\Users\\<user>\\...``. Message text is kept: it is the evidence.
+Device instance identifiers are kept: they are how PCIe endpoints are told apart.
 
-One function, :func:`redact`, walks a JSON tree and returns a new one plus the
-list of what it removed. Every route, the composed handoff and the capture pack
-pass through it unless the caller asked for ``unredacted`` by name.
+Two layers, so the policy cannot fail open. Fields are redacted **by name** wherever
+they appear (``MachineName``, ``SerialNumber``, ``mac_address``, ``ipv4`` and their
+kin), which needs nothing learned about the machine. Then the machine's own names,
+once learned from it, are replaced **by value** wherever they occur inside text, so a
+host name quoted in a message goes too. If the names were never learned, the first
+layer still holds.
+
+One function, :func:`redact`, walks a JSON tree and returns a new one plus the list
+of what it removed. Every route, the composed handoff and the capture pack pass
+through it unless the caller asked for ``unredacted`` by name.
 """
 
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 PLACEHOLDER_HOST = "<host>"
 PLACEHOLDER_USER = "<user>"
 PLACEHOLDER_SERIAL = "<serial>"
 PLACEHOLDER_MAC = "<mac>"
+PLACEHOLDER_ADDRESS = "<address>"
 
-# Field names whose values are identifiers of the physical part, not evidence of its state.
+# Fields whose values identify the physical part, the machine, the person or the network,
+# not the machine's state. Matched on the field name, case-insensitively.
 # PlatformId and FRUId are the stable machine and part identifiers a decoded CPER record carries.
 _SERIAL_KEY = re.compile(r"(serial|uuid|productkey|product_key|hardwareid$|platformid|platform_id|fruid|fru_id)", re.I)
 _MAC_KEY = re.compile(r"(macaddress|mac_address|physicaladdress)$", re.I)
+_HOST_KEY = re.compile(r"^(machinename|machine_name|computername|computer_name|host|hostname|host_name|__server|pscomputername|dnshostname)$", re.I)
+_USER_KEY = re.compile(r"^(user|username|user_name|registereduser|registered_user|owner|loggedonuser|logged_on_user|account)$", re.I)
+_ADDRESS_KEY = re.compile(r"^(ip|ipv4|ipv6|ipaddress|ip_address|ip_addresses|gateway|default_gateway|dns|dns_servers|dnsservers)$", re.I)
 
 _MAC_VALUE = re.compile(r"\b(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}\b")
 _PROFILE_PATH = re.compile(r"(?i)((?:[A-Z]:\\|/mnt/[a-z]/)Users[\\/])([^\\/\"'<>|]+)")
@@ -33,19 +45,17 @@ _WSL_HOME = re.compile(r"(?i)((?:\\\\wsl(?:\.localhost)?\\[^\\]+\\|/)home[\\/])(
 
 @dataclass(frozen=True)
 class Identity:
-    """What this machine calls itself: replaced wherever it appears."""
+    """What this machine calls itself: replaced wherever it appears in text, once learned."""
 
     host: str | None = None
     user: str | None = None
-    extra_users: tuple[str, ...] = field(default_factory=tuple)
 
     def names(self) -> list[tuple[str, str]]:
         pairs: list[tuple[str, str]] = []
         if self.host:
             pairs.append((self.host, PLACEHOLDER_HOST))
-        for u in (self.user, *self.extra_users):
-            if u:
-                pairs.append((u, PLACEHOLDER_USER))
+        if self.user:
+            pairs.append((self.user, PLACEHOLDER_USER))
         # Longest first so a user name that contains the host name is replaced whole.
         return sorted(pairs, key=lambda p: -len(p[0]))
 
@@ -64,6 +74,13 @@ class Redactor:
         out = self._walk(value, removed, key=None)
         return out, sorted(removed)
 
+    def attach(self, payload: Any) -> Any:
+        """Redact a payload and, when it is an object, record what was removed on it as ``redacted``."""
+        body, removed = self.redact(payload)
+        if isinstance(body, dict):
+            body["redacted"] = removed
+        return body
+
     def _walk(self, value: Any, removed: set[str], key: str | None) -> Any:
         if isinstance(value, dict):
             return {k: self._walk(v, removed, key=str(k)) for k, v in value.items()}
@@ -81,6 +98,15 @@ class Redactor:
             if _MAC_KEY.search(key):
                 removed.add("mac")
                 return PLACEHOLDER_MAC
+            if _HOST_KEY.match(key):
+                removed.add("host")
+                return PLACEHOLDER_HOST
+            if _USER_KEY.match(key):
+                removed.add("user")
+                return PLACEHOLDER_USER
+            if _ADDRESS_KEY.match(key):
+                removed.add("address")
+                return PLACEHOLDER_ADDRESS
         if _MAC_VALUE.search(s):
             s = _MAC_VALUE.sub(PLACEHOLDER_MAC, s)
             removed.add("mac")

@@ -96,13 +96,29 @@ class TokenMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next) -> Response:
         path = request.url.path
         if path.startswith(PROTECTED_PREFIXES) and path not in OPEN_PATHS:
-            if not matches(self.token, presented_token(request)):
+            if not authorized(self.token, request):
                 return JSONResponse({"error": "unauthorized"}, status_code=401, headers={"WWW-Authenticate": "Bearer"})
         return await call_next(request)
 
 
+def session_value(token: str) -> str:
+    """What the dashboard's cookie holds: a value derived from the token, never the token.
+
+    A browser, or a phone through whatever transport fronts the machine, then holds something
+    that opens the dashboard and nothing else; the token stays where agents read it on purpose."""
+    return _signature(token, "session")
+
+
+def authorized(token: str, request: Request) -> bool:
+    """A bearer header carrying the token, or the session cookie carrying the value derived from it."""
+    header = request.headers.get("authorization", "")
+    if header.lower().startswith("bearer "):
+        return matches(token, header[7:].strip() or None)
+    return matches(session_value(token), request.cookies.get(COOKIE))
+
+
 def session_cookie(response: Response, token: str, secure: bool) -> None:
-    response.set_cookie(COOKIE, token, httponly=True, samesite="lax", secure=secure, max_age=60 * 60 * 24 * 365, path="/")
+    response.set_cookie(COOKIE, session_value(token), httponly=True, samesite="lax", secure=secure, max_age=60 * 60 * 24 * 365, path="/")
 
 
 def clear_session_cookie(response: Response) -> None:

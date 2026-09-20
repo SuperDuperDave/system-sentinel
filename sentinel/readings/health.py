@@ -36,7 +36,7 @@ def take_health(bridge: Bridge, params: dict[str, Any]) -> Reading:
         "decoder": {"present": os.path.exists(DECODER)},
         "data_dir": {"present": data_dir().is_dir()},
     }
-    outcome = facts["outcome"] if facts["outcome"] in ("ok", "empty", "failed", "unavailable", "denied", "timeout") else "failed"
+    outcome = facts["outcome"]
     reading = Reading(reading="health", params={}, outcome=outcome, method={"kind": "powershell", "query": IDENTITY_SCRIPT}, took_ms=facts.get("took_ms", 0))
     reading.sections = [Section("bridge", "raw", data)]
     if outcome not in ("ok", "empty"):

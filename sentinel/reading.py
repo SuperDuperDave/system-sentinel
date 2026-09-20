@@ -115,7 +115,11 @@ class Spec:
         }
 
     def coerce(self, raw: dict[str, Any]) -> dict[str, Any]:
-        """Apply defaults and types to caller-supplied parameters; unknown names are ignored."""
+        """Apply defaults and types to caller-supplied parameters. An unknown name is refused: a
+        misspelled parameter silently ignored would read the wrong evidence with a clean outcome."""
+        unknown = sorted(set(raw) - {p.name for p in self.params})
+        if unknown:
+            raise ValueError(f"unknown parameter(s) {unknown}; this reading takes {[p.name for p in self.params] or 'none'}")
         out: dict[str, Any] = {}
         for p in self.params:
             value = raw.get(p.name, p.default)

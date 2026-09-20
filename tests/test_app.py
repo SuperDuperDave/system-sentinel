@@ -125,3 +125,35 @@ def test_mcp_lists_the_catalog_and_calls_a_reading(client: TestClient):
     assert r.status_code == 200, r.text
     text = r.json()["result"]["content"][0]["text"]
     assert '"outcome": "ok"' in text and "<host>" in text and "TESTBOX" not in text
+
+
+def test_the_cookie_is_derived_from_the_token_not_the_token(client: TestClient):
+    from sentinel.auth import session_value
+
+    r = client.post("/api/session", json={"token": TOKEN})
+    cookie = r.cookies["sentinel_session"]
+    assert cookie != TOKEN and cookie == session_value(TOKEN)
+    # the token itself in the cookie opens nothing; the derived value as a bearer opens nothing
+    assert client.get("/api/readings", cookies={"sentinel_session": TOKEN}).status_code == 401
+    assert client.get("/api/readings", headers={"Authorization": f"Bearer {cookie}"}).status_code == 401
+
+
+def test_unknown_parameters_are_refused(client: TestClient):
+    r = client.get("/api/readings/events?lvl=3", headers=AUTH)
+    assert r.status_code == 422 and "lvl" in r.json()["detail"]
+    r = client.post("/mcp", json={"jsonrpc": "2.0", "id": 9, "method": "tools/call", "params": {"name": "events", "arguments": {"lvl": [3]}}}, headers=MCP_HEADERS)
+    assert r.json()["result"]["isError"] is True
+
+
+def test_host_field_is_redacted_even_before_the_machine_names_are_learned():
+    """The bridge answers the log but not the identity probe: MachineName still leaves as <host>."""
+    bridge = FakeBridge(result=BridgeResult("ok", items=[EVENT], took_ms=5), by_marker={"$env:COMPUTERNAME": BridgeResult("unavailable", error="no interop")})
+    with TestClient(create_app(State(bridge=bridge, token=TOKEN))) as c:
+        rec = c.get("/api/readings/events", headers=AUTH).json()["sections"][0]["data"][0]
+        assert rec["MachineName"] == "<host>"
+
+
+def test_stack_update_and_prompt_are_tools_too(client: TestClient):
+    r = client.post("/mcp", json={"jsonrpc": "2.0", "id": 2, "method": "tools/list"}, headers=MCP_HEADERS)
+    names = {t["name"] for t in r.json()["result"]["tools"]}
+    assert {"stack_update", "stack_prompt", "hardware_cpu"} <= names and "hardware.cpu" not in names

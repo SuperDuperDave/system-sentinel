@@ -26,6 +26,7 @@ from .stack import Duplicate, Prompts, Stack, compose, new_item
 from .stream import Stream
 
 STATIC = Path(__file__).parent / "static"
+RELEARN_SECONDS = 60.0
 
 SSE_HEADERS = {"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"}
 
@@ -82,7 +83,8 @@ class State:
         self.bridge = bridge or Bridge.locate()
         self.token = token or load_or_create_token()
         self.identity = Identity()
-        self.redactor = Redactor(self.identity)
+        self._redactor = Redactor(self.identity)
+        self._learned_at: float | None = None
         self.facts: dict[str, Any] = {}
         self.stack = Stack()
         self.prompts = Prompts()
@@ -107,8 +109,20 @@ class State:
         return True
 
     def learn(self) -> None:
+        """Ask the machine its names. Field-name redaction never depends on this; replacing the
+        names inside message text does, so an answer that did not come is asked for again later."""
+        self._learned_at = time.time()
         self.identity, self.facts = learn_identity(self.bridge)
-        self.redactor = Redactor(self.identity)
+        self._redactor = Redactor(self.identity)
+
+    @property
+    def redactor(self) -> Redactor:
+        """The policy with the machine's names in it. If the names were never learned (the bridge
+        was not answering when the server started), try again, at most once a minute, so the
+        default cannot quietly stay weaker than it should for the life of the process."""
+        if self.identity.host is None and (self._learned_at is None or time.time() - self._learned_at > RELEARN_SECONDS):
+            self.learn()
+        return self._redactor
 
 
 def create_app(state: State | None = None, mcp: bool = True) -> FastAPI:
@@ -145,10 +159,7 @@ def create_app(state: State | None = None, mcp: bool = True) -> FastAPI:
         """The one way anything leaves: redacted unless the caller asked for the real values by name."""
         if unredacted:
             return JSONResponse(payload, status_code=status_code)
-        body, removed = state.redactor.redact(payload)
-        if isinstance(body, dict):
-            body["redacted"] = removed
-        return JSONResponse(body, status_code=status_code)
+        return JSONResponse(state.redactor.attach(payload), status_code=status_code)
 
     def envelope(reading: Reading, unredacted: bool) -> JSONResponse:
         return guarded(reading.to_dict(), unredacted)

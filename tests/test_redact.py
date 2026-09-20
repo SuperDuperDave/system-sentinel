@@ -66,3 +66,26 @@ def test_walks_lists_and_nested_structures():
 def test_short_names_are_not_replaced():
     out, _ = redact({"Message": "an ab error"}, Identity(host="ab"))
     assert out["Message"] == "an ab error"
+
+
+def test_host_and_user_fields_are_redacted_by_name_without_learning():
+    """The largest leak must not depend on the startup probe: MachineName goes by field name."""
+    out, removed = redact({"MachineName": "DESKTOP-ABC123", "user": "someone", "Owner": "someone", "note": "kept"})
+    assert out["MachineName"] == "<host>" and out["user"] == "<user>" and out["Owner"] == "<user>"
+    assert out["note"] == "kept"
+    assert removed == ["host", "user"]
+
+
+def test_network_addresses_are_redacted_by_name():
+    out, removed = redact({"ipv4": ["192.168.1.20"], "ipv6": "fe80::1", "gateway": "192.168.1.1", "dns": ["1.1.1.1", "8.8.8.8"], "address": "0000:03:00.0"})
+    assert out["ipv4"] == ["<address>"] and out["ipv6"] == "<address>" and out["gateway"] == "<address>" and out["dns"] == ["<address>", "<address>"]
+    assert out["address"] == "0000:03:00.0"  # a bus address is how a PCIe endpoint is told apart
+    assert removed == ["address"]
+
+
+def test_attach_records_what_was_removed_on_the_object():
+    from sentinel.redact import Redactor
+
+    body = Redactor().attach({"MachineName": "X-1", "plain": 1})
+    assert body == {"MachineName": "<host>", "plain": 1, "redacted": ["host"]}
+    assert Redactor().attach(["a"]) == ["a"]

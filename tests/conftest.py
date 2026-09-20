@@ -114,3 +114,30 @@ def real_bridge_or_skip() -> Bridge:
 
 def fake_any(value: Any) -> Any:
     return value
+
+
+@pytest.fixture(autouse=True)
+def one_host_suite_at_a_time(request: pytest.FixtureRequest):
+    """Host tests take the bridge one process at a time.
+
+    WSL's interop layer failed repeatedly on 2026-09-20 when several pytest processes launched
+    ``powershell.exe`` at once, and never when one suite ran alone (friction F2). A lock file
+    outside every test's private data directory serialises host tests across processes, so the
+    rule "run host tests serially" is a mechanism rather than something to remember. Unit tests
+    and platforms without ``fcntl`` are untouched.
+    """
+    if request.node.get_closest_marker("host") is None:
+        yield
+        return
+    try:
+        import fcntl
+    except ImportError:  # Windows: one process at a time is the norm there
+        yield
+        return
+    lock_path = Path(os.environ.get("TMPDIR", "/tmp")) / "system-sentinel-host-tests.lock"
+    with open(lock_path, "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)

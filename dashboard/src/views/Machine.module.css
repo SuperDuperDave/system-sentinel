@@ -56,7 +56,6 @@
 }
 .partButton[aria-expanded='true'] .chevron { transform: rotate(90deg); }
 .partTitle { font-size: 20px; color: var(--ink); }
-.partButton:hover .partTitle { color: var(--phosphor-core); }
 .take { margin-left: auto; color: var(--muted); }
 .partButton:hover .take { color: var(--ink); }
 .hint { margin: 6px 0 0 20px; color: var(--muted); font-size: 13.5px; max-width: 72ch; }

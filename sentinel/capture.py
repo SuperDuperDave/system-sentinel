@@ -96,7 +96,7 @@ async def _take(name: str, bridge: Bridge, at: datetime) -> Reading:
     params = {"before": _stamp(at)} if name == "record" else {}
     try:
         return await take(name, bridge, params)
-    except (KeyError, ValueError) as exc:
+    except Exception as exc:  # noqa: BLE001 - one reading's failure must not end the capture
         return Reading(
             reading=name,
             params=params,

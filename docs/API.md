@@ -11,7 +11,7 @@ The server runs on the Windows machine it reads and listens on `http://127.0.0.1
 | Windows | `%LOCALAPPDATA%\SystemSentinel\` |
 | Other (development from WSL) | `~/.system-sentinel/` |
 
-The file `token` in that directory holds it. Send it as `Authorization: Bearer <token>`. The dashboard exchanges it once for a session cookie; agents send the header. A request without a valid token gets `401` with `{"error": "unauthorized"}` and nothing else.
+The file `token` in that directory holds it. Send it as `Authorization: Bearer <token>`. The dashboard exchanges it once for a session cookie whose value is derived from the token, never the token itself, so a browser or a phone holds something that opens the dashboard and nothing else; agents send the header. A request without a valid token gets `401` with `{"error": "unauthorized"}` and nothing else.
 
 `system-sentinel token` prints it. `system-sentinel check` tells you whether the bridge to Windows works before you ask for anything.
 
@@ -23,7 +23,7 @@ claude mcp add --transport http system-sentinel http://127.0.0.1:8000/mcp --head
 
 ### Codex and other MCP clients
 
-Streamable HTTP at `http://127.0.0.1:8000/mcp` with the same header. Every reading below is one tool, named as the reading is named, except that a dot becomes an underscore because MCP tool names allow only letters, digits, underscore and hyphen: `hardware.cpu` is the tool `hardware_cpu`. The stack and the composer are tools too: `stack_list`, `stack_add`, `stack_remove`, `stack_clear`, `compose`, `prompts_list`.
+Streamable HTTP at `http://127.0.0.1:8000/mcp` with the same header. Every reading below is one tool, named as the reading is named, except that a dot becomes an underscore because MCP tool names allow only letters, digits, underscore and hyphen: `hardware.cpu` is the tool `hardware_cpu`. The stack and the composer are tools too: `stack_list`, `stack_add`, `stack_update`, `stack_remove`, `stack_clear`, `stack_prompt`, `compose`, `prompts_list`.
 
 ### Without MCP
 
@@ -77,7 +77,7 @@ Only `ok` and `empty` say anything about the machine. Treat the other four as "n
 
 **`warnings`** are error records PowerShell emitted while still producing output: a sub-query that failed inside a reading that otherwise answered.
 
-**`redacted`** lists what the default redaction removed from this response. By default a response carries no serial number, computer name, user account name or MAC address, and paths under a user profile read `C:\Users\<user>\...`. Pass `?unredacted=true` (or the `unredacted` argument in MCP) to receive them; do that only when the reader has a reason, such as a warranty claim. Message text is kept: it is the evidence. Device instance identifiers are kept: they are how PCIe endpoints are told apart.
+**`redacted`** lists what the default redaction removed from this response. By default a response carries no serial number, computer name, user account name, MAC address or network address (IP, gateway, DNS), and paths under a user profile read `C:\Users\<user>\...`. Fields are redacted by name wherever they appear, and the machine's own names are replaced inside text once learned, so the default holds even when the names could not be learned. Pass `?unredacted=true` (or the `unredacted` argument in MCP) to receive them; do that only when the reader has a reason, such as a warranty claim. Message text is kept: it is the evidence. Device instance identifiers are kept: they are how PCIe endpoints are told apart.
 
 ## The catalog
 
@@ -105,7 +105,7 @@ Only `ok` and `empty` say anything about the machine. Treat the other four as "n
 | `constraints` | Configured limits and their sources | `raw`, `derived` | |
 | `signals` | Forensic signals across the readings and the recent log | `signals` (inferred: suppressions, gaps, pressure, transitions, mismatches; `basis` names the inputs) | |
 
-`GET /api/readings/{name}` takes the reading. Parameters are query parameters. Heavy readings (`hardware.*`, `pcie`, `power`, `memory`, `signals`) take seconds; the dashboard loads them on demand.
+`GET /api/readings/{name}` takes the reading. Parameters are query parameters; a name the reading does not take is refused with `422` rather than ignored, so a misspelled parameter cannot read the wrong evidence with a clean outcome. Heavy readings (`hardware.*`, `pcie`, `power`, `memory`, `signals`) take seconds; the dashboard loads them on demand.
 
 Records from a log (`events`, `record`, `whea`, the stream) share one shape: `RecordId`, `Id`, `Level`, `LevelDisplayName`, `ProviderName`, `MachineName`, `TaskDisplayName`, `TimeCreated` (UTC, ISO), `Message`, `Properties` (the event's data, binary values as hex).
 

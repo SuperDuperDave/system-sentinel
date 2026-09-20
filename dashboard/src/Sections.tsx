@@ -14,7 +14,7 @@
  * the JSON hands an agent, and it cannot fall out of step with a field the reading adds.
  */
 import { Fragment, ReactNode, useState } from 'react';
-import { Cls, Reading } from './api';
+import { Cls, Reading, section } from './api';
 import styles from './Sections.module.css';
 
 /**
@@ -22,9 +22,9 @@ import styles from './Sections.module.css';
  * of a reading alike, which is right for a reading that returns one kind of record and wrong for
  * one that returns a bucket array, a signature list and a status object.
  */
+/** A section's data by name, typed by the caller: the views hold an untyped envelope and name what they expect. One implementation, in api.ts. */
 export function part<T>(reading: Reading | null | undefined, name: string): T | null {
-  const found = reading?.sections.find((s) => s.name === name);
-  return found ? (found.data as T) : null;
+  return section<T>(reading as Reading<T> | null | undefined, name);
 }
 
 /** The basis sentence a derived or inferred section carries, when it carries one. */

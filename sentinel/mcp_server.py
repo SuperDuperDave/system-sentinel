@@ -79,6 +79,16 @@ async def _prompts_list(state: "State", _arguments: dict[str, Any], _redactor: R
     return {"prompts": state.prompts.all()}
 
 
+async def _stack_update(state: "State", arguments: dict[str, Any], redactor: Redactor | None) -> Any:
+    item = state.stack.update(str(arguments.get("id") or ""), rank=arguments.get("rank"), verbosity=arguments.get("verbosity"), title=arguments.get("title"))
+    return _redacted(item, redactor)
+
+
+async def _stack_prompt(state: "State", arguments: dict[str, Any], redactor: Redactor | None) -> Any:
+    chosen = state.stack.choose(prompt_id=arguments.get("prompt_id"), system_prompt=arguments.get("system_prompt"), set_prompt="prompt_id" in arguments)
+    return _redacted(chosen, redactor)
+
+
 STACK_TOOLS: dict[str, StackTool] = {
     tool.name: tool
     for tool in (
@@ -110,6 +120,27 @@ STACK_TOOLS: dict[str, StackTool] = {
         ),
         StackTool("stack_remove", "Remove one item from the stack by its id.", {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}, _stack_remove),
         StackTool("stack_clear", "Remove every item from the stack.", _NO_ARGUMENTS, _stack_clear),
+        StackTool(
+            "stack_update",
+            "Change one item's place in the handoff (rank 1 first to 5 last), how much of it is rendered (verbosity summary or full), or its title.",
+            {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string"},
+                    "rank": {"type": "integer", "minimum": 1, "maximum": 5},
+                    "verbosity": {"type": "string", "enum": ["summary", "full"]},
+                    "title": {"type": "string"},
+                },
+                "required": ["id"],
+            },
+            _stack_update,
+        ),
+        StackTool(
+            "stack_prompt",
+            "Choose the prompt that leads the handoff (by id from prompts_list; null for none) or whether one leads it at all.",
+            {"type": "object", "properties": {"prompt_id": {"type": ["string", "null"]}, "system_prompt": {"type": "boolean"}}},
+            _stack_prompt,
+        ),
         StackTool("compose", "The handoff as Markdown: the prompt, then the evidence by rank, each with its provenance and outcome.", _NO_ARGUMENTS, _compose),
         StackTool("prompts_list", "The prompt library: the six the tool ships with and any that were added.", _NO_ARGUMENTS, _prompts_list, carries_machine_data=False),
     )
@@ -117,12 +148,7 @@ STACK_TOOLS: dict[str, StackTool] = {
 
 
 def _redacted(payload: Any, redactor: Redactor | None) -> Any:
-    if redactor is None:
-        return payload
-    body, removed = redactor.redact(payload)
-    if isinstance(body, dict):
-        body["redacted"] = removed
-    return body
+    return payload if redactor is None else redactor.attach(payload)
 
 
 def input_schema(spec: Spec) -> dict[str, Any]:
@@ -136,12 +162,7 @@ def input_schema(spec: Spec) -> dict[str, Any]:
         if p.choices:
             prop["enum"] = list(p.choices)
         props[p.name] = prop
-    props["unredacted"] = {
-        "type": "boolean",
-        "default": False,
-        "description": "Include serial numbers, the computer name, user names and MAC addresses. Only with a reason.",
-    }
-    return {"type": "object", "properties": props, "required": [p.name for p in spec.params if p.default is None]}
+    return _with_unredacted({"type": "object", "properties": props, "required": [p.name for p in spec.params if p.default is None]})
 
 
 def _with_unredacted(schema: dict[str, Any]) -> dict[str, Any]:
@@ -196,10 +217,7 @@ def build_mcp(state: "State") -> Starlette:
             reading = await take(reading_name, state.bridge, arguments)
         except ValueError as exc:
             return types.CallToolResult(content=[types.TextContent(type="text", text=str(exc))], is_error=True)
-        body = reading.to_dict()
-        if not unredacted:
-            body, removed = state.redactor.redact(body)
-            body["redacted"] = removed
+        body = reading.to_dict() if unredacted else state.redactor.attach(reading.to_dict())
         return types.CallToolResult(content=[types.TextContent(type="text", text=json.dumps(body, indent=1))])
 
     server = Server("system-sentinel", version=__version__, instructions=INSTRUCTIONS, on_list_tools=on_list_tools, on_call_tool=on_call_tool)

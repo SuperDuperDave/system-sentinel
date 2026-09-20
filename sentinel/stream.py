@@ -59,7 +59,7 @@ LOGS: tuple[str, ...] = ("System", "Application")
 
 CURSOR_SCRIPT = f"""foreach ($log in {','.join(f"'{log}'" for log in LOGS)}) {{
     $latest = Get-WinEvent -LogName $log -MaxEvents 1 -ErrorAction SilentlyContinue
-    [pscustomobject]@{{ log = $log; record = [int64]$latest.RecordId }}
+    [pscustomobject]@{{ log = $log; record = $(if ($latest) {{ [int64]$latest.RecordId }} else {{ $null }}) }}
 }}"""
 
 
@@ -126,9 +126,7 @@ class Stream:
             self.cursors[log] = max(self.cursors.get(log, 0), rid)
             payload: dict[str, Any] = {"log": log, "record": record}
             if self.redactor is not None:
-                payload, removed = self.redactor.redact(payload)
-                if removed:
-                    payload["redacted"] = removed
+                payload = self.redactor.attach(payload)
             events.append(payload)
         return result, events
 
@@ -148,7 +146,9 @@ class Stream:
                     if result.observed and not self.ready:
                         yield frame("bridge", {"outcome": "failed", "error": "the logs did not report where they are; the stream has nothing to be new against"})
                 if not result.observed:
-                    yield frame("bridge", {"outcome": result.outcome, "error": result.error or ""})
+                    # The error text is PowerShell's own and can quote a path or a name: it leaves redacted too.
+                    detail = {"outcome": result.outcome, "error": result.error or ""}
+                    yield frame("bridge", self.redactor.attach(detail) if self.redactor is not None else detail)
                 yield frame("heartbeat", {"at": _now(), "cursors": dict(self.cursors)})
                 # While the machine is not answering, every poll costs the bridge's full retries: ask less often.
                 await asyncio.sleep(self.interval if result.observed else self.interval * 4)
