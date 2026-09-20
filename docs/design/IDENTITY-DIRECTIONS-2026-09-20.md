@@ -1,8 +1,30 @@
 # System Sentinel — identity directions, 2026-09-20
 
-**Status: proposed, awaiting David's choice.** Board: https://claude.ai/artifact/4RZbu4qwZ12Kr2d3ARxKvg (private). Source of the board: [identity-board/build-board.py](identity-board/build-board.py); everything on it is drawn in code.
+**Status: direction A, Instrument, selected by David on 2026-09-20 ("I absolutely LOVE option A"). Values below under Selected identity.** Board: https://claude.ai/artifact/4RZbu4qwZ12Kr2d3ARxKvg (private). Source of the board: [identity-board/build-board.py](identity-board/build-board.py); everything on it is drawn in code.
 
 This note is for the presentation of System Sentinel on mainthread.ai, built in `mainthread-studio`. Once a direction is chosen, this folder owns the identity's values, as Bendr's and Zoning Signal's repositories own theirs. Nothing in the application source was changed for this note.
+
+## Selected identity (owns the values)
+
+Direction A, Instrument. The page on mainthread.ai is the reference implementation (`mainthread-studio/site`: `lib/system-sentinel-mark.ts`, `lib/system-sentinel-record.ts`, `components/SystemSentinel*.tsx`, the `instrument` surface in `styles/globals.css`). Change values here first, then there.
+
+| Token | Value | Use |
+| --- | --- | --- |
+| Field | `#0B1A16` | ground |
+| Lit | `#163429` | the lit region, upper left |
+| Deep | `#06100D` | lower right, footer |
+| Ink | `#EAF3EE` | text |
+| Body | `#C3D6CD` | running text |
+| Muted | `#8FB0A3` | labels, captions |
+| Rule | `rgba(234,243,238,.14)` | hairlines |
+| Phosphor core | `#C9FFE1` | the trace's core, the one lit word; light only |
+| Phosphor | `#6FF0A8` | the glow; light only |
+| Phosphor deep | `#1E8F5E` | links on paper |
+| Graticule | `#9CFFC4` at 13% | 40 px hairline squares, one zone |
+
+Type: Azeret Mono 300 for headlines and section titles, 400 tracked capitals for the wordmark (OFL; the Latin subset is self-hosted on the site); JetBrains Mono for readouts and labels; DM Sans for text. Mark: `S_PATH` on a 64-unit grid (`M45 19C42 12 22 11 21 20C20 29 44 30 44 41C44 50 23 53 18 45`), the beam's dot at (18, 45), on a tile of radius 14 carrying an 8-unit graticule; the tab icon drops the graticule and the glow. The trace: flat, one pulse at the right, drawn once on load. The headline on the page: *See what your machine already knows.*, the last two words lit; alternatives offered to David with the release. Amber (`#FFE4B0`, `#FFB454`, `#A8651A`) is recorded as the accent he did not choose.
+
+David's five ChatGPT renders from the prompts (backdrop, graticule, trace, share-card ground, app icon) are references only, kept outside this repository. The application takes these values back when it is next worked on: its `globals.css` tokens, the mark, the display face.
 
 ## What is decided (from the studio's records)
 
