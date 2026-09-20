@@ -46,6 +46,7 @@ Every reading is one query against the machine, returned in one envelope. The en
     { "name": "records", "class": "raw", "data": [ ... ] }
   ],
   "error": null,
+  "warnings": [],
   "redacted": ["host", "user"]
 }
 ```
@@ -70,39 +71,43 @@ Only `ok` and `empty` say anything about the machine. Treat the other four as "n
 | `raw` | What Windows returned, field for field, minus redaction. |
 | `derived` | Computed from raw by a stated rule (a count, a bucket, a signature, a decoded structure). The section names its inputs and rule in `basis`. |
 | `invariant` | A fact about the machine that does not change between readings (the fingerprint). |
-| `inferred` | A lead: a pattern the tool noticed that a person or an agent should investigate. Never a diagnosis. |
+| `inferred` | A lead: a pattern the tool noticed that a person or an agent should investigate. Never a diagnosis. `basis` names the rule. |
 
-**`method`** is how the reading was taken: the kind of bridge and the query text, so the evidence can be reproduced by hand.
+**`method`** is how the reading was taken: the kind of bridge and the query text, so the evidence can be reproduced by hand. A reading built from several queries lists them.
 
-**`redacted`** lists what the default redaction removed from this response. By default a response carries no serial number, computer name, user account name or MAC address, and paths under a user profile read `C:\Users\<user>\...`. Pass `?unredacted=true` (or the `unredacted` argument in MCP) to receive them; do that only when the reader has a reason, such as a warranty claim. Message text is kept: it is the evidence.
+**`warnings`** are error records PowerShell emitted while still producing output: a sub-query that failed inside a reading that otherwise answered.
+
+**`redacted`** lists what the default redaction removed from this response. By default a response carries no serial number, computer name, user account name or MAC address, and paths under a user profile read `C:\Users\<user>\...`. Pass `?unredacted=true` (or the `unredacted` argument in MCP) to receive them; do that only when the reader has a reason, such as a warranty claim. Message text is kept: it is the evidence. Device instance identifiers are kept: they are how PCIe endpoints are told apart.
 
 ## The catalog
 
-`GET /api/readings` lists every reading with its description, class, parameters and their defaults, what it may carry that redaction removes, and a typical `took_ms`. The list below is the catalog as designed; the live catalog is authoritative.
+`GET /api/readings` lists every reading with its description, classes, parameters and their defaults, what it may carry that redaction removes, and whether it is heavy. The live catalog is authoritative; this is the catalog as designed, with each reading's sections.
 
-| Reading | What it reads | Class | Parameters |
+| Reading | What it reads | Sections (class) | Parameters |
 | --- | --- | --- | --- |
-| `health` | Whether the bridge works: PowerShell found, its version, a trivial round trip, decoder present, data directory | raw | |
-| `events` | Records from a Windows log by level | raw | `log` (System, Application), `levels` (1 critical, 2 error, 3 warning, 4 information; default 1,2), `count` (default 50) |
-| `record` | The log around a moment: the records before a timestamp, oldest last | raw | `before` (ISO timestamp), `count` (default 50), `log` (default System) |
-| `whea` | WHEA-Logger records with their binary payload, each decoded beside it | raw + derived | `count` (default 30) |
-| `storms` | WHEA records over a window in time buckets, grouped by signature, with burst and acceleration flags | derived | `hours` (default 24), `bucket_seconds` (60), `burst_threshold` (5), `accel_threshold` (2.0) |
-| `dumps` | The crash-dump inventory: names, sizes, times under the Windows dump locations | raw | |
-| `system` | The snapshot: OS, build, boot time, uptime, processor load, memory | raw | |
-| `hardware` | The fingerprint and configuration: CPU, GPU, board, BIOS, boot storage, Secure Boot, Fast Startup, virtualization | invariant + raw + derived | |
-| `hardware.cpu` | Processor and platform detail | raw + derived | |
-| `hardware.gpu` | Display adapters and driver | raw + derived | |
-| `hardware.board` | Board and firmware | raw + derived | |
-| `hardware.storage` | Disks, volumes, SMART where exposed | raw + derived | |
-| `hardware.network` | Adapters and connectivity | raw + derived | |
-| `drivers` | Driver changes: the most recently dated signed drivers | raw | `count` (default 30) |
-| `pcie` | The PCIe fabric: endpoints, roots, shared groups | raw + derived | |
-| `power` | Power configuration and transitions | raw + derived | |
-| `memory` | Physical memory and stability signals | raw + derived | |
-| `constraints` | Configured limits and their sources | raw + derived | |
-| `signals` | Forensic signals across the readings and the recent log: suppressions, gaps, pressure, transitions, mismatches | inferred | |
+| `health` | Whether the bridge works: PowerShell found, its version, a trivial round trip, decoder present, data directory | `bridge` (raw) | |
+| `events` | Records from a Windows log by level | `records` (raw) | `log` (System, Application), `levels` (1 critical, 2 error, 3 warning, 4 information; default 1,2), `count` (default 50) |
+| `record` | The log around a moment: the records before a timestamp, oldest first | `records` (raw) | `before` (ISO timestamp), `count` (default 50), `log` (default System) |
+| `whea` | WHEA-Logger records with their binary payload, each decoded beside it | `records` (raw, with `RawData` hex), `decoded` (derived: one entry per record, the decoder's structure or its error) | `count` (default 30) |
+| `storms` | WHEA records over a window in wall-clock buckets, grouped by signature, with burst and acceleration flags | `buckets` (derived, includes empty minutes), `signatures` (derived), `status` (inferred: quiet, burst or accelerating, with the rates and the reason) | `hours` (default 24), `bucket_seconds` (60), `burst_threshold` (5), `accel_threshold` (2.0) |
+| `dumps` | The crash-dump inventory under the Windows dump locations | `files` (raw: name, path, bytes, modified) | |
+| `system` | The snapshot: OS, build, boot time, uptime, processor load, memory | `snapshot` (raw) | |
+| `hardware` | The fingerprint and configuration | `fingerprint` (invariant), `config` (raw), `risks` (inferred: observations such as Secure Boot off, never advice) | |
+| `hardware.cpu` | Processor and platform detail | `raw`, `derived` | |
+| `hardware.gpu` | Display adapters and driver | `raw`, `derived` | |
+| `hardware.board` | Board and firmware | `raw`, `derived` | |
+| `hardware.storage` | Disks, volumes, SMART where exposed | `raw`, `derived` | |
+| `hardware.network` | Adapters and connectivity | `raw`, `derived` | |
+| `drivers` | Driver changes: the most recently dated signed drivers | `drivers` (raw) | `count` (default 30) |
+| `pcie` | The PCIe fabric | `endpoints` (raw), `roots` (raw), `groups` (derived: endpoints sharing a root) | |
+| `power` | Power configuration and transitions | `raw`, `derived` | |
+| `memory` | Physical memory and stability signals | `raw`, `derived` | |
+| `constraints` | Configured limits and their sources | `raw`, `derived` | |
+| `signals` | Forensic signals across the readings and the recent log | `signals` (inferred: suppressions, gaps, pressure, transitions, mismatches; `basis` names the inputs) | |
 
-`GET /api/readings/{name}` takes the reading. Parameters are query parameters. Heavy readings (`hardware.*`, `pcie`, `power`, `memory`) take seconds; `took_ms` in the catalog is the last observed cost on this machine.
+`GET /api/readings/{name}` takes the reading. Parameters are query parameters. Heavy readings (`hardware.*`, `pcie`, `power`, `memory`, `signals`) take seconds; the dashboard loads them on demand.
+
+Records from a log (`events`, `record`, `whea`, the stream) share one shape: `RecordId`, `Id`, `Level`, `LevelDisplayName`, `ProviderName`, `MachineName`, `TaskDisplayName`, `TimeCreated` (UTC, ISO), `Message`, `Properties` (the event's data, binary values as hex).
 
 ## The record around a moment
 
@@ -110,27 +115,60 @@ Only `ok` and `empty` say anything about the machine. Treat the other four as "n
 
 ## The stream
 
-`GET /api/stream` is server-sent events. It emits `event` messages for new records matching the tool's presets (crash and power, WHEA, storage, driver and service, application crashes, TPM), a `heartbeat` on every poll, and a `bridge` message when a poll fails, with the same outcome vocabulary as a reading. A silent stream is not a healthy machine; a stream with heartbeats and no `bridge` messages is.
+`GET /api/stream` is server-sent events, polled from the logs every few seconds with one query per poll.
+
+| Event | Data |
+| --- | --- |
+| `record` | `{ "log": "System", "record": { ...the record shape... } }` for each new record matching the tool's presets: crash and power (Kernel-Power 41, EventLog 6008, WER 1001, volmgr 46, disk 161 and 162), WHEA (1, 17 to 20, 46, 47), storage (7, 11, 51, 55, 57, 129, 153), driver and service (219, 7000 to 7034, 10110, 10111), application crashes (1000 to 1002), TPM (1796, 1801) |
+| `heartbeat` | `{ "at": "...", "cursors": { "System": 307379, "Application": 88120 } }` on every poll |
+| `bridge` | `{ "outcome": "failed", "error": "..." }` when a poll did not observe the machine, with the reading vocabulary |
+
+A silent stream is not a healthy machine; a stream with heartbeats and no `bridge` events is.
 
 ## The stack
 
 The stack is the evidence a person or an agent has chosen to hand on. It lives on the server so the desktop, the phone and the agent see one stack.
 
+An item:
+
+```json
+{
+  "id": "…",
+  "added_at": "2026-09-20T18:10:02.000Z",
+  "kind": "reading",
+  "title": "Critical and error records, last 50",
+  "rank": 3,
+  "verbosity": "full",
+  "reading": { …the envelope as it was read… },
+  "ids": null,
+  "note": null
+}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `kind` | `reading` (a whole reading), `selection` (some records of a reading, chosen by `RecordId` in `ids`), `note` (text the person or agent wrote) |
+| `rank` | 1 first to 5 last in the composed handoff; default 3 |
+| `verbosity` | `summary` (a table of time, level, provider, ID and the first line of the message) or `full` (the records as JSON); default `full` |
+| `reading` | The envelope, kept as it was at the moment of adding: its `asked_at`, `outcome` and `method` are the item's provenance |
+
 | Route | Does |
 | --- | --- |
-| `GET /api/stack` | The items, the active prompt, the options |
-| `POST /api/stack/items` | Add an item. An item is a reading taken now, a `record` around a moment, a selection of records from a reading by their ids, or a note. The item keeps the data as it was read, with its provenance. |
-| `PATCH /api/stack/items/{id}` | Change `rank` (1 first to 5 last) or `verbosity` (`summary`, `full`) |
+| `GET /api/stack` | `{ "items": [...], "prompt_id": "...", "system_prompt": true }` |
+| `PATCH /api/stack` | Change `prompt_id` or `system_prompt` |
+| `POST /api/stack/items` | Add an item. Body: `kind`, optional `title`, `rank`, `verbosity`, `ids`, `note`, and either `take: { "name": "...", "params": {...} }` (the server takes the reading now) or `envelope: { ... }` (a reading the caller already holds, stored as given). Returns the item. Adding the same reading with the same parameters and the same `ids` twice is refused with `409`. |
+| `PATCH /api/stack/items/{id}` | Change `rank`, `verbosity` or `title` |
 | `DELETE /api/stack/items/{id}` | Remove one |
 | `DELETE /api/stack` | Clear |
-| `GET /api/stack/composed` | The handoff text: the chosen prompt, then the items by rank, each labelled with its class and provenance; redacted unless `unredacted=true` |
-| `GET /api/prompts`, `POST`, `PATCH /{id}`, `DELETE /{id}` | The prompt library: six presets to start, yours to add, edit and delete |
+| `GET /api/stack/composed` | `{ "text": "...", "items": 4, "redacted": [...] }`: the handoff as Markdown, the chosen prompt first (when `system_prompt` is on), then the items by rank, each headed with its kind, its class, its provenance (reading, parameters, when, outcome, method kind) and rendered by its verbosity; redacted unless `unredacted=true` |
+| `GET /api/prompts` | The prompt library: `{ "id", "name", "description", "content", "builtin" }` each; six presets to start |
+| `POST /api/prompts`, `PATCH /api/prompts/{id}`, `DELETE /api/prompts/{id}` | Yours to add, edit and delete, presets included |
 
 The composed text is what the dashboard copies to the clipboard. An agent reads the same text and needs no clipboard.
 
 ## Captures
 
-`POST /api/captures` writes a ZIP into the data directory and returns it: every reading, the stack, the composed text, and a manifest that lists exactly the members and the redaction applied. `GET /api/captures` lists what is on disk. Nothing is sent anywhere.
+`POST /api/captures` takes every reading in the catalog now, writes a ZIP into the data directory and returns it. Members: `readings/<name>.json` (one envelope each, heavy ones included), `stack.json`, `composed.md`, and `manifest.json`, which lists exactly the members with each reading's outcome and byte size, the tool's version, and the redaction applied. The ZIP is redacted unless `unredacted=true`. `GET /api/captures` lists what is on disk; `GET /api/captures/{name}` returns one. Nothing is sent anywhere.
 
 ## What is not here
 

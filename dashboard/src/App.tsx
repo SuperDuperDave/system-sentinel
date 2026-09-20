@@ -1,9 +1,27 @@
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, ReactElement, useEffect, useState } from 'react';
 import { openSession, take } from './api';
 import { Lockup, Mark } from './Mark';
-import { useApp, VIEWS } from './store';
+import { useApp, VIEWS, ViewId } from './store';
 import { Record } from './views/Record';
+import { Errors } from './views/Errors';
+import { Dumps } from './views/Dumps';
+import { Machine } from './views/Machine';
+import { Diagnostics } from './views/Diagnostics';
+import { Signals } from './views/Signals';
+import { Stack } from './views/Stack';
+import { Agents } from './views/Agents';
 import styles from './App.module.css';
+
+const VIEW_COMPONENTS: { [K in ViewId]: () => ReactElement } = {
+  record: Record,
+  errors: Errors,
+  dumps: Dumps,
+  machine: Machine,
+  diagnostics: Diagnostics,
+  signals: Signals,
+  stack: Stack,
+  agents: Agents,
+};
 
 export function App() {
   const session = useApp((s) => s.session);
@@ -22,6 +40,7 @@ export function App() {
 function Shell() {
   const view = useApp((s) => s.view);
   const setView = useApp((s) => s.setView);
+  const View = VIEW_COMPONENTS[view];
   return (
     <div className={styles.shell}>
       <header className={styles.header}>
@@ -36,7 +55,7 @@ function Shell() {
           </button>
         ))}
       </nav>
-      <main className={styles.main}>{view === 'record' ? <Record /> : null}</main>
+      <main className={styles.main}><View /></main>
     </div>
   );
 }
