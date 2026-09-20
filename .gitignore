@@ -47,3 +47,6 @@ package-lock.json
 # Logs
 *.log
 npm-debug.log*
+
+# Python packaging
+*.egg-info/
