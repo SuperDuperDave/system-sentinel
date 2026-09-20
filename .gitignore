@@ -41,8 +41,6 @@ C:\*
 # TypeScript
 next-env.d.ts
 
-# Lock files (regenerated on install)
-package-lock.json
 
 # Logs
 *.log
