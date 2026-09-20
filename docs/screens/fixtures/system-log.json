@@ -1,0 +1,924 @@
+{
+  "what": "Synthetic System-log records for the sanitized dashboard screenshots. Windows' public providers, event ids and Microsoft's own message templates only; no record here was read from any real machine.",
+  "how": "minutes_ago is materialized into TimeCreated against the capture moment by docs/screens/fixtures/fixture-server.py, exactly as tests/fixtures/whea-records.json's loader does. Two evenings, each: a quiet stretch of informational records, a Display 4101 warning, the start triad (Kernel-General 12, Kernel-Power 41, EventLog 6008) six minutes later, then recovery.",
+  "records": [
+    {
+      "Id": 7034,
+      "Level": 2,
+      "LevelDisplayName": "Error",
+      "ProviderName": "Service Control Manager",
+      "TaskDisplayName": null,
+      "Message": "The Background Intelligent Transfer Service service terminated unexpectedly.  It has done this 1 time(s).",
+      "Properties": [
+        "Background Intelligent Transfer Service",
+        "1"
+      ],
+      "minutes_ago": 3146.0,
+      "MachineName": "WORKSTATION",
+      "RecordId": 20001
+    },
+    {
+      "Id": 20,
+      "Level": 4,
+      "LevelDisplayName": "Information",
+      "ProviderName": "Microsoft-Windows-Kernel-Boot",
+      "TaskDisplayName": null,
+      "Message": "Windows has started up:\r\n\r\nBootMode: 0x0\r\nBoot Type: 0x0\r\nLast Shutdown was Graceful: true",
+      "Properties": [
+        "0x0",
+        "0x0",
+        "true"
+      ],
+      "minutes_ago": 3134.0,
+      "MachineName": "WORKSTATION",
+      "RecordId": 20002
+    },
+    {
+      "Id": 10016,
+      "Level": 2,
+      "LevelDisplayName": "Error",
+      "ProviderName": "Microsoft-Windows-DistributedCOM",
+      "TaskDisplayName": null,
+      "Message": "The application-specific permission settings do not grant Local Activation permission for the COM Server application with CLSID {00000000-0000-0000-0000-000000000000} to the user NT AUTHORITY\\SYSTEM SID (S-1-5-18) from address LocalHost (Using LRPC) running in the application container Unavailable SID (Unavailable). This security permission can be modified using the Component Services administrative tool.",
+      "Properties": [
+        "{00000000-0000-0000-0000-000000000000}",
+        "NT AUTHORITY\\SYSTEM",
+        "S-1-5-18",
+        "LocalHost (Using LRPC)"
+      ],
+      "minutes_ago": 3122.0,
+      "MachineName": "WORKSTATION",
+      "RecordId": 20003
+    },
+    {
+      "Id": 129,
+      "Level": 3,
+      "LevelDisplayName": "Warning",
+      "ProviderName": "storahci",
+      "TaskDisplayName": null,
+      "Message": "Reset to device, \\Device\\RaidPort0, was issued.",
+      "Properties": [
+        "\\Device\\RaidPort0"
+      ],
+      "minutes_ago": 3110.0,
+      "MachineName": "WORKSTATION",
+      "RecordId": 20004
+    },
+    {
+      "Id": 17,
+      "Level": 3,
+      "LevelDisplayName": "Warning",
+      "ProviderName": "Microsoft-Windows-WHEA-Logger",
+      "TaskDisplayName": "Memory Error",
+      "Message": "A corrected hardware error has occurred.\n\nReported by component: Memory Error Source\nError Source: Corrected Machine Check\nError Type: Multi-bit ECC\nProcessor APIC ID: 0\nBank: 5\nMCI Status: 0xcc20008000010092\n\nThe details view of this entry contains further information.",
+      "Properties": [
+        17,
+        "0"
+      ],
+      "minutes_ago": 3098.0,
+      "MachineName": "WORKSTATION",
+      "RecordId": 20005
+    },
+    {
+      "Id": 6,
+      "Level": 4,
+      "LevelDisplayName": "Information",
+      "ProviderName": "Microsoft-Windows-FilterManager",
+      "TaskDisplayName": null,
+      "Message": "A file system filter, WdFilter, has successfully loaded and attached to volume \\Device\\HarddiskVolume2.",
+      "Properties": [
+        "WdFilter",
+        "\\Device\\HarddiskVolume2"
+      ],
+      "minutes_ago": 3086.0,
+      "MachineName": "WORKSTATION",
+      "RecordId": 20006
+    },
+    {
+      "Id": 7036,
+      "Level": 4,
+      "LevelDisplayName": "Information",
+      "ProviderName": "Service Control Manager",
+      "TaskDisplayName": null,
+      "Message": "The Windows Search service entered the running state.",
+      "Properties": [
+        "Windows Search",
+        "running"
+      ],
+      "minutes_ago": 3074.0,
+      "MachineName": "WORKSTATION",
+      "RecordId": 20007
+    },
+    {
+      "Id": 7034,
+      "Level": 2,
+      "LevelDisplayName": "Error",
+      "ProviderName": "Service Control Manager",
+      "TaskDisplayName": null,
+      "Message": "The Background Intelligent Transfer Service service terminated unexpectedly.  It has done this 1 time(s).",
+      "Properties": [
+        "Background Intelligent Transfer Service",
+        "1"
+      ],
+      "minutes_ago": 3062.0,
+      "MachineName": "WORKSTATION",
+      "RecordId": 20008
+    },
+    {
+      "Id": 20,
+      "Level": 4,
+      "LevelDisplayName": "Information",
+      "ProviderName": "Microsoft-Windows-Kernel-Boot",
+      "TaskDisplayName": null,
+      "Message": "Windows has started up:\r\n\r\nBootMode: 0x0\r\nBoot Type: 0x0\r\nLast Shutdown was Graceful: true",
+      "Properties": [
+        "0x0",
+        "0x0",
+        "true"
+      ],
+      "minutes_ago": 3050.0,
+      "MachineName": "WORKSTATION",
+      "RecordId": 20009
+    },
+    {
+      "Id": 10016,
+      "Level": 2,
+      "LevelDisplayName": "Error",
+      "ProviderName": "Microsoft-Windows-DistributedCOM",
+      "TaskDisplayName": null,
+      "Message": "The application-specific permission settings do not grant Local Activation permission for the COM Server application with CLSID {00000000-0000-0000-0000-000000000000} to the user NT AUTHORITY\\SYSTEM SID (S-1-5-18) from address LocalHost (Using LRPC) running in the application container Unavailable SID (Unavailable). This security permission can be modified using the Component Services administrative tool.",
+      "Properties": [
+        "{00000000-0000-0000-0000-000000000000}",
+        "NT AUTHORITY\\SYSTEM",
+        "S-1-5-18",
+        "LocalHost (Using LRPC)"
+      ],
+      "minutes_ago": 3038.0,
+      "MachineName": "WORKSTATION",
+      "RecordId": 20010
+    },
+    {
+      "Id": 129,
+      "Level": 3,
+      "LevelDisplayName": "Warning",
+      "ProviderName": "storahci",
+      "TaskDisplayName": null,
+      "Message": "Reset to device, \\Device\\RaidPort0, was issued.",
+      "Properties": [
+        "\\Device\\RaidPort0"
+      ],
+      "minutes_ago": 3026.0,
+      "MachineName": "WORKSTATION",
+      "RecordId": 20011
+    },
+    {
+      "Id": 17,
+      "Level": 3,
+      "LevelDisplayName": "Warning",
+      "ProviderName": "Microsoft-Windows-WHEA-Logger",
+      "TaskDisplayName": "Memory Error",
+      "Message": "A corrected hardware error has occurred.\n\nReported by component: Memory Error Source\nError Source: Corrected Machine Check\nError Type: Multi-bit ECC\nProcessor APIC ID: 0\nBank: 5\nMCI Status: 0xcc20008000010092\n\nThe details view of this entry contains further information.",
+      "Properties": [
+        17,
+        "0"
+      ],
+      "minutes_ago": 3014.0,
+      "MachineName": "WORKSTATION",
+      "RecordId": 20012
+    },
+    {
+      "Id": 6,
+      "Level": 4,
+      "LevelDisplayName": "Information",
+      "ProviderName": "Microsoft-Windows-FilterManager",
+      "TaskDisplayName": null,
+      "Message": "A file system filter, WdFilter, has successfully loaded and attached to volume \\Device\\HarddiskVolume2.",
+      "Properties": [
+        "WdFilter",
+        "\\Device\\HarddiskVolume2"
+      ],
+      "minutes_ago": 3002.0,
+      "MachineName": "WORKSTATION",
+      "RecordId": 20013
+    },
+    {
+      "Id": 7036,
+      "Level": 4,
+      "LevelDisplayName": "Information",
+      "ProviderName": "Service Control Manager",
+      "TaskDisplayName": null,
+      "Message": "The Windows Search service entered the running state.",
+      "Properties": [
+        "Windows Search",
+        "running"
+      ],
+      "minutes_ago": 2990.0,
+      "MachineName": "WORKSTATION",
+      "RecordId": 20014
+    },
+    {
+      "Id": 7034,
+      "Level": 2,
+      "LevelDisplayName": "Error",
+      "ProviderName": "Service Control Manager",
+      "TaskDisplayName": null,
+      "Message": "The Background Intelligent Transfer Service service terminated unexpectedly.  It has done this 1 time(s).",
+      "Properties": [
+        "Background Intelligent Transfer Service",
+        "1"
+      ],
+      "minutes_ago": 2978.0,
+      "MachineName": "WORKSTATION",
+      "RecordId": 20015
+    },
+    {
+      "Id": 20,
+      "Level": 4,
+      "LevelDisplayName": "Information",
+      "ProviderName": "Microsoft-Windows-Kernel-Boot",
+      "TaskDisplayName": null,
+      "Message": "Windows has started up:\r\n\r\nBootMode: 0x0\r\nBoot Type: 0x0\r\nLast Shutdown was Graceful: true",
+      "Properties": [
+        "0x0",
+        "0x0",
+        "true"
+      ],
+      "minutes_ago": 2966.0,
+      "MachineName": "WORKSTATION",
+      "RecordId": 20016
+    },
+    {
+      "Id": 10016,
+      "Level": 2,
+      "LevelDisplayName": "Error",
+      "ProviderName": "Microsoft-Windows-DistributedCOM",
+      "TaskDisplayName": null,
+      "Message": "The application-specific permission settings do not grant Local Activation permission for the COM Server application with CLSID {00000000-0000-0000-0000-000000000000} to the user NT AUTHORITY\\SYSTEM SID (S-1-5-18) from address LocalHost (Using LRPC) running in the application container Unavailable SID (Unavailable). This security permission can be modified using the Component Services administrative tool.",
+      "Properties": [
+        "{00000000-0000-0000-0000-000000000000}",
+        "NT AUTHORITY\\SYSTEM",
+        "S-1-5-18",
+        "LocalHost (Using LRPC)"
+      ],
+      "minutes_ago": 2954.0,
+      "MachineName": "WORKSTATION",
+      "RecordId": 20017
+    },
+    {
+      "Id": 129,
+      "Level": 3,
+      "LevelDisplayName": "Warning",
+      "ProviderName": "storahci",
+      "TaskDisplayName": null,
+      "Message": "Reset to device, \\Device\\RaidPort0, was issued.",
+      "Properties": [
+        "\\Device\\RaidPort0"
+      ],
+      "minutes_ago": 2942.0,
+      "MachineName": "WORKSTATION",
+      "RecordId": 20018
+    },
+    {
+      "Id": 17,
+      "Level": 3,
+      "LevelDisplayName": "Warning",
+      "ProviderName": "Microsoft-Windows-WHEA-Logger",
+      "TaskDisplayName": "Memory Error",
+      "Message": "A corrected hardware error has occurred.\n\nReported by component: Memory Error Source\nError Source: Corrected Machine Check\nError Type: Multi-bit ECC\nProcessor APIC ID: 0\nBank: 5\nMCI Status: 0xcc20008000010092\n\nThe details view of this entry contains further information.",
+      "Properties": [
+        17,
+        "0"
+      ],
+      "minutes_ago": 2930.0,
+      "MachineName": "WORKSTATION",
+      "RecordId": 20019
+    },
+    {
+      "Id": 6,
+      "Level": 4,
+      "LevelDisplayName": "Information",
+      "ProviderName": "Microsoft-Windows-FilterManager",
+      "TaskDisplayName": null,
+      "Message": "A file system filter, WdFilter, has successfully loaded and attached to volume \\Device\\HarddiskVolume2.",
+      "Properties": [
+        "WdFilter",
+        "\\Device\\HarddiskVolume2"
+      ],
+      "minutes_ago": 2918.0,
+      "MachineName": "WORKSTATION",
+      "RecordId": 20020
+    },
+    {
+      "Id": 4101,
+      "Level": 3,
+      "LevelDisplayName": "Warning",
+      "ProviderName": "Display",
+      "TaskDisplayName": null,
+      "Message": "Display driver nvlddmkm stopped responding and has successfully recovered.",
+      "Properties": [
+        "nvlddmkm"
+      ],
+      "minutes_ago": 2906.0,
+      "MachineName": "WORKSTATION",
+      "RecordId": 20021
+    },
+    {
+      "Id": 12,
+      "Level": 4,
+      "LevelDisplayName": "Information",
+      "ProviderName": "Microsoft-Windows-Kernel-General",
+      "TaskDisplayName": null,
+      "Message": "The operating system started at system time {boot_iso}.",
+      "Properties": [
+        "{boot_iso}"
+      ],
+      "minutes_ago": 2900.0,
+      "MachineName": "WORKSTATION",
+      "RecordId": 20022
+    },
+    {
+      "Id": 41,
+      "Level": 1,
+      "LevelDisplayName": "Critical",
+      "ProviderName": "Microsoft-Windows-Kernel-Power",
+      "TaskDisplayName": "(63)",
+      "Message": "The system has rebooted without cleanly shutting down first. This error could be caused if the system stopped responding, crashed, or lost power unexpectedly.",
+      "Properties": [
+        "0",
+        "0",
+        "0x0",
+        "0x0"
+      ],
+      "minutes_ago": 2899.9,
+      "MachineName": "WORKSTATION",
+      "RecordId": 20023
+    },
+    {
+      "Id": 6008,
+      "Level": 2,
+      "LevelDisplayName": "Error",
+      "ProviderName": "EventLog",
+      "TaskDisplayName": null,
+      "Message": "The previous system shutdown at {shutdown_time} on {shutdown_date} was unexpected.",
+      "Properties": [
+        "{shutdown_time}",
+        "{shutdown_date}"
+      ],
+      "minutes_ago": 2899.8,
+      "MachineName": "WORKSTATION",
+      "RecordId": 20024
+    },
+    {
+      "Id": 10016,
+      "Level": 2,
+      "LevelDisplayName": "Error",
+      "ProviderName": "Microsoft-Windows-DistributedCOM",
+      "TaskDisplayName": null,
+      "Message": "The application-specific permission settings do not grant Local Activation permission for the COM Server application with CLSID {00000000-0000-0000-0000-000000000000} to the user NT AUTHORITY\\SYSTEM SID (S-1-5-18) from address LocalHost (Using LRPC) running in the application container Unavailable SID (Unavailable). This security permission can be modified using the Component Services administrative tool.",
+      "Properties": [
+        "{00000000-0000-0000-0000-000000000000}",
+        "NT AUTHORITY\\SYSTEM",
+        "S-1-5-18",
+        "LocalHost (Using LRPC)"
+      ],
+      "minutes_ago": 2884.8,
+      "MachineName": "WORKSTATION",
+      "RecordId": 20025
+    },
+    {
+      "Id": 20,
+      "Level": 4,
+      "LevelDisplayName": "Information",
+      "ProviderName": "Microsoft-Windows-Kernel-Boot",
+      "TaskDisplayName": null,
+      "Message": "Windows has started up:\r\n\r\nBootMode: 0x0\r\nBoot Type: 0x0\r\nLast Shutdown was Graceful: true",
+      "Properties": [
+        "0x0",
+        "0x0",
+        "true"
+      ],
+      "minutes_ago": 2869.8,
+      "MachineName": "WORKSTATION",
+      "RecordId": 20026
+    },
+    {
+      "Id": 7034,
+      "Level": 2,
+      "LevelDisplayName": "Error",
+      "ProviderName": "Service Control Manager",
+      "TaskDisplayName": null,
+      "Message": "The Background Intelligent Transfer Service service terminated unexpectedly.  It has done this 1 time(s).",
+      "Properties": [
+        "Background Intelligent Transfer Service",
+        "1"
+      ],
+      "minutes_ago": 2854.8,
+      "MachineName": "WORKSTATION",
+      "RecordId": 20027
+    },
+    {
+      "Id": 7036,
+      "Level": 4,
+      "LevelDisplayName": "Information",
+      "ProviderName": "Service Control Manager",
+      "TaskDisplayName": null,
+      "Message": "The Windows Search service entered the running state.",
+      "Properties": [
+        "Windows Search",
+        "running"
+      ],
+      "minutes_ago": 2839.8,
+      "MachineName": "WORKSTATION",
+      "RecordId": 20028
+    },
+    {
+      "Id": 6,
+      "Level": 4,
+      "LevelDisplayName": "Information",
+      "ProviderName": "Microsoft-Windows-FilterManager",
+      "TaskDisplayName": null,
+      "Message": "A file system filter, WdFilter, has successfully loaded and attached to volume \\Device\\HarddiskVolume2.",
+      "Properties": [
+        "WdFilter",
+        "\\Device\\HarddiskVolume2"
+      ],
+      "minutes_ago": 2824.8,
+      "MachineName": "WORKSTATION",
+      "RecordId": 20029
+    },
+    {
+      "Id": 17,
+      "Level": 3,
+      "LevelDisplayName": "Warning",
+      "ProviderName": "Microsoft-Windows-WHEA-Logger",
+      "TaskDisplayName": "Memory Error",
+      "Message": "A corrected hardware error has occurred.\n\nReported by component: Memory Error Source\nError Source: Corrected Machine Check\nError Type: Multi-bit ECC\nProcessor APIC ID: 0\nBank: 5\nMCI Status: 0xcc20008000010092\n\nThe details view of this entry contains further information.",
+      "Properties": [
+        17,
+        "0"
+      ],
+      "minutes_ago": 2809.8,
+      "MachineName": "WORKSTATION",
+      "RecordId": 20030
+    },
+    {
+      "Id": 7034,
+      "Level": 2,
+      "LevelDisplayName": "Error",
+      "ProviderName": "Service Control Manager",
+      "TaskDisplayName": null,
+      "Message": "The Background Intelligent Transfer Service service terminated unexpectedly.  It has done this 1 time(s).",
+      "Properties": [
+        "Background Intelligent Transfer Service",
+        "1"
+      ],
+      "minutes_ago": 1706.0,
+      "MachineName": "WORKSTATION",
+      "RecordId": 20031
+    },
+    {
+      "Id": 20,
+      "Level": 4,
+      "LevelDisplayName": "Information",
+      "ProviderName": "Microsoft-Windows-Kernel-Boot",
+      "TaskDisplayName": null,
+      "Message": "Windows has started up:\r\n\r\nBootMode: 0x0\r\nBoot Type: 0x0\r\nLast Shutdown was Graceful: true",
+      "Properties": [
+        "0x0",
+        "0x0",
+        "true"
+      ],
+      "minutes_ago": 1694.0,
+      "MachineName": "WORKSTATION",
+      "RecordId": 20032
+    },
+    {
+      "Id": 10016,
+      "Level": 2,
+      "LevelDisplayName": "Error",
+      "ProviderName": "Microsoft-Windows-DistributedCOM",
+      "TaskDisplayName": null,
+      "Message": "The application-specific permission settings do not grant Local Activation permission for the COM Server application with CLSID {00000000-0000-0000-0000-000000000000} to the user NT AUTHORITY\\SYSTEM SID (S-1-5-18) from address LocalHost (Using LRPC) running in the application container Unavailable SID (Unavailable). This security permission can be modified using the Component Services administrative tool.",
+      "Properties": [
+        "{00000000-0000-0000-0000-000000000000}",
+        "NT AUTHORITY\\SYSTEM",
+        "S-1-5-18",
+        "LocalHost (Using LRPC)"
+      ],
+      "minutes_ago": 1682.0,
+      "MachineName": "WORKSTATION",
+      "RecordId": 20033
+    },
+    {
+      "Id": 129,
+      "Level": 3,
+      "LevelDisplayName": "Warning",
+      "ProviderName": "storahci",
+      "TaskDisplayName": null,
+      "Message": "Reset to device, \\Device\\RaidPort0, was issued.",
+      "Properties": [
+        "\\Device\\RaidPort0"
+      ],
+      "minutes_ago": 1670.0,
+      "MachineName": "WORKSTATION",
+      "RecordId": 20034
+    },
+    {
+      "Id": 17,
+      "Level": 3,
+      "LevelDisplayName": "Warning",
+      "ProviderName": "Microsoft-Windows-WHEA-Logger",
+      "TaskDisplayName": "Memory Error",
+      "Message": "A corrected hardware error has occurred.\n\nReported by component: Memory Error Source\nError Source: Corrected Machine Check\nError Type: Multi-bit ECC\nProcessor APIC ID: 0\nBank: 5\nMCI Status: 0xcc20008000010092\n\nThe details view of this entry contains further information.",
+      "Properties": [
+        17,
+        "0"
+      ],
+      "minutes_ago": 1658.0,
+      "MachineName": "WORKSTATION",
+      "RecordId": 20035
+    },
+    {
+      "Id": 6,
+      "Level": 4,
+      "LevelDisplayName": "Information",
+      "ProviderName": "Microsoft-Windows-FilterManager",
+      "TaskDisplayName": null,
+      "Message": "A file system filter, WdFilter, has successfully loaded and attached to volume \\Device\\HarddiskVolume2.",
+      "Properties": [
+        "WdFilter",
+        "\\Device\\HarddiskVolume2"
+      ],
+      "minutes_ago": 1646.0,
+      "MachineName": "WORKSTATION",
+      "RecordId": 20036
+    },
+    {
+      "Id": 7036,
+      "Level": 4,
+      "LevelDisplayName": "Information",
+      "ProviderName": "Service Control Manager",
+      "TaskDisplayName": null,
+      "Message": "The Windows Search service entered the running state.",
+      "Properties": [
+        "Windows Search",
+        "running"
+      ],
+      "minutes_ago": 1634.0,
+      "MachineName": "WORKSTATION",
+      "RecordId": 20037
+    },
+    {
+      "Id": 7034,
+      "Level": 2,
+      "LevelDisplayName": "Error",
+      "ProviderName": "Service Control Manager",
+      "TaskDisplayName": null,
+      "Message": "The Background Intelligent Transfer Service service terminated unexpectedly.  It has done this 1 time(s).",
+      "Properties": [
+        "Background Intelligent Transfer Service",
+        "1"
+      ],
+      "minutes_ago": 1622.0,
+      "MachineName": "WORKSTATION",
+      "RecordId": 20038
+    },
+    {
+      "Id": 20,
+      "Level": 4,
+      "LevelDisplayName": "Information",
+      "ProviderName": "Microsoft-Windows-Kernel-Boot",
+      "TaskDisplayName": null,
+      "Message": "Windows has started up:\r\n\r\nBootMode: 0x0\r\nBoot Type: 0x0\r\nLast Shutdown was Graceful: true",
+      "Properties": [
+        "0x0",
+        "0x0",
+        "true"
+      ],
+      "minutes_ago": 1610.0,
+      "MachineName": "WORKSTATION",
+      "RecordId": 20039
+    },
+    {
+      "Id": 10016,
+      "Level": 2,
+      "LevelDisplayName": "Error",
+      "ProviderName": "Microsoft-Windows-DistributedCOM",
+      "TaskDisplayName": null,
+      "Message": "The application-specific permission settings do not grant Local Activation permission for the COM Server application with CLSID {00000000-0000-0000-0000-000000000000} to the user NT AUTHORITY\\SYSTEM SID (S-1-5-18) from address LocalHost (Using LRPC) running in the application container Unavailable SID (Unavailable). This security permission can be modified using the Component Services administrative tool.",
+      "Properties": [
+        "{00000000-0000-0000-0000-000000000000}",
+        "NT AUTHORITY\\SYSTEM",
+        "S-1-5-18",
+        "LocalHost (Using LRPC)"
+      ],
+      "minutes_ago": 1598.0,
+      "MachineName": "WORKSTATION",
+      "RecordId": 20040
+    },
+    {
+      "Id": 129,
+      "Level": 3,
+      "LevelDisplayName": "Warning",
+      "ProviderName": "storahci",
+      "TaskDisplayName": null,
+      "Message": "Reset to device, \\Device\\RaidPort0, was issued.",
+      "Properties": [
+        "\\Device\\RaidPort0"
+      ],
+      "minutes_ago": 1586.0,
+      "MachineName": "WORKSTATION",
+      "RecordId": 20041
+    },
+    {
+      "Id": 17,
+      "Level": 3,
+      "LevelDisplayName": "Warning",
+      "ProviderName": "Microsoft-Windows-WHEA-Logger",
+      "TaskDisplayName": "Memory Error",
+      "Message": "A corrected hardware error has occurred.\n\nReported by component: Memory Error Source\nError Source: Corrected Machine Check\nError Type: Multi-bit ECC\nProcessor APIC ID: 0\nBank: 5\nMCI Status: 0xcc20008000010092\n\nThe details view of this entry contains further information.",
+      "Properties": [
+        17,
+        "0"
+      ],
+      "minutes_ago": 1574.0,
+      "MachineName": "WORKSTATION",
+      "RecordId": 20042
+    },
+    {
+      "Id": 6,
+      "Level": 4,
+      "LevelDisplayName": "Information",
+      "ProviderName": "Microsoft-Windows-FilterManager",
+      "TaskDisplayName": null,
+      "Message": "A file system filter, WdFilter, has successfully loaded and attached to volume \\Device\\HarddiskVolume2.",
+      "Properties": [
+        "WdFilter",
+        "\\Device\\HarddiskVolume2"
+      ],
+      "minutes_ago": 1562.0,
+      "MachineName": "WORKSTATION",
+      "RecordId": 20043
+    },
+    {
+      "Id": 7036,
+      "Level": 4,
+      "LevelDisplayName": "Information",
+      "ProviderName": "Service Control Manager",
+      "TaskDisplayName": null,
+      "Message": "The Windows Search service entered the running state.",
+      "Properties": [
+        "Windows Search",
+        "running"
+      ],
+      "minutes_ago": 1550.0,
+      "MachineName": "WORKSTATION",
+      "RecordId": 20044
+    },
+    {
+      "Id": 7034,
+      "Level": 2,
+      "LevelDisplayName": "Error",
+      "ProviderName": "Service Control Manager",
+      "TaskDisplayName": null,
+      "Message": "The Background Intelligent Transfer Service service terminated unexpectedly.  It has done this 1 time(s).",
+      "Properties": [
+        "Background Intelligent Transfer Service",
+        "1"
+      ],
+      "minutes_ago": 1538.0,
+      "MachineName": "WORKSTATION",
+      "RecordId": 20045
+    },
+    {
+      "Id": 20,
+      "Level": 4,
+      "LevelDisplayName": "Information",
+      "ProviderName": "Microsoft-Windows-Kernel-Boot",
+      "TaskDisplayName": null,
+      "Message": "Windows has started up:\r\n\r\nBootMode: 0x0\r\nBoot Type: 0x0\r\nLast Shutdown was Graceful: true",
+      "Properties": [
+        "0x0",
+        "0x0",
+        "true"
+      ],
+      "minutes_ago": 1526.0,
+      "MachineName": "WORKSTATION",
+      "RecordId": 20046
+    },
+    {
+      "Id": 10016,
+      "Level": 2,
+      "LevelDisplayName": "Error",
+      "ProviderName": "Microsoft-Windows-DistributedCOM",
+      "TaskDisplayName": null,
+      "Message": "The application-specific permission settings do not grant Local Activation permission for the COM Server application with CLSID {00000000-0000-0000-0000-000000000000} to the user NT AUTHORITY\\SYSTEM SID (S-1-5-18) from address LocalHost (Using LRPC) running in the application container Unavailable SID (Unavailable). This security permission can be modified using the Component Services administrative tool.",
+      "Properties": [
+        "{00000000-0000-0000-0000-000000000000}",
+        "NT AUTHORITY\\SYSTEM",
+        "S-1-5-18",
+        "LocalHost (Using LRPC)"
+      ],
+      "minutes_ago": 1514.0,
+      "MachineName": "WORKSTATION",
+      "RecordId": 20047
+    },
+    {
+      "Id": 129,
+      "Level": 3,
+      "LevelDisplayName": "Warning",
+      "ProviderName": "storahci",
+      "TaskDisplayName": null,
+      "Message": "Reset to device, \\Device\\RaidPort0, was issued.",
+      "Properties": [
+        "\\Device\\RaidPort0"
+      ],
+      "minutes_ago": 1502.0,
+      "MachineName": "WORKSTATION",
+      "RecordId": 20048
+    },
+    {
+      "Id": 17,
+      "Level": 3,
+      "LevelDisplayName": "Warning",
+      "ProviderName": "Microsoft-Windows-WHEA-Logger",
+      "TaskDisplayName": "Memory Error",
+      "Message": "A corrected hardware error has occurred.\n\nReported by component: Memory Error Source\nError Source: Corrected Machine Check\nError Type: Multi-bit ECC\nProcessor APIC ID: 0\nBank: 5\nMCI Status: 0xcc20008000010092\n\nThe details view of this entry contains further information.",
+      "Properties": [
+        17,
+        "0"
+      ],
+      "minutes_ago": 1490.0,
+      "MachineName": "WORKSTATION",
+      "RecordId": 20049
+    },
+    {
+      "Id": 6,
+      "Level": 4,
+      "LevelDisplayName": "Information",
+      "ProviderName": "Microsoft-Windows-FilterManager",
+      "TaskDisplayName": null,
+      "Message": "A file system filter, WdFilter, has successfully loaded and attached to volume \\Device\\HarddiskVolume2.",
+      "Properties": [
+        "WdFilter",
+        "\\Device\\HarddiskVolume2"
+      ],
+      "minutes_ago": 1478.0,
+      "MachineName": "WORKSTATION",
+      "RecordId": 20050
+    },
+    {
+      "Id": 4101,
+      "Level": 3,
+      "LevelDisplayName": "Warning",
+      "ProviderName": "Display",
+      "TaskDisplayName": null,
+      "Message": "Display driver nvlddmkm stopped responding and has successfully recovered.",
+      "Properties": [
+        "nvlddmkm"
+      ],
+      "minutes_ago": 1466.0,
+      "MachineName": "WORKSTATION",
+      "RecordId": 20051
+    },
+    {
+      "Id": 12,
+      "Level": 4,
+      "LevelDisplayName": "Information",
+      "ProviderName": "Microsoft-Windows-Kernel-General",
+      "TaskDisplayName": null,
+      "Message": "The operating system started at system time {boot_iso}.",
+      "Properties": [
+        "{boot_iso}"
+      ],
+      "minutes_ago": 1460.0,
+      "MachineName": "WORKSTATION",
+      "RecordId": 20052
+    },
+    {
+      "Id": 41,
+      "Level": 1,
+      "LevelDisplayName": "Critical",
+      "ProviderName": "Microsoft-Windows-Kernel-Power",
+      "TaskDisplayName": "(63)",
+      "Message": "The system has rebooted without cleanly shutting down first. This error could be caused if the system stopped responding, crashed, or lost power unexpectedly.",
+      "Properties": [
+        "0",
+        "0",
+        "0x0",
+        "0x0"
+      ],
+      "minutes_ago": 1459.9,
+      "MachineName": "WORKSTATION",
+      "RecordId": 20053
+    },
+    {
+      "Id": 6008,
+      "Level": 2,
+      "LevelDisplayName": "Error",
+      "ProviderName": "EventLog",
+      "TaskDisplayName": null,
+      "Message": "The previous system shutdown at {shutdown_time} on {shutdown_date} was unexpected.",
+      "Properties": [
+        "{shutdown_time}",
+        "{shutdown_date}"
+      ],
+      "minutes_ago": 1459.8,
+      "MachineName": "WORKSTATION",
+      "RecordId": 20054
+    },
+    {
+      "Id": 10016,
+      "Level": 2,
+      "LevelDisplayName": "Error",
+      "ProviderName": "Microsoft-Windows-DistributedCOM",
+      "TaskDisplayName": null,
+      "Message": "The application-specific permission settings do not grant Local Activation permission for the COM Server application with CLSID {00000000-0000-0000-0000-000000000000} to the user NT AUTHORITY\\SYSTEM SID (S-1-5-18) from address LocalHost (Using LRPC) running in the application container Unavailable SID (Unavailable). This security permission can be modified using the Component Services administrative tool.",
+      "Properties": [
+        "{00000000-0000-0000-0000-000000000000}",
+        "NT AUTHORITY\\SYSTEM",
+        "S-1-5-18",
+        "LocalHost (Using LRPC)"
+      ],
+      "minutes_ago": 1444.8,
+      "MachineName": "WORKSTATION",
+      "RecordId": 20055
+    },
+    {
+      "Id": 20,
+      "Level": 4,
+      "LevelDisplayName": "Information",
+      "ProviderName": "Microsoft-Windows-Kernel-Boot",
+      "TaskDisplayName": null,
+      "Message": "Windows has started up:\r\n\r\nBootMode: 0x0\r\nBoot Type: 0x0\r\nLast Shutdown was Graceful: true",
+      "Properties": [
+        "0x0",
+        "0x0",
+        "true"
+      ],
+      "minutes_ago": 1429.8,
+      "MachineName": "WORKSTATION",
+      "RecordId": 20056
+    },
+    {
+      "Id": 7034,
+      "Level": 2,
+      "LevelDisplayName": "Error",
+      "ProviderName": "Service Control Manager",
+      "TaskDisplayName": null,
+      "Message": "The Background Intelligent Transfer Service service terminated unexpectedly.  It has done this 1 time(s).",
+      "Properties": [
+        "Background Intelligent Transfer Service",
+        "1"
+      ],
+      "minutes_ago": 1414.8,
+      "MachineName": "WORKSTATION",
+      "RecordId": 20057
+    },
+    {
+      "Id": 7036,
+      "Level": 4,
+      "LevelDisplayName": "Information",
+      "ProviderName": "Service Control Manager",
+      "TaskDisplayName": null,
+      "Message": "The Windows Search service entered the running state.",
+      "Properties": [
+        "Windows Search",
+        "running"
+      ],
+      "minutes_ago": 1399.8,
+      "MachineName": "WORKSTATION",
+      "RecordId": 20058
+    },
+    {
+      "Id": 6,
+      "Level": 4,
+      "LevelDisplayName": "Information",
+      "ProviderName": "Microsoft-Windows-FilterManager",
+      "TaskDisplayName": null,
+      "Message": "A file system filter, WdFilter, has successfully loaded and attached to volume \\Device\\HarddiskVolume2.",
+      "Properties": [
+        "WdFilter",
+        "\\Device\\HarddiskVolume2"
+      ],
+      "minutes_ago": 1384.8,
+      "MachineName": "WORKSTATION",
+      "RecordId": 20059
+    },
+    {
+      "Id": 17,
+      "Level": 3,
+      "LevelDisplayName": "Warning",
+      "ProviderName": "Microsoft-Windows-WHEA-Logger",
+      "TaskDisplayName": "Memory Error",
+      "Message": "A corrected hardware error has occurred.\n\nReported by component: Memory Error Source\nError Source: Corrected Machine Check\nError Type: Multi-bit ECC\nProcessor APIC ID: 0\nBank: 5\nMCI Status: 0xcc20008000010092\n\nThe details view of this entry contains further information.",
+      "Properties": [
+        17,
+        "0"
+      ],
+      "minutes_ago": 1369.8,
+      "MachineName": "WORKSTATION",
+      "RecordId": 20060
+    }
+  ]
+}

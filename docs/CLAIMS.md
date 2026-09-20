@@ -57,7 +57,7 @@ Every claim the page at mainthread.ai/work/system-sentinel/ could make about the
 | Every view starts with the outcome line: what was asked, what came back, whether the machine was observed, the method on request | `dashboard/src/Outcome.tsx`; every file under `dashboard/src/views/` |
 | Inspect in place: a record opens where it is, and the record before it opens under it | `dashboard/src/views/Record.tsx`, `dashboard/src/Sections.tsx` (`RowList`) |
 | Heavy readings are taken only when asked | `dashboard/src/views/Machine.tsx`, `Diagnostics.tsx` ("Take the reading"); `useReading(..., enabled)` |
-| Works at phone width over the same boundary | Verified on glass 2026-09-20 at 390x844 and 1440x900, every view, no horizontal overflow (`docs/screens/README.md` once the captures land) |
+| Works at phone width over the same boundary | Verified on glass 2026-09-20 at 390x844 and 1440x900, every view, no horizontal overflow; `docs/screens/` holds the sanitized captures with the commit, sizes and the fixture pipeline that reproduces them |
 | The identity is in the tool: the tokens, Azeret Mono, JetBrains Mono, DM Sans self-hosted under the OFL, the mark, the graticule in one zone, the phosphor as light only | `dashboard/src/identity.css`, `dashboard/src/Mark.tsx`, `dashboard/src/App.module.css`, `dashboard/public/fonts/`; owned by `docs/design/IDENTITY-DIRECTIONS-2026-09-20.md` |
 | One lit word: `live` while the stream is connected | `dashboard/src/Live.tsx` |
 
@@ -78,4 +78,11 @@ No live telemetry as a service, no prediction, no crash-dump decoding (the dump 
 
 ## Pending this session
 
-The double-click launcher and the single-file Windows executable (in progress); the sanitized screenshots in `docs/screens/` with the build recorded; the deploy prompt's "tested on" record. Each joins this list when it is observed.
+The double-click launcher and the single-file Windows executable (in progress); the deploy prompt's "tested on" record. Each joins this list when it is observed.
+
+## The screens
+
+| Claim | Source or check |
+| --- | --- |
+| The screens show the real dashboard rendering a synthetic record built from Windows' own providers, ids and message templates, so nothing from any real machine appears | `docs/screens/README.md`; reproduce with `docs/screens/fixtures/fixture-server.py` and `capture.cjs` |
+| Captured at 1440x900 at 2x and 390x844 at 3x from a recorded commit | `docs/screens/README.md` (the table and the commit) |
