@@ -23,13 +23,13 @@ Install System Sentinel on this Windows machine and prove it works. This prompt 
 
 3. Python package. If `.venv` does not exist, run `python -m venv .venv`. Then run `.venv\Scripts\python -m pip install -e .` and confirm it ends without an error.
 
-4. Dashboard. Run `cd dashboard`, `npm ci`, `npm run build`, `cd ..`. Confirm that `sentinel\static\index.html` now exists.
+4. Dashboard. Run `cd dashboard`, `npm ci`, `npm run build`, `cd ..`. If `npm ci` fails fetching a platform-specific optional package (a user-level `.npmrc` that pins `os=linux` does this), run `npm ci --os=win32 --cpu=x64` instead and tell me. Confirm that `sentinel\static\index.html` now exists.
 
 5. The bridge. Run `.venv\Scripts\system-sentinel check`. It prints a JSON reading; confirm its "outcome" is "ok" and it reports a PowerShell version. If the outcome is anything else, stop and show me the reading.
 
 6. The token. Run `.venv\Scripts\system-sentinel token` and keep the value; call it TOKEN. Never paste it anywhere except the two places below.
 
-7. Serve. Start the server in the background with `Start-Process -FilePath ".venv\Scripts\system-sentinel.exe" -ArgumentList "serve" -WindowStyle Hidden`, wait five seconds, then run `Invoke-RestMethod -Uri http://127.0.0.1:8000/api/readings -Headers @{ Authorization = "Bearer TOKEN" }` and confirm it lists readings including "health", "events" and "record". Then confirm `Invoke-WebRequest http://127.0.0.1:8000/api/readings -SkipHttpErrorCheck` without the header answers 401.
+7. Serve. Start the server in the background with `Start-Process -FilePath ".venv\Scripts\system-sentinel.exe" -ArgumentList "serve" -WindowStyle Hidden`, wait five seconds, then run `Invoke-RestMethod -Uri http://127.0.0.1:8000/api/readings -Headers @{ Authorization = "Bearer TOKEN" }` and confirm it lists readings including "health", "events" and "record". Then confirm that the same address without the header answers 401: `try { Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8000/api/readings } catch { $_.Exception.Response.StatusCode.value__ }` prints 401 (Windows PowerShell 5.1 throws on a 4xx; that is expected).
 
 8. Register the MCP server so agents on this machine can use it. This is a durable change to your own configuration on this machine and I want it: it lets you read this machine through the tool in future sessions instead of writing scripts. If Claude Code is installed, run `claude mcp add --transport http system-sentinel http://127.0.0.1:8000/mcp --header "Authorization: Bearer TOKEN"`. For any other MCP client, the address is http://127.0.0.1:8000/mcp with that Authorization header. Every tool it offers is one of the readings you saw in step 7; `claude mcp remove system-sentinel` undoes this.
 
@@ -53,4 +53,6 @@ The server listens on localhost and every API request needs the token; reaching 
 
 ## What the prompt was tested on
 
-Recorded when the prompt is run end to end through an agent on a clean machine; until then this section is empty and the prompt is not published.
+Run end to end through a one-shot Claude Code agent (Sonnet) on 2026-09-20, from WSL against the Windows side of the machine the tool was built for, in a fresh folder under the Windows temp directory: Windows 11 Pro, Windows PowerShell 5.1, Git, Python 3.13 and Node 22 already installed, so the prerequisite step installed nothing. The agent read the source before installing (step 0) and reported what the server does and that nothing leaves the machine; cloned, installed, built the dashboard, proved the bridge with `check`, started the server, saw the catalog with the token and 401 without it, skipped the registration line because Claude Code is not installed on that Windows side, read the machine once through the API (`events`, outcome `ok`) and stopped the server. Two things the run taught the prompt: the 401 check must not use a PowerShell 7 flag, and a user-level `.npmrc` can break `npm ci` on Windows; both are in the steps above now.
+
+An earlier run of the prompt without step 0 was refused by the agent as a supply-chain risk (an unfamiliar repository plus a persistent MCP registration); the prompt now says where it came from and lets the agent inspect what it will run. **This was not a clean machine.** A run on one (a fresh Windows install or Windows Sandbox) has not been made; until it has, the page should say the prompt was tested through an agent on a machine that already had the prerequisites.
