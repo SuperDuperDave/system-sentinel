@@ -23,7 +23,7 @@ claude mcp add --transport http system-sentinel http://127.0.0.1:8000/mcp --head
 
 ### Codex and other MCP clients
 
-Streamable HTTP at `http://127.0.0.1:8000/mcp` with the same header. Every reading below is one tool, named as the reading is named; the stack and the composer are tools too.
+Streamable HTTP at `http://127.0.0.1:8000/mcp` with the same header. Every reading below is one tool, named as the reading is named, except that a dot becomes an underscore because MCP tool names allow only letters, digits, underscore and hyphen: `hardware.cpu` is the tool `hardware_cpu`. The stack and the composer are tools too: `stack_list`, `stack_add`, `stack_remove`, `stack_clear`, `compose`, `prompts_list`.
 
 ### Without MCP
 
@@ -58,7 +58,7 @@ Every reading is one query against the machine, returned in one envelope. The en
 | `ok` | The query ran and returned at least one record. |
 | `empty` | The query ran cleanly and matched nothing. This is a finding: the log holds no such records. |
 | `failed` | The query ran and Windows or PowerShell reported an error. `error` says what. |
-| `unavailable` | The bridge to Windows is not there: `powershell.exe` was not found or did not start, or the decoder is missing. Nothing about the machine can be concluded. |
+| `unavailable` | The bridge to Windows is not there: `powershell.exe` was not found or did not start. Nothing about the machine can be concluded. |
 | `denied` | Windows refused (access denied, or a log that needs elevation). |
 | `timeout` | The query did not finish within its limit. |
 
@@ -87,8 +87,8 @@ Only `ok` and `empty` say anything about the machine. Treat the other four as "n
 | --- | --- | --- | --- |
 | `health` | Whether the bridge works: PowerShell found, its version, a trivial round trip, decoder present, data directory | `bridge` (raw) | |
 | `events` | Records from a Windows log by level | `records` (raw) | `log` (System, Application), `levels` (1 critical, 2 error, 3 warning, 4 information; default 1,2), `count` (default 50) |
-| `record` | The log around a moment: the records before a timestamp, oldest first | `records` (raw) | `before` (ISO timestamp), `count` (default 50), `log` (default System) |
-| `whea` | WHEA-Logger records with their binary payload, each decoded beside it | `records` (raw, with `RawData` hex), `decoded` (derived: one entry per record, the decoder's structure or its error) | `count` (default 30) |
+| `record` | The log around a moment: the records before a timestamp, oldest first | `records` (raw) | `before` (ISO timestamp, required: `422` without it), `count` (default 50), `log` (default System) |
+| `whea` | WHEA-Logger records with their binary payload, each decoded beside it | `records` (raw, with `RawData` hex), `decoded` (derived: one entry per record, the decoder's structure or its error). A record the decoder cannot read, or a missing decoder, is an error on that entry and a warning on the reading; the outcome stays the log's, because the records were observed either way | `count` (default 30) |
 | `storms` | WHEA records over a window in wall-clock buckets, grouped by signature, with burst and acceleration flags | `buckets` (derived, includes empty minutes), `signatures` (derived), `status` (inferred: quiet, burst or accelerating, with the rates and the reason) | `hours` (default 24), `bucket_seconds` (60), `burst_threshold` (5), `accel_threshold` (2.0) |
 | `dumps` | The crash-dump inventory under the Windows dump locations | `files` (raw: name, path, bytes, modified) | |
 | `system` | The snapshot: OS, build, boot time, uptime, processor load, memory | `snapshot` (raw) | |
@@ -123,7 +123,7 @@ Records from a log (`events`, `record`, `whea`, the stream) share one shape: `Re
 | `heartbeat` | `{ "at": "...", "cursors": { "System": 307379, "Application": 88120 } }` on every poll |
 | `bridge` | `{ "outcome": "failed", "error": "..." }` when a poll did not observe the machine, with the reading vocabulary |
 
-A silent stream is not a healthy machine; a stream with heartbeats and no `bridge` events is.
+A silent stream is not a healthy machine; a stream with heartbeats and no `bridge` events is. Records arrive redacted unless the stream was opened with `?unredacted=true`. While the machine is not answering, the poll backs off to every twenty seconds and says so with a `bridge` event each time.
 
 ## The stack
 
@@ -161,14 +161,14 @@ An item:
 | `DELETE /api/stack/items/{id}` | Remove one |
 | `DELETE /api/stack` | Clear |
 | `GET /api/stack/composed` | `{ "text": "...", "items": 4, "redacted": [...] }`: the handoff as Markdown, the chosen prompt first (when `system_prompt` is on), then the items by rank, each headed with its kind, its class, its provenance (reading, parameters, when, outcome, method kind) and rendered by its verbosity; redacted unless `unredacted=true` |
-| `GET /api/prompts` | The prompt library: `{ "id", "name", "description", "content", "builtin" }` each; six presets to start |
-| `POST /api/prompts`, `PATCH /api/prompts/{id}`, `DELETE /api/prompts/{id}` | Yours to add, edit and delete, presets included |
+| `GET /api/prompts` | The prompt library: `{ "prompts": [ { "id", "name", "description", "content", "builtin" }, ... ] }`; six presets to start |
+| `POST /api/prompts`, `PATCH /api/prompts/{id}`, `DELETE /api/prompts/{id}` | Yours to add, edit and delete, presets included; a deleted preset stays deleted |
 
 The composed text is what the dashboard copies to the clipboard. An agent reads the same text and needs no clipboard.
 
 ## Captures
 
-`POST /api/captures` takes every reading in the catalog now, writes a ZIP into the data directory and returns it. Members: `readings/<name>.json` (one envelope each, heavy ones included), `stack.json`, `composed.md`, and `manifest.json`, which lists exactly the members with each reading's outcome and byte size, the tool's version, and the redaction applied. The ZIP is redacted unless `unredacted=true`. `GET /api/captures` lists what is on disk; `GET /api/captures/{name}` returns one. Nothing is sent anywhere.
+`POST /api/captures` takes every reading in the catalog now, writes a ZIP into the data directory and returns it, with the file's name in the `X-Capture-Name` header. It is the slowest thing the tool does, on the order of a minute, because it is every reading including the heavy ones; give it a long timeout. Members: `readings/<name>.json` (one envelope each), `stack.json`, `composed.md`, and `manifest.json`, which lists exactly the members with each reading's outcome and byte size, the tool's version, and the redaction applied. The ZIP is redacted unless `unredacted=true`. `GET /api/captures` lists what is on disk; `GET /api/captures/{name}` returns one. The tool never deletes a capture and nothing is sent anywhere.
 
 ## What is not here
 

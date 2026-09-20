@@ -1,0 +1,21 @@
+.day { padding: 18px 0 6px; }
+
+.row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    'name size'
+    'when when';
+}
+.name { grid-area: name; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.size { grid-area: size; color: var(--body); text-align: right; white-space: nowrap; }
+.when { grid-area: when; color: var(--muted); }
+
+@media (min-width: 900px) {
+  .row {
+    grid-template-columns: minmax(0, 1fr) 96px 200px;
+    grid-template-areas: 'name size when';
+  }
+  .when { text-align: right; }
+}
+
+.path { overflow-wrap: anywhere; }

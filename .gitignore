@@ -32,9 +32,6 @@ Thumbs.db
 *.debug.json
 *_debug.json
 
-# Capture packs (generated diagnostics)
-backend/captures/
-
 # Windows artifacts
 C:\*
 

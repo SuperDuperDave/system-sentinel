@@ -1,0 +1,686 @@
+{
+  "what": "Synthetic WHEA-Logger records in the shared record shape, for the bucketing, signature and status rules. Not this machine's records: no machine here logged them.",
+  "how": "minutes_ago is materialized into TimeCreated against a reference moment by the test's loader, so the fixture never ages. Groups: baseline, tail, burst, odd.",
+  "records": [
+    {
+      "group": "baseline",
+      "minutes_ago": 12,
+      "RecordId": 9001,
+      "Id": 19,
+      "Level": 3,
+      "LevelDisplayName": "Warning",
+      "ProviderName": "Microsoft-Windows-WHEA-Logger",
+      "MachineName": "SENTINEL-FIXTURE",
+      "TaskDisplayName": "Memory Error",
+      "Message": "A corrected hardware error has occurred.\n\nReported by component: Memory Error Source\nError Source: Corrected Machine Check\nError Type: Multi-bit ECC\nProcessor APIC ID: 0\nBank: 5\nMCI Status: 0xcc20008000010092\n\nThe details view of this entry contains further information.",
+      "Properties": [
+        19,
+        "0"
+      ],
+      "RawData": "435045520000000A"
+    },
+    {
+      "group": "baseline",
+      "minutes_ago": 22,
+      "RecordId": 9002,
+      "Id": 19,
+      "Level": 3,
+      "LevelDisplayName": "Warning",
+      "ProviderName": "Microsoft-Windows-WHEA-Logger",
+      "MachineName": "SENTINEL-FIXTURE",
+      "TaskDisplayName": "Memory Error",
+      "Message": "A corrected hardware error has occurred.\n\nReported by component: Memory Error Source\nError Source: Corrected Machine Check\nError Type: Multi-bit ECC\nProcessor APIC ID: 0\nBank: 5\nMCI Status: 0xcc20008000010092\n\nThe details view of this entry contains further information.",
+      "Properties": [
+        19,
+        "0"
+      ],
+      "RawData": "435045520000000A"
+    },
+    {
+      "group": "baseline",
+      "minutes_ago": 32,
+      "RecordId": 9003,
+      "Id": 19,
+      "Level": 3,
+      "LevelDisplayName": "Warning",
+      "ProviderName": "Microsoft-Windows-WHEA-Logger",
+      "MachineName": "SENTINEL-FIXTURE",
+      "TaskDisplayName": "Memory Error",
+      "Message": "A corrected hardware error has occurred.\n\nReported by component: Memory Error Source\nError Source: Corrected Machine Check\nError Type: Multi-bit ECC\nProcessor APIC ID: 0\nBank: 5\nMCI Status: 0xcc20008000010092\n\nThe details view of this entry contains further information.",
+      "Properties": [
+        19,
+        "0"
+      ],
+      "RawData": "435045520000000A"
+    },
+    {
+      "group": "baseline",
+      "minutes_ago": 42,
+      "RecordId": 9004,
+      "Id": 19,
+      "Level": 3,
+      "LevelDisplayName": "Warning",
+      "ProviderName": "Microsoft-Windows-WHEA-Logger",
+      "MachineName": "SENTINEL-FIXTURE",
+      "TaskDisplayName": "Memory Error",
+      "Message": "A corrected hardware error has occurred.\n\nReported by component: Memory Error Source\nError Source: Corrected Machine Check\nError Type: Multi-bit ECC\nProcessor APIC ID: 0\nBank: 5\nMCI Status: 0xcc20008000010092\n\nThe details view of this entry contains further information.",
+      "Properties": [
+        19,
+        "0"
+      ],
+      "RawData": "435045520000000A"
+    },
+    {
+      "group": "baseline",
+      "minutes_ago": 52,
+      "RecordId": 9005,
+      "Id": 19,
+      "Level": 3,
+      "LevelDisplayName": "Warning",
+      "ProviderName": "Microsoft-Windows-WHEA-Logger",
+      "MachineName": "SENTINEL-FIXTURE",
+      "TaskDisplayName": "Memory Error",
+      "Message": "A corrected hardware error has occurred.\n\nReported by component: Memory Error Source\nError Source: Corrected Machine Check\nError Type: Multi-bit ECC\nProcessor APIC ID: 0\nBank: 5\nMCI Status: 0xcc20008000010092\n\nThe details view of this entry contains further information.",
+      "Properties": [
+        19,
+        "0"
+      ],
+      "RawData": "435045520000000A"
+    },
+    {
+      "group": "baseline",
+      "minutes_ago": 62,
+      "RecordId": 9006,
+      "Id": 19,
+      "Level": 3,
+      "LevelDisplayName": "Warning",
+      "ProviderName": "Microsoft-Windows-WHEA-Logger",
+      "MachineName": "SENTINEL-FIXTURE",
+      "TaskDisplayName": "Memory Error",
+      "Message": "A corrected hardware error has occurred.\n\nReported by component: Memory Error Source\nError Source: Corrected Machine Check\nError Type: Multi-bit ECC\nProcessor APIC ID: 0\nBank: 5\nMCI Status: 0xcc20008000010092\n\nThe details view of this entry contains further information.",
+      "Properties": [
+        19,
+        "0"
+      ],
+      "RawData": "435045520000000A"
+    },
+    {
+      "group": "baseline",
+      "minutes_ago": 72,
+      "RecordId": 9007,
+      "Id": 19,
+      "Level": 3,
+      "LevelDisplayName": "Warning",
+      "ProviderName": "Microsoft-Windows-WHEA-Logger",
+      "MachineName": "SENTINEL-FIXTURE",
+      "TaskDisplayName": "Memory Error",
+      "Message": "A corrected hardware error has occurred.\n\nReported by component: Memory Error Source\nError Source: Corrected Machine Check\nError Type: Multi-bit ECC\nProcessor APIC ID: 0\nBank: 5\nMCI Status: 0xcc20008000010092\n\nThe details view of this entry contains further information.",
+      "Properties": [
+        19,
+        "0"
+      ],
+      "RawData": "435045520000000A"
+    },
+    {
+      "group": "baseline",
+      "minutes_ago": 82,
+      "RecordId": 9008,
+      "Id": 19,
+      "Level": 3,
+      "LevelDisplayName": "Warning",
+      "ProviderName": "Microsoft-Windows-WHEA-Logger",
+      "MachineName": "SENTINEL-FIXTURE",
+      "TaskDisplayName": "Memory Error",
+      "Message": "A corrected hardware error has occurred.\n\nReported by component: Memory Error Source\nError Source: Corrected Machine Check\nError Type: Multi-bit ECC\nProcessor APIC ID: 0\nBank: 5\nMCI Status: 0xcc20008000010092\n\nThe details view of this entry contains further information.",
+      "Properties": [
+        19,
+        "0"
+      ],
+      "RawData": "435045520000000A"
+    },
+    {
+      "group": "baseline",
+      "minutes_ago": 92,
+      "RecordId": 9009,
+      "Id": 19,
+      "Level": 3,
+      "LevelDisplayName": "Warning",
+      "ProviderName": "Microsoft-Windows-WHEA-Logger",
+      "MachineName": "SENTINEL-FIXTURE",
+      "TaskDisplayName": "Memory Error",
+      "Message": "A corrected hardware error has occurred.\n\nReported by component: Memory Error Source\nError Source: Corrected Machine Check\nError Type: Multi-bit ECC\nProcessor APIC ID: 0\nBank: 5\nMCI Status: 0xcc20008000010092\n\nThe details view of this entry contains further information.",
+      "Properties": [
+        19,
+        "0"
+      ],
+      "RawData": "435045520000000A"
+    },
+    {
+      "group": "baseline",
+      "minutes_ago": 102,
+      "RecordId": 9010,
+      "Id": 19,
+      "Level": 3,
+      "LevelDisplayName": "Warning",
+      "ProviderName": "Microsoft-Windows-WHEA-Logger",
+      "MachineName": "SENTINEL-FIXTURE",
+      "TaskDisplayName": "Memory Error",
+      "Message": "A corrected hardware error has occurred.\n\nReported by component: Memory Error Source\nError Source: Corrected Machine Check\nError Type: Multi-bit ECC\nProcessor APIC ID: 0\nBank: 5\nMCI Status: 0xcc20008000010092\n\nThe details view of this entry contains further information.",
+      "Properties": [
+        19,
+        "0"
+      ],
+      "RawData": "435045520000000A"
+    },
+    {
+      "group": "baseline",
+      "minutes_ago": 112,
+      "RecordId": 9011,
+      "Id": 19,
+      "Level": 3,
+      "LevelDisplayName": "Warning",
+      "ProviderName": "Microsoft-Windows-WHEA-Logger",
+      "MachineName": "SENTINEL-FIXTURE",
+      "TaskDisplayName": "Memory Error",
+      "Message": "A corrected hardware error has occurred.\n\nReported by component: Memory Error Source\nError Source: Corrected Machine Check\nError Type: Multi-bit ECC\nProcessor APIC ID: 0\nBank: 5\nMCI Status: 0xcc20008000010092\n\nThe details view of this entry contains further information.",
+      "Properties": [
+        19,
+        "0"
+      ],
+      "RawData": "435045520000000A"
+    },
+    {
+      "group": "baseline",
+      "minutes_ago": 122,
+      "RecordId": 9012,
+      "Id": 19,
+      "Level": 3,
+      "LevelDisplayName": "Warning",
+      "ProviderName": "Microsoft-Windows-WHEA-Logger",
+      "MachineName": "SENTINEL-FIXTURE",
+      "TaskDisplayName": "Memory Error",
+      "Message": "A corrected hardware error has occurred.\n\nReported by component: Memory Error Source\nError Source: Corrected Machine Check\nError Type: Multi-bit ECC\nProcessor APIC ID: 0\nBank: 5\nMCI Status: 0xcc20008000010092\n\nThe details view of this entry contains further information.",
+      "Properties": [
+        19,
+        "0"
+      ],
+      "RawData": "435045520000000A"
+    },
+    {
+      "group": "baseline",
+      "minutes_ago": 132,
+      "RecordId": 9013,
+      "Id": 19,
+      "Level": 3,
+      "LevelDisplayName": "Warning",
+      "ProviderName": "Microsoft-Windows-WHEA-Logger",
+      "MachineName": "SENTINEL-FIXTURE",
+      "TaskDisplayName": "Memory Error",
+      "Message": "A corrected hardware error has occurred.\n\nReported by component: Memory Error Source\nError Source: Corrected Machine Check\nError Type: Multi-bit ECC\nProcessor APIC ID: 0\nBank: 5\nMCI Status: 0xcc20008000010092\n\nThe details view of this entry contains further information.",
+      "Properties": [
+        19,
+        "0"
+      ],
+      "RawData": "435045520000000A"
+    },
+    {
+      "group": "baseline",
+      "minutes_ago": 142,
+      "RecordId": 9014,
+      "Id": 19,
+      "Level": 3,
+      "LevelDisplayName": "Warning",
+      "ProviderName": "Microsoft-Windows-WHEA-Logger",
+      "MachineName": "SENTINEL-FIXTURE",
+      "TaskDisplayName": "Memory Error",
+      "Message": "A corrected hardware error has occurred.\n\nReported by component: Memory Error Source\nError Source: Corrected Machine Check\nError Type: Multi-bit ECC\nProcessor APIC ID: 0\nBank: 5\nMCI Status: 0xcc20008000010092\n\nThe details view of this entry contains further information.",
+      "Properties": [
+        19,
+        "0"
+      ],
+      "RawData": "435045520000000A"
+    },
+    {
+      "group": "baseline",
+      "minutes_ago": 152,
+      "RecordId": 9015,
+      "Id": 19,
+      "Level": 3,
+      "LevelDisplayName": "Warning",
+      "ProviderName": "Microsoft-Windows-WHEA-Logger",
+      "MachineName": "SENTINEL-FIXTURE",
+      "TaskDisplayName": "Memory Error",
+      "Message": "A corrected hardware error has occurred.\n\nReported by component: Memory Error Source\nError Source: Corrected Machine Check\nError Type: Multi-bit ECC\nProcessor APIC ID: 0\nBank: 5\nMCI Status: 0xcc20008000010092\n\nThe details view of this entry contains further information.",
+      "Properties": [
+        19,
+        "0"
+      ],
+      "RawData": "435045520000000A"
+    },
+    {
+      "group": "baseline",
+      "minutes_ago": 162,
+      "RecordId": 9016,
+      "Id": 19,
+      "Level": 3,
+      "LevelDisplayName": "Warning",
+      "ProviderName": "Microsoft-Windows-WHEA-Logger",
+      "MachineName": "SENTINEL-FIXTURE",
+      "TaskDisplayName": "Memory Error",
+      "Message": "A corrected hardware error has occurred.\n\nReported by component: Memory Error Source\nError Source: Corrected Machine Check\nError Type: Multi-bit ECC\nProcessor APIC ID: 0\nBank: 5\nMCI Status: 0xcc20008000010092\n\nThe details view of this entry contains further information.",
+      "Properties": [
+        19,
+        "0"
+      ],
+      "RawData": "435045520000000A"
+    },
+    {
+      "group": "baseline",
+      "minutes_ago": 172,
+      "RecordId": 9017,
+      "Id": 19,
+      "Level": 3,
+      "LevelDisplayName": "Warning",
+      "ProviderName": "Microsoft-Windows-WHEA-Logger",
+      "MachineName": "SENTINEL-FIXTURE",
+      "TaskDisplayName": "Memory Error",
+      "Message": "A corrected hardware error has occurred.\n\nReported by component: Memory Error Source\nError Source: Corrected Machine Check\nError Type: Multi-bit ECC\nProcessor APIC ID: 0\nBank: 5\nMCI Status: 0xcc20008000010092\n\nThe details view of this entry contains further information.",
+      "Properties": [
+        19,
+        "0"
+      ],
+      "RawData": "435045520000000A"
+    },
+    {
+      "group": "baseline",
+      "minutes_ago": 182,
+      "RecordId": 9018,
+      "Id": 19,
+      "Level": 3,
+      "LevelDisplayName": "Warning",
+      "ProviderName": "Microsoft-Windows-WHEA-Logger",
+      "MachineName": "SENTINEL-FIXTURE",
+      "TaskDisplayName": "Memory Error",
+      "Message": "A corrected hardware error has occurred.\n\nReported by component: Memory Error Source\nError Source: Corrected Machine Check\nError Type: Multi-bit ECC\nProcessor APIC ID: 0\nBank: 5\nMCI Status: 0xcc20008000010092\n\nThe details view of this entry contains further information.",
+      "Properties": [
+        19,
+        "0"
+      ],
+      "RawData": "435045520000000A"
+    },
+    {
+      "group": "baseline",
+      "minutes_ago": 192,
+      "RecordId": 9019,
+      "Id": 19,
+      "Level": 3,
+      "LevelDisplayName": "Warning",
+      "ProviderName": "Microsoft-Windows-WHEA-Logger",
+      "MachineName": "SENTINEL-FIXTURE",
+      "TaskDisplayName": "Memory Error",
+      "Message": "A corrected hardware error has occurred.\n\nReported by component: Memory Error Source\nError Source: Corrected Machine Check\nError Type: Multi-bit ECC\nProcessor APIC ID: 0\nBank: 5\nMCI Status: 0xcc20008000010092\n\nThe details view of this entry contains further information.",
+      "Properties": [
+        19,
+        "0"
+      ],
+      "RawData": "435045520000000A"
+    },
+    {
+      "group": "baseline",
+      "minutes_ago": 202,
+      "RecordId": 9020,
+      "Id": 19,
+      "Level": 3,
+      "LevelDisplayName": "Warning",
+      "ProviderName": "Microsoft-Windows-WHEA-Logger",
+      "MachineName": "SENTINEL-FIXTURE",
+      "TaskDisplayName": "Memory Error",
+      "Message": "A corrected hardware error has occurred.\n\nReported by component: Memory Error Source\nError Source: Corrected Machine Check\nError Type: Multi-bit ECC\nProcessor APIC ID: 0\nBank: 5\nMCI Status: 0xcc20008000010092\n\nThe details view of this entry contains further information.",
+      "Properties": [
+        19,
+        "0"
+      ],
+      "RawData": "435045520000000A"
+    },
+    {
+      "group": "baseline",
+      "minutes_ago": 212,
+      "RecordId": 9021,
+      "Id": 19,
+      "Level": 3,
+      "LevelDisplayName": "Warning",
+      "ProviderName": "Microsoft-Windows-WHEA-Logger",
+      "MachineName": "SENTINEL-FIXTURE",
+      "TaskDisplayName": "Memory Error",
+      "Message": "A corrected hardware error has occurred.\n\nReported by component: Memory Error Source\nError Source: Corrected Machine Check\nError Type: Multi-bit ECC\nProcessor APIC ID: 0\nBank: 5\nMCI Status: 0xcc20008000010092\n\nThe details view of this entry contains further information.",
+      "Properties": [
+        19,
+        "0"
+      ],
+      "RawData": "435045520000000A"
+    },
+    {
+      "group": "baseline",
+      "minutes_ago": 222,
+      "RecordId": 9022,
+      "Id": 19,
+      "Level": 3,
+      "LevelDisplayName": "Warning",
+      "ProviderName": "Microsoft-Windows-WHEA-Logger",
+      "MachineName": "SENTINEL-FIXTURE",
+      "TaskDisplayName": "Memory Error",
+      "Message": "A corrected hardware error has occurred.\n\nReported by component: Memory Error Source\nError Source: Corrected Machine Check\nError Type: Multi-bit ECC\nProcessor APIC ID: 0\nBank: 5\nMCI Status: 0xcc20008000010092\n\nThe details view of this entry contains further information.",
+      "Properties": [
+        19,
+        "0"
+      ],
+      "RawData": "435045520000000A"
+    },
+    {
+      "group": "baseline",
+      "minutes_ago": 232,
+      "RecordId": 9023,
+      "Id": 19,
+      "Level": 3,
+      "LevelDisplayName": "Warning",
+      "ProviderName": "Microsoft-Windows-WHEA-Logger",
+      "MachineName": "SENTINEL-FIXTURE",
+      "TaskDisplayName": "Memory Error",
+      "Message": "A corrected hardware error has occurred.\n\nReported by component: Memory Error Source\nError Source: Corrected Machine Check\nError Type: Multi-bit ECC\nProcessor APIC ID: 0\nBank: 5\nMCI Status: 0xcc20008000010092\n\nThe details view of this entry contains further information.",
+      "Properties": [
+        19,
+        "0"
+      ],
+      "RawData": "435045520000000A"
+    },
+    {
+      "group": "baseline",
+      "minutes_ago": 242,
+      "RecordId": 9024,
+      "Id": 19,
+      "Level": 3,
+      "LevelDisplayName": "Warning",
+      "ProviderName": "Microsoft-Windows-WHEA-Logger",
+      "MachineName": "SENTINEL-FIXTURE",
+      "TaskDisplayName": "Memory Error",
+      "Message": "A corrected hardware error has occurred.\n\nReported by component: Memory Error Source\nError Source: Corrected Machine Check\nError Type: Multi-bit ECC\nProcessor APIC ID: 0\nBank: 5\nMCI Status: 0xcc20008000010092\n\nThe details view of this entry contains further information.",
+      "Properties": [
+        19,
+        "0"
+      ],
+      "RawData": "435045520000000A"
+    },
+    {
+      "group": "tail",
+      "minutes_ago": 4,
+      "RecordId": 9025,
+      "Id": 17,
+      "Level": 3,
+      "LevelDisplayName": "Warning",
+      "ProviderName": "Microsoft-Windows-WHEA-Logger",
+      "MachineName": "SENTINEL-FIXTURE",
+      "TaskDisplayName": "PCI Express Error",
+      "Message": "A corrected hardware error has occurred.\n\nComponent: PCI Express Root Port\nError Source: Advanced Error Reporting (PCI Express)\nBus:Device:Function: 0x0:0x2:0x1\nVendor ID:Device ID: 0x1022:0x1483\nClass Code: 0x060400\n\nThe details view of this entry contains further information.",
+      "Properties": [
+        17,
+        "0"
+      ],
+      "RawData": "435045520000000B"
+    },
+    {
+      "group": "tail",
+      "minutes_ago": 4,
+      "RecordId": 9026,
+      "Id": 17,
+      "Level": 3,
+      "LevelDisplayName": "Warning",
+      "ProviderName": "Microsoft-Windows-WHEA-Logger",
+      "MachineName": "SENTINEL-FIXTURE",
+      "TaskDisplayName": "PCI Express Error",
+      "Message": "A corrected hardware error has occurred.\n\nComponent: PCI Express Root Port\nError Source: Advanced Error Reporting (PCI Express)\nBus:Device:Function: 0x0:0x2:0x1\nVendor ID:Device ID: 0x1022:0x1483\nClass Code: 0x060400\n\nThe details view of this entry contains further information.",
+      "Properties": [
+        17,
+        "0"
+      ],
+      "RawData": "435045520000000B"
+    },
+    {
+      "group": "tail",
+      "minutes_ago": 4,
+      "RecordId": 9027,
+      "Id": 17,
+      "Level": 3,
+      "LevelDisplayName": "Warning",
+      "ProviderName": "Microsoft-Windows-WHEA-Logger",
+      "MachineName": "SENTINEL-FIXTURE",
+      "TaskDisplayName": "PCI Express Error",
+      "Message": "A corrected hardware error has occurred.\n\nComponent: PCI Express Root Port\nError Source: Advanced Error Reporting (PCI Express)\nBus:Device:Function: 0x0:0x2:0x1\nVendor ID:Device ID: 0x1022:0x1483\nClass Code: 0x060400\n\nThe details view of this entry contains further information.",
+      "Properties": [
+        17,
+        "0"
+      ],
+      "RawData": "435045520000000B"
+    },
+    {
+      "group": "tail",
+      "minutes_ago": 3,
+      "RecordId": 9028,
+      "Id": 17,
+      "Level": 3,
+      "LevelDisplayName": "Warning",
+      "ProviderName": "Microsoft-Windows-WHEA-Logger",
+      "MachineName": "SENTINEL-FIXTURE",
+      "TaskDisplayName": "PCI Express Error",
+      "Message": "A corrected hardware error has occurred.\n\nComponent: PCI Express Root Port\nError Source: Advanced Error Reporting (PCI Express)\nBus:Device:Function: 0x0:0x2:0x1\nVendor ID:Device ID: 0x1022:0x1483\nClass Code: 0x060400\n\nThe details view of this entry contains further information.",
+      "Properties": [
+        17,
+        "0"
+      ],
+      "RawData": "435045520000000B"
+    },
+    {
+      "group": "tail",
+      "minutes_ago": 3,
+      "RecordId": 9029,
+      "Id": 17,
+      "Level": 3,
+      "LevelDisplayName": "Warning",
+      "ProviderName": "Microsoft-Windows-WHEA-Logger",
+      "MachineName": "SENTINEL-FIXTURE",
+      "TaskDisplayName": "PCI Express Error",
+      "Message": "A corrected hardware error has occurred.\n\nComponent: PCI Express Root Port\nError Source: Advanced Error Reporting (PCI Express)\nBus:Device:Function: 0x0:0x2:0x1\nVendor ID:Device ID: 0x1022:0x1483\nClass Code: 0x060400\n\nThe details view of this entry contains further information.",
+      "Properties": [
+        17,
+        "0"
+      ],
+      "RawData": "435045520000000B"
+    },
+    {
+      "group": "tail",
+      "minutes_ago": 3,
+      "RecordId": 9030,
+      "Id": 17,
+      "Level": 3,
+      "LevelDisplayName": "Warning",
+      "ProviderName": "Microsoft-Windows-WHEA-Logger",
+      "MachineName": "SENTINEL-FIXTURE",
+      "TaskDisplayName": "PCI Express Error",
+      "Message": "A corrected hardware error has occurred.\n\nComponent: PCI Express Root Port\nError Source: Advanced Error Reporting (PCI Express)\nBus:Device:Function: 0x0:0x2:0x1\nVendor ID:Device ID: 0x1022:0x1483\nClass Code: 0x060400\n\nThe details view of this entry contains further information.",
+      "Properties": [
+        17,
+        "0"
+      ],
+      "RawData": "435045520000000B"
+    },
+    {
+      "group": "tail",
+      "minutes_ago": 2,
+      "RecordId": 9031,
+      "Id": 17,
+      "Level": 3,
+      "LevelDisplayName": "Warning",
+      "ProviderName": "Microsoft-Windows-WHEA-Logger",
+      "MachineName": "SENTINEL-FIXTURE",
+      "TaskDisplayName": "PCI Express Error",
+      "Message": "A corrected hardware error has occurred.\n\nComponent: PCI Express Root Port\nError Source: Advanced Error Reporting (PCI Express)\nBus:Device:Function: 0x0:0x2:0x1\nVendor ID:Device ID: 0x1022:0x1483\nClass Code: 0x060400\n\nThe details view of this entry contains further information.",
+      "Properties": [
+        17,
+        "0"
+      ],
+      "RawData": "435045520000000B"
+    },
+    {
+      "group": "tail",
+      "minutes_ago": 2,
+      "RecordId": 9032,
+      "Id": 17,
+      "Level": 3,
+      "LevelDisplayName": "Warning",
+      "ProviderName": "Microsoft-Windows-WHEA-Logger",
+      "MachineName": "SENTINEL-FIXTURE",
+      "TaskDisplayName": "PCI Express Error",
+      "Message": "A corrected hardware error has occurred.\n\nComponent: PCI Express Root Port\nError Source: Advanced Error Reporting (PCI Express)\nBus:Device:Function: 0x0:0x2:0x1\nVendor ID:Device ID: 0x1022:0x1483\nClass Code: 0x060400\n\nThe details view of this entry contains further information.",
+      "Properties": [
+        17,
+        "0"
+      ],
+      "RawData": "435045520000000B"
+    },
+    {
+      "group": "tail",
+      "minutes_ago": 2,
+      "RecordId": 9033,
+      "Id": 17,
+      "Level": 3,
+      "LevelDisplayName": "Warning",
+      "ProviderName": "Microsoft-Windows-WHEA-Logger",
+      "MachineName": "SENTINEL-FIXTURE",
+      "TaskDisplayName": "PCI Express Error",
+      "Message": "A corrected hardware error has occurred.\n\nComponent: PCI Express Root Port\nError Source: Advanced Error Reporting (PCI Express)\nBus:Device:Function: 0x0:0x2:0x1\nVendor ID:Device ID: 0x1022:0x1483\nClass Code: 0x060400\n\nThe details view of this entry contains further information.",
+      "Properties": [
+        17,
+        "0"
+      ],
+      "RawData": "435045520000000B"
+    },
+    {
+      "group": "burst",
+      "minutes_ago": 5,
+      "RecordId": 9034,
+      "Id": 17,
+      "Level": 3,
+      "LevelDisplayName": "Warning",
+      "ProviderName": "Microsoft-Windows-WHEA-Logger",
+      "MachineName": "SENTINEL-FIXTURE",
+      "TaskDisplayName": "Cache Error",
+      "Message": "A corrected hardware error has occurred.\n\nReported by component: Processor Core\nError Source: Corrected Machine Check\nError Type: Cache Hierarchy Error\nProcessor APIC ID: 4\nBank: 1\nMCI Status: 0xbea0000001000108\n\nThe details view of this entry contains further information.",
+      "Properties": [
+        17,
+        "0"
+      ],
+      "RawData": "435045520000000C"
+    },
+    {
+      "group": "burst",
+      "minutes_ago": 5,
+      "RecordId": 9035,
+      "Id": 17,
+      "Level": 3,
+      "LevelDisplayName": "Warning",
+      "ProviderName": "Microsoft-Windows-WHEA-Logger",
+      "MachineName": "SENTINEL-FIXTURE",
+      "TaskDisplayName": "Cache Error",
+      "Message": "A corrected hardware error has occurred.\n\nReported by component: Processor Core\nError Source: Corrected Machine Check\nError Type: Cache Hierarchy Error\nProcessor APIC ID: 4\nBank: 1\nMCI Status: 0xbea0000001000108\n\nThe details view of this entry contains further information.",
+      "Properties": [
+        17,
+        "0"
+      ],
+      "RawData": "435045520000000C"
+    },
+    {
+      "group": "burst",
+      "minutes_ago": 5,
+      "RecordId": 9036,
+      "Id": 17,
+      "Level": 3,
+      "LevelDisplayName": "Warning",
+      "ProviderName": "Microsoft-Windows-WHEA-Logger",
+      "MachineName": "SENTINEL-FIXTURE",
+      "TaskDisplayName": "Cache Error",
+      "Message": "A corrected hardware error has occurred.\n\nReported by component: Processor Core\nError Source: Corrected Machine Check\nError Type: Cache Hierarchy Error\nProcessor APIC ID: 4\nBank: 1\nMCI Status: 0xbea0000001000108\n\nThe details view of this entry contains further information.",
+      "Properties": [
+        17,
+        "0"
+      ],
+      "RawData": "435045520000000C"
+    },
+    {
+      "group": "burst",
+      "minutes_ago": 5,
+      "RecordId": 9037,
+      "Id": 17,
+      "Level": 3,
+      "LevelDisplayName": "Warning",
+      "ProviderName": "Microsoft-Windows-WHEA-Logger",
+      "MachineName": "SENTINEL-FIXTURE",
+      "TaskDisplayName": "Cache Error",
+      "Message": "A corrected hardware error has occurred.\n\nReported by component: Processor Core\nError Source: Corrected Machine Check\nError Type: Cache Hierarchy Error\nProcessor APIC ID: 4\nBank: 1\nMCI Status: 0xbea0000001000108\n\nThe details view of this entry contains further information.",
+      "Properties": [
+        17,
+        "0"
+      ],
+      "RawData": "435045520000000C"
+    },
+    {
+      "group": "burst",
+      "minutes_ago": 5,
+      "RecordId": 9038,
+      "Id": 17,
+      "Level": 3,
+      "LevelDisplayName": "Warning",
+      "ProviderName": "Microsoft-Windows-WHEA-Logger",
+      "MachineName": "SENTINEL-FIXTURE",
+      "TaskDisplayName": "Cache Error",
+      "Message": "A corrected hardware error has occurred.\n\nReported by component: Processor Core\nError Source: Corrected Machine Check\nError Type: Cache Hierarchy Error\nProcessor APIC ID: 4\nBank: 1\nMCI Status: 0xbea0000001000108\n\nThe details view of this entry contains further information.",
+      "Properties": [
+        17,
+        "0"
+      ],
+      "RawData": "435045520000000C"
+    },
+    {
+      "group": "burst",
+      "minutes_ago": 5,
+      "RecordId": 9039,
+      "Id": 17,
+      "Level": 3,
+      "LevelDisplayName": "Warning",
+      "ProviderName": "Microsoft-Windows-WHEA-Logger",
+      "MachineName": "SENTINEL-FIXTURE",
+      "TaskDisplayName": "Cache Error",
+      "Message": "A corrected hardware error has occurred.\n\nReported by component: Processor Core\nError Source: Corrected Machine Check\nError Type: Cache Hierarchy Error\nProcessor APIC ID: 4\nBank: 1\nMCI Status: 0xbea0000001000108\n\nThe details view of this entry contains further information.",
+      "Properties": [
+        17,
+        "0"
+      ],
+      "RawData": "435045520000000C"
+    },
+    {
+      "group": "odd",
+      "minutes_ago": 300,
+      "RecordId": 9040,
+      "Id": 18,
+      "Level": 2,
+      "LevelDisplayName": "Error",
+      "ProviderName": "Microsoft-Windows-WHEA-Logger",
+      "MachineName": "SENTINEL-FIXTURE",
+      "TaskDisplayName": "Machine Check Exception",
+      "Message": "A fatal hardware error has occurred.\n\nReported by component: Processor Core\nError Source: Machine Check Exception\nError Type: Micro-architectural Error\nProcessor APIC ID: 6\n\nThe details view of this entry contains further information.",
+      "Properties": [
+        18,
+        "0"
+      ],
+      "RawData": null
+    }
+  ]
+}

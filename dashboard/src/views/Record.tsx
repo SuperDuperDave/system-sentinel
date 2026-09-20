@@ -1,6 +1,8 @@
 import { Fragment, useMemo, useState } from 'react';
-import { EventRecord, observed, section } from '../api';
+import { AddToStack } from '../AddToStack';
+import { EventRecord, Reading, observed, section } from '../api';
 import { clock, Glyph, OutcomeLine, firstLine } from '../Outcome';
+import { Segmented, byDay } from '../Sections';
 import { useReading } from '../useReading';
 import styles from './Record.module.css';
 
@@ -8,7 +10,6 @@ type Levels = 'errors' | 'all';
 const LEVELS: Record<Levels, number[]> = { errors: [1, 2], all: [1, 2, 3, 4] };
 const COUNTS = [50, 200, 500];
 
-const day = new Intl.DateTimeFormat(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
 
 /**
  * The record: the System log, most recent first, each row inspectable in place, and for any row the
@@ -25,38 +26,27 @@ export function Record() {
       <div className={styles.head}>
         <h1 className={`${styles.title} display`}>Record</h1>
         <div className={styles.controls} role="group" aria-label="Which records">
-          <Segmented value={levels} onChange={setLevels} options={[{ value: 'errors', label: 'Critical and error' }, { value: 'all', label: 'Every level' }]} />
-          <Segmented value={count} onChange={setCount} options={COUNTS.map((c) => ({ value: c, label: `last ${c}` }))} />
+          <Segmented value={levels} onChange={setLevels} options={[{ value: 'errors', label: 'Critical and error' }, { value: 'all', label: 'Every level' }]} label="Which levels" />
+          <Segmented value={count} onChange={setCount} options={COUNTS.map((c) => ({ value: c, label: `last ${c}` }))} label="How many" />
         </div>
+        {taken.reading ? <AddToStack item={{ kind: 'reading', envelope: taken.reading }} label="Stack this reading" /> : null}
       </div>
       <OutcomeLine taken={taken} noun="records" emptyText={levels === 'errors' ? `No critical or error records among the last ${count}` : 'The log is empty'} />
-      {observed(taken.reading) && records.length > 0 ? <Rows records={records} /> : null}
+      {observed(taken.reading) && records.length > 0 && taken.reading ? <Rows records={records} reading={taken.reading} /> : null}
     </section>
   );
 }
 
-function Segmented<V extends string | number>({ value, onChange, options }: { value: V; onChange: (v: V) => void; options: { value: V; label: string }[] }) {
-  return (
-    <div className={styles.segmented}>
-      {options.map((o) => (
-        <button key={String(o.value)} className={`${styles.segment} ${o.value === value ? styles.segmentOn : ''}`} onClick={() => onChange(o.value)} aria-pressed={o.value === value}>
-          {o.label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function Rows({ records }: { records: EventRecord[] }) {
+function Rows({ records, reading }: { records: EventRecord[]; reading: Reading<EventRecord[]> }) {
   const [open, setOpen] = useState<number | null>(null);
-  const grouped = useMemo(() => groupByDay(records), [records]);
+  const grouped = useMemo(() => byDay(records, (r) => r.TimeCreated), [records]);
   return (
     <ol className={styles.rows}>
       {grouped.map(([label, rows]) => (
         <Fragment key={label}>
           <li className={`${styles.day} label`} aria-hidden="true">{label}</li>
           {rows.map((r) => (
-            <Row key={r.RecordId} record={r} open={open === r.RecordId} onToggle={() => setOpen(open === r.RecordId ? null : r.RecordId)} />
+            <Row key={r.RecordId} record={r} reading={reading} open={open === r.RecordId} onToggle={() => setOpen(open === r.RecordId ? null : r.RecordId)} />
           ))}
         </Fragment>
       ))}
@@ -64,7 +54,7 @@ function Rows({ records }: { records: EventRecord[] }) {
   );
 }
 
-function Row({ record, open, onToggle }: { record: EventRecord; open: boolean; onToggle: () => void }) {
+function Row({ record, reading, open, onToggle }: { record: EventRecord; reading: Reading<EventRecord[]>; open: boolean; onToggle: () => void }) {
   const t = new Date(record.TimeCreated);
   const level = levelKind(record.Level);
   return (
@@ -76,13 +66,13 @@ function Row({ record, open, onToggle }: { record: EventRecord; open: boolean; o
         <span className={`${styles.id} readout`}>{record.Id}</span>
         <span className={styles.message}>{record.Message ? firstLine(record.Message) : <em className={styles.noMessage}>no message text</em>}</span>
       </button>
-      {open ? <Inspect record={record} /> : null}
+      {open ? <Inspect record={record} reading={reading} /> : null}
     </li>
   );
 }
 
 /** Inspect in place: the whole record, then the records before it, without leaving the list. */
-function Inspect({ record }: { record: EventRecord }) {
+function Inspect({ record, reading }: { record: EventRecord; reading: Reading<EventRecord[]> }) {
   const [before, setBefore] = useState(false);
   return (
     <div className={styles.inspect}>
@@ -102,6 +92,7 @@ function Inspect({ record }: { record: EventRecord }) {
       ) : null}
       <div className={styles.actions}>
         <button className={styles.action} onClick={() => setBefore((v) => !v)} aria-expanded={before}>{before ? 'Hide the record before this' : 'The record before this'}</button>
+        <AddToStack item={{ kind: 'selection', envelope: reading, ids: [record.RecordId] }} label="Stack this record" />
       </div>
       {before ? <Before moment={record.TimeCreated} /> : null}
     </div>
@@ -139,15 +130,4 @@ function levelKind(level: number): 'critical' | 'error' | 'warning' | 'info' {
 
 function shortProvider(name: string): string {
   return name.replace(/^Microsoft-Windows-/, '');
-}
-
-function groupByDay(records: EventRecord[]): [string, EventRecord[]][] {
-  const out: [string, EventRecord[]][] = [];
-  for (const r of records) {
-    const label = day.format(new Date(r.TimeCreated));
-    const last = out[out.length - 1];
-    if (last && last[0] === label) last[1].push(r);
-    else out.push([label, [r]]);
-  }
-  return out;
 }

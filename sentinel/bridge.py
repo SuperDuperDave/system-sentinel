@@ -38,8 +38,8 @@ _KNOWN_LOCATIONS = (
 
 # WSL's interop layer failing to hand the process over; seen on this machine on 2026-09-20 as
 # "<3>WSL (pid - ) ERROR: UtilAcceptVsock:271: accept4 failed 110". Not a Windows error.
-_WSL_INTEROP = "UtilAcceptVsock"
-_WSL_INTEROP_ATTEMPTS = 3
+WSL_INTEROP = "UtilAcceptVsock"
+WSL_INTEROP_ATTEMPTS = 3
 
 _DENIED_MARKERS = (
     "access is denied",
@@ -102,8 +102,8 @@ class Bridge:
         retried a bounded number of times with a short pause and otherwise reported as ``unavailable``.
         Native Windows never sees this path."""
         result = self._run_once(script, timeout=timeout, depth=depth)
-        for attempt in range(1, _WSL_INTEROP_ATTEMPTS):
-            if not (result.outcome == "unavailable" and result.error and _WSL_INTEROP in result.error):
+        for attempt in range(1, WSL_INTEROP_ATTEMPTS):
+            if not (result.outcome == "unavailable" and result.error and WSL_INTEROP in result.error):
                 break
             time.sleep(0.5 * attempt)
             result = self._run_once(script, timeout=timeout, depth=depth)
@@ -135,7 +135,7 @@ class Bridge:
         stdout = proc.stdout.decode("utf-8", errors="replace").strip()
         stderr = clean_stderr(proc.stderr.decode("utf-8", errors="replace"))
 
-        if not stdout and _WSL_INTEROP in stderr:
+        if not stdout and WSL_INTEROP in stderr:
             return BridgeResult("unavailable", took_ms=took, returncode=proc.returncode, error=f"WSL could not start powershell.exe: {stderr}")
 
         if proc.returncode != 0 and not stdout:

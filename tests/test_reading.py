@@ -46,9 +46,11 @@ def test_spec_coerces_defaults_types_and_choices():
         spec.coerce({"count": "many"})
 
 
-def test_required_param_stays_none_until_given():
+def test_required_param_is_refused_when_missing():
     spec = REGISTRY["record"]
-    assert spec.coerce({})["before"] is None
+    with pytest.raises(ValueError, match="'before' is required"):
+        spec.coerce({})
+    assert spec.coerce({"before": "2026-09-20T18:04:11Z"})["before"] == "2026-09-20T18:04:11Z"
 
 
 def test_catalog_lists_every_registered_reading_once():

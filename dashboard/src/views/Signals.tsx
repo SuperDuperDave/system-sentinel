@@ -1,9 +1,119 @@
-/** Signals: the forensic signals across the readings and the recent log (inferred: leads, never diagnoses). Built in phase 2. */
+import { AddToStack } from '../AddToStack';
+import { observed, section } from '../api';
+import { OutcomeLine } from '../Outcome';
+import { Head, RowList, Section, Tree } from '../Sections';
+import { useReading } from '../useReading';
+import styles from './Signals.module.css';
+
+interface Signal {
+  id: string;
+  class: string;
+  title: string;
+  summary: string;
+  evidence: Record<string, unknown>;
+  readings: string[];
+}
+
+interface Input {
+  name: string;
+  params: Record<string, unknown>;
+  outcome: string;
+  took_ms: number;
+}
+
+/**
+ * Signals: what the tool noticed across several readings at once.
+ *
+ * Every row here is a lead. None of them is a diagnosis, and none is styled as one — no level
+ * glyph, no alarm, no ranking by severity — because the evidence for each is one tap away and
+ * the reading belongs to whoever holds it. What makes a signal trustworthy is that it names the
+ * readings it came from and what those readings returned, so a lead built on an input that was
+ * never observed cannot pass for one built on the machine.
+ */
 export function Signals() {
+  const taken = useReading<Signal[]>('signals');
+  const signals = section(taken.reading, 'signals') ?? [];
+  const head = observed(taken.reading) ? taken.reading?.sections.find((s) => s.name === 'signals') : undefined;
+  const inputs = ((taken.reading?.method ?? {}) as { readings?: Input[] }).readings ?? [];
+  const groups = CLASSES.map((cls) => [cls, signals.filter((s) => s.class === cls)] as const);
+  const silent = groups.filter(([, found]) => found.length === 0).map(([cls]) => cls);
+
   return (
     <section>
-      <h1 className="display" style={{ fontSize: 28, margin: '0 0 10px', lineHeight: 1.1 }}>Signals</h1>
-      <p className="readout" style={{ color: 'var(--muted)' }}>Not built yet.</p>
+      <Head title="Signals">{taken.reading ? <AddToStack item={{ kind: 'reading', envelope: taken.reading }} label="Stack this reading" /> : null}</Head>
+      <p className={styles.lede}>
+        Patterns the tool noticed across several readings at once. Each one is a lead to follow, never a finding about what is wrong; the rule that
+        produced it and the evidence under it are both here.
+      </p>
+      <OutcomeLine taken={taken} noun="signals" emptyText="No signal fired: every rule ran and none of them matched" />
+      {taken.reading && !observed(taken.reading) ? (
+        <p className={styles.unobserved}>No input could be observed, so no rule could run. Signals are read from other readings, not from the machine directly.</p>
+      ) : null}
+      {inputs.length ? <Inputs inputs={inputs} /> : null}
+
+      {head ? (
+        <div className={styles.section}>
+          <Section title="What was noticed" cls={head.class} basis={head.basis}>
+            {groups.map(([cls, found]) => (found.length ? <Group key={cls} cls={cls} signals={found} /> : null))}
+            {signals.length && silent.length ? <p className={`${styles.silent} readout`}>No signal in {silent.join(', ')}.</p> : null}
+          </Section>
+        </div>
+      ) : null}
     </section>
   );
 }
+
+/** One class of signal: what the class looks for, then the leads that fired under it. */
+function Group({ cls, signals }: { cls: string; signals: Signal[] }) {
+  return (
+    <div className={styles.group}>
+      <h3 className={`${styles.groupTitle} label`}>{cls}</h3>
+      <p className={styles.groupWhat}>{WHAT[cls]}</p>
+      <RowList
+        items={signals}
+        idOf={(s) => s.id}
+        layout={styles.signalRow}
+        cells={(s) => (
+          <>
+            <span className={styles.signalTitle}>{s.title}</span>
+            <span className={styles.summary}>{s.summary}</span>
+          </>
+        )}
+        inspect={(s) => (
+          <div className={styles.evidence}>
+            <p className="label">Evidence</p>
+            <Tree value={s.evidence} />
+            <p className={`${styles.from} readout`}>read from {s.readings.join(', ')} · {s.id}</p>
+          </div>
+        )}
+      />
+    </div>
+  );
+}
+
+/** What each reading returned when the rules were run over it: a lead is only as observed as its inputs. */
+function Inputs({ inputs }: { inputs: Input[] }) {
+  return (
+    <div className={styles.inputs}>
+      <p className="label">Inputs</p>
+      <ul className={styles.inputList}>
+        {inputs.map((i) => (
+          <li key={i.name} className={`${styles.input} readout`}>
+            <span className={styles.inputName}>{i.name}</span>
+            <span className={i.outcome === 'ok' || i.outcome === 'empty' ? styles.inputOk : styles.inputLost}>{i.outcome}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+const CLASSES = ['suppressions', 'gaps', 'pressure', 'transitions', 'mismatches'] as const;
+
+const WHAT: Record<string, string> = {
+  suppressions: 'Settings that would keep a fault from showing itself.',
+  gaps: 'Places the record has a hole: something that cannot report.',
+  pressure: 'What is filling the recent log.',
+  transitions: 'What the machine did between one power state and the next.',
+  mismatches: 'Where two readings of the same thing do not agree.',
+};

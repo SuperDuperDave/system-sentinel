@@ -1,138 +1,62 @@
 # System Sentinel
 
-**AI-augmented hardware diagnostics platform for Windows systems.**
+**A stethoscope for your computer.** A Windows machine keeps a record of itself: the event log, the hardware error log, the crash dumps, what it is made of and how it is configured. System Sentinel gathers that record, shows it to you in one place, lets you choose what matters, and hands it on to the AI conversation of your choice. It is built for two users at once: the person at the dashboard, and the agent running on the same machine.
 
-System Sentinel captures deep hardware telemetry — WHEA errors, crash dumps, event logs, driver history, PCIe topology, power delivery, and memory health — then composes that data into structured context for AI-powered diagnostic analysis.
+Every read of the machine passes through one boundary, the API. The dashboard, a phone and a local agent (Claude Code, Codex and the like) are three clients of that one interface. An agent troubleshooting the machine calls the tool instead of writing and running its own scripts.
 
-## What It Does
+## What it reads
 
-- **WHEA Storm Detection** — Identifies rapid bursts of hardware error corrections that signal imminent failure
-- **Deep Hardware Diagnostics** — PCIe fabric analysis, memory channel mapping, power delivery assessment, CPU/GPU health
-- **Hardware Topology Mapping** — Visualizes your system's physical component layout with per-component drill-down
-- **Live Event Streaming** — Real-time system events via SSE, monitoring WHEA, crashes, and driver state changes
-- **Crash Dump Forensics** — Collects and decodes Windows crash dumps with bugcheck code mapping
-- **Context Composer** — Assembles diagnostic data into optimized context packages for AI analysis
-- **Capture Pack Export** — One-click ZIP export of all diagnostic data for sharing or archival
+| Reading | What it is |
+| --- | --- |
+| `events`, `record` | Records from the System and Application logs by level, and the records *before* a moment: the log does not announce a freeze; the next start does |
+| `whea`, `storms` | Hardware-error records with their binary payload decoded beside them, and the same records over a window in wall-clock buckets, grouped by signature, with burst and acceleration flags |
+| `dumps` | The crash-dump inventory |
+| `system`, `hardware`, `hardware.cpu`, `.gpu`, `.board`, `.storage`, `.network`, `drivers` | The snapshot, the fingerprint and configuration, one subsystem at a time, and driver changes |
+| `pcie`, `power`, `memory`, `constraints` | The PCIe fabric, power configuration and transitions, physical memory, devices present and not working |
+| `signals` | Leads across the readings and the recent log: suppressions, gaps, pressure, transitions, mismatches |
 
-## AI Diagnostic Modes
+Every reading comes back in one envelope. Its **outcome** says whether the machine was observed (`ok`, `empty`) or not (`failed`, `unavailable`, `denied`, `timeout`), so a collection failure is never mistaken for a clean machine. Its **sections** keep what Windows said (`raw`) apart from what the tool computed (`derived`), what does not change (`invariant`) and what is only a lead (`inferred`). Its **method** is the query, so the evidence can be reproduced by hand. By default nothing in a response carries a serial number, the computer name, a user name or a MAC address; a caller asks for those by name.
 
-System Sentinel ships with 6 specialist prompt configurations, each tuned for a different diagnostic scenario:
+The **stack** is the evidence you or your agent chose to hand on. It lives on the machine, so the desktop, the phone and the agent see one stack. It composes into one text, led by a prompt from a library you can edit; the dashboard copies it to the clipboard, and an agent reads the same text from a route. A **capture** is every reading, the stack and the composed text in one ZIP on disk, with a manifest that says exactly what is in it. Nothing leaves the machine unless a person sends it.
 
-| Mode | Purpose |
-|------|---------|
-| **Quantum Diagnostician** | Silicon-level physics analysis — voltage domains, cache hierarchy, thermal effects |
-| **System Archaeologist** | Temporal pattern tracing — what changed, when, and what broke |
-| **Preventative Oracle** | Pre-failure detection — find invisible degradation before it crashes |
-| **Emergency Triage** | Crisis stabilization — minimal analysis, maximum action |
-| **RMA Prosecutor** | Warranty claim evidence — build an ironclad hardware failure case |
-| **Performance Alchemist** | Post-stability optimization — extract maximum capability from stable hardware |
+## Running it
 
-These prompts are designed for use with Claude, ChatGPT, or any capable LLM. Feed the composed context + select a mode.
-
-## Architecture
+On the Windows machine, with Python 3.11 or newer and Node 22 or newer:
 
 ```
-┌─────────────────────┐     ┌──────────────────────┐
-│   Next.js Frontend  │────▶│   FastAPI Backend     │
-│   (React + Zustand) │ API │   (Python + Win32)    │
-│   Port 3000         │◀────│   Port 8000           │
-└─────────────────────┘     └──────────┬───────────┘
-                                       │
-                            ┌──────────▼───────────┐
-                            │   Windows System      │
-                            │   - Event Log (WMI)   │
-                            │   - WHEA Records      │
-                            │   - Crash Dumps       │
-                            │   - Hardware Topology  │
-                            └──────────────────────┘
+git clone https://github.com/SuperDuperDave/system-sentinel.git
+cd system-sentinel
+python -m venv .venv
+.venv\Scripts\python -m pip install -e .
+cd dashboard && npm ci && npm run build && cd ..
+.venv\Scripts\system-sentinel check
+.venv\Scripts\system-sentinel serve
 ```
 
-**Backend**: FastAPI serving REST + SSE endpoints. Collects data via PowerShell/WMI on Windows, with graceful fallbacks for development on other platforms.
+`check` proves the bridge to Windows before anything is asked of it. `serve` runs the API and the dashboard on `http://127.0.0.1:8000/`; the dashboard asks once for the access token the tool created on first start, which `system-sentinel token` prints. [docs/DEPLOY.md](docs/DEPLOY.md) is the same procedure as a prompt you paste to your agent, with the optional steps for running at logon and reaching the machine from your phone.
 
-**Frontend**: Next.js 16 + React 19 + Tailwind CSS 4. Dashboard with sidebar navigation, widget grid, deep diagnostics views, and the Context Composer.
+From WSL on the same machine the tool runs the same way, reading Windows through `powershell.exe`; that is how it is developed.
 
-## Quick Start
+## For agents
 
-### Prerequisites
-
-- Python 3.10+ (`python3` on Linux/WSL — install `python3-venv` if missing: `sudo apt install python3-venv`)
-- Node.js 18+
-- Windows 10/11 (for full hardware data collection; backend runs on Linux/WSL with mock data)
-
-### Run Both Services
-
-```bash
-chmod +x start.sh
-./start.sh
-```
-
-This creates a Python venv, installs dependencies, and launches both backend (port 8000) and frontend (port 3000).
-
-### Run Individually
-
-**Backend:**
-```bash
-cd backend
-python3 -m venv venv
-source venv/bin/activate  # or venv\Scripts\activate on Windows
-pip install -r requirements.txt
-uvicorn main:app --host 0.0.0.0 --port 8000 --reload
-```
-
-**Frontend:**
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-Then open [http://localhost:3000](http://localhost:3000).
-
-## Tech Stack
-
-| Layer | Technology |
-|-------|-----------|
-| Backend | Python 3.10+, FastAPI, Uvicorn, Pydantic |
-| Frontend | Next.js 16, React 19, TypeScript 5, Tailwind CSS 4, Zustand |
-| Windows Integration | PyWin32, PowerShell, WMI |
-| WHEA Decoding | DecodeWheaRecord (.NET tool) |
-
-## Project Structure
+Register it once and every reading is a tool:
 
 ```
-system-sentinel/
-├── backend/
-│   ├── main.py                 # FastAPI application
-│   ├── collectors/             # Data collection modules
-│   ├── services/               # Core diagnostic services
-│   │   ├── whea/               # WHEA error processing
-│   │   └── domains/            # Hardware domain analyzers
-│   │       └── hardware/       # Per-component analysis
-│   └── tools/                  # External tools (DecodeWheaRecord)
-├── frontend/
-│   ├── app/                    # Next.js app directory
-│   ├── components/             # React components
-│   │   ├── views/              # Dashboard view pages
-│   │   ├── widgets/            # Dashboard widgets
-│   │   └── context/            # Context Composer
-│   └── lib/                    # Utilities, stores, types
-├── system_prompts.md           # AI diagnostic mode gallery
-├── start.sh                    # Launch script
-└── backend/start_server.ps1    # Windows PowerShell launcher
+claude mcp add --transport http system-sentinel http://127.0.0.1:8000/mcp --header "Authorization: Bearer $(system-sentinel token)"
 ```
 
-## Status
+Any MCP client reaches the same address over streamable HTTP with the same header; any shell reaches the same evidence with `curl`. [docs/API.md](docs/API.md) is the interface, written for an agent to read without the source; the live reference is `/api/docs`.
 
-This project is under active development. The core diagnostic pipeline and UI are functional. Areas for improvement include:
+## The source
 
-- Test coverage
-- Configuration management
-- Documentation for individual diagnostic domains
-- Docker containerization
-- CI/CD pipeline
+`sentinel/` is the Python package: the bridge to Windows, the reading envelope and catalog, the readings, the redaction policy, the token boundary, the stack, the stream, captures, the MCP projection and the CLI. `dashboard/` is the Vite and React dashboard, which builds into `sentinel/static` and is served from the same origin. `tests/` runs anywhere through a fake bridge and, where there is one, against the real machine. `docs/design/` owns the identity. `_sessions/` is how the work is worked.
 
-Contributions welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
+The identity, the copy and the figure on [mainthread.ai](https://mainthread.ai/work/system-sentinel/) are the reference presentation; the page states only what this source implements.
+
+## What it does not do
+
+No live telemetry as a service, no prediction, no crash-dump decoding, no diagnosis. A burst of corrected errors, a gap in the log or a correlated event is a lead to investigate; the reading belongs to the person or the agent holding the evidence.
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE). The fonts are under the SIL Open Font License, with their license texts beside them in `dashboard/public/fonts/`.

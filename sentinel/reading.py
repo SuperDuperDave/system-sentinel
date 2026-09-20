@@ -120,6 +120,8 @@ class Spec:
         for p in self.params:
             value = raw.get(p.name, p.default)
             if value is None:
+                if p.default is None:
+                    raise ValueError(f"parameter {p.name!r} is required")
                 out[p.name] = None
                 continue
             try:
@@ -190,6 +192,44 @@ def from_bridge(
     elif result.outcome == "empty":
         reading.sections = [Section(section, cls, [] if shape == "list" else None)]
         reading.count = 0
+    else:
+        reading.error = {"kind": result.outcome, "detail": result.error or ""}
+    return reading
+
+
+def from_object(
+    name: str,
+    params: dict[str, Any],
+    script: str,
+    result: BridgeResult,
+    build: Callable[[dict[str, Any]], list[Section]],
+) -> Reading:
+    """Turn one object from the machine into a reading whose sections ``build`` decides.
+
+    ``build`` receives the payload and returns the sections; it is where every derivation and
+    every observation lives, so a test can hold the rule rather than the passthrough. A
+    ``warnings`` list in the payload is lifted into the envelope and never reaches a section: it
+    says which sub-query did not answer, so an absence the tool could not look at is distinguishable
+    from an observed nothing. On ``empty``, ``build`` sees an empty payload and decides the sections.
+    """
+    reading = Reading(
+        reading=name,
+        params=params,
+        outcome=result.outcome,
+        method={"kind": "powershell", "query": textwrap.dedent(script).strip()},
+        took_ms=result.took_ms,
+        warnings=list(result.warnings),
+    )
+    if result.outcome == "ok":
+        payload = result.items[0]
+        if not isinstance(payload, dict):
+            reading.outcome = "failed"
+            reading.error = {"kind": "failed", "detail": "the query did not return an object"}
+            return reading
+        reading.warnings.extend(str(w) for w in (payload.pop("warnings", None) or []))
+        reading.sections = build(payload)
+    elif result.outcome == "empty":
+        reading.sections = build({})
     else:
         reading.error = {"kind": result.outcome, "detail": result.error or ""}
     return reading

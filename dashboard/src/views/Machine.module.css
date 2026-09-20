@@ -1,0 +1,114 @@
+/* One scrolling view, so the strip at the top is the map of it. Sticky, because on a phone the
+   end of this page is a long way from the beginning. */
+
+.strip {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  gap: 2px;
+  margin: 0 calc(-1 * var(--gutter)) 4px;
+  padding: 6px var(--gutter);
+  background: var(--field);
+  border-bottom: 1px solid var(--rule-soft);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.strip::-webkit-scrollbar { display: none; }
+.jump {
+  color: var(--muted);
+  text-decoration: none;
+  white-space: nowrap;
+  padding: 0 10px;
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 6px;
+}
+.jump:hover { color: var(--ink); background: rgba(234, 243, 238, 0.06); }
+
+.part {
+  font-size: 20px;
+  margin: 40px 0 8px;
+  line-height: 1.2;
+  scroll-margin-top: 56px;
+}
+.part:first-of-type { margin-top: 28px; }
+
+/* A heavy section: the header is the affordance, and nothing is read until it is used. */
+.partHead { margin: 40px 0 0; scroll-margin-top: 56px; }
+.partButton {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 48px;
+  text-align: left;
+  border-top: 1px solid var(--rule-soft);
+  padding-top: 8px;
+}
+.chevron {
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 1;
+  width: 12px;
+  transition: transform 0.15s ease;
+}
+.partButton[aria-expanded='true'] .chevron { transform: rotate(90deg); }
+.partTitle { font-size: 20px; color: var(--ink); }
+.partButton:hover .partTitle { color: var(--phosphor-core); }
+.take { margin-left: auto; color: var(--muted); }
+.partButton:hover .take { color: var(--ink); }
+.hint { margin: 6px 0 0 20px; color: var(--muted); font-size: 13.5px; max-width: 72ch; }
+
+/* An observation is a lead: a domain, a sentence, no glyph and no colour. */
+.leads { list-style: none; margin: 0; padding: 0; }
+.lead {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0 16px;
+  padding: 8px 0;
+  border-top: 1px solid var(--rule-soft);
+}
+.lead:first-child { border-top: 0; }
+.leadDomain { align-self: center; }
+.leadText { color: var(--ink); min-width: 0; overflow-wrap: anywhere; }
+.none { margin: 0; color: var(--muted); }
+
+@media (min-width: 560px) {
+  .lead { grid-template-columns: 96px minmax(0, 1fr); align-items: baseline; }
+}
+
+.everything { margin: 14px 0 0; }
+.everything summary { cursor: pointer; list-style: none; min-height: 32px; display: flex; align-items: center; }
+.everything summary::before { content: '›'; display: inline-block; width: 1em; transition: transform 0.15s; }
+.everything[open] summary::before { transform: rotate(90deg); }
+.everythingBody {
+  margin-top: 8px;
+  padding: 10px 12px;
+  background: var(--deep);
+  border-radius: 6px;
+}
+
+/* Driver rows. */
+.day { padding: 18px 0 6px; }
+.driverRow {
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    'name class'
+    'version version';
+}
+.deviceName { grid-area: name; color: var(--ink); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.deviceClass { grid-area: class; color: var(--muted); text-align: right; white-space: nowrap; }
+.driverVersion { grid-area: version; color: var(--body); }
+
+@media (min-width: 900px) {
+  .driverRow {
+    grid-template-columns: minmax(0, 1fr) 140px 170px;
+    grid-template-areas: 'name class version';
+  }
+  .driverVersion { text-align: right; }
+  .part, .partHead { scroll-margin-top: 64px; }
+}
+
+.anchor { scroll-margin-top: 56px; }

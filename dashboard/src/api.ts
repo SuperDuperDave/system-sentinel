@@ -19,7 +19,8 @@ export interface Reading<T = unknown> {
   asked_at: string;
   took_ms: number;
   outcome: Outcome;
-  method: { kind: string; query: string };
+  /** One query, several, or (for an inferred reading) the readings it drew on and what each answered. */
+  method: { kind: string; query?: string; queries?: string[]; readings?: unknown };
   count: number | null;
   sections: Section<T>[];
   error: { kind: string; detail: string } | null;

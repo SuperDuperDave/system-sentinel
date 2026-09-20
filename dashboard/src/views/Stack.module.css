@@ -1,0 +1,113 @@
+/* One column on a phone, one column on a desk: the handoff is a sequence, and a sequence reads
+   down. Blocks are separated by space and a label, not by panels. */
+.state { margin: 0 0 6px; color: var(--muted); }
+.problem { margin: 0 0 10px; color: var(--ink); overflow-wrap: anywhere; }
+
+.block { margin: 30px 0 0; }
+.blockTitle { margin: 0 0 10px; }
+.empty { margin: 0; color: var(--muted); max-width: 64ch; }
+.what { margin: 0 0 10px; color: var(--body); max-width: 66ch; }
+
+/* Evidence */
+.items { list-style: none; margin: 0; padding: 0; }
+.item { padding: 14px 0; border-top: 1px solid var(--rule-soft); min-width: 0; }
+.item:first-child { border-top: 0; padding-top: 0; }
+.itemTitle { margin: 0 0 2px; color: var(--ink); overflow-wrap: anywhere; }
+.itemMeta { margin: 0 0 8px; color: var(--muted); overflow-wrap: anywhere; }
+.fine { color: var(--muted); }
+.lost { color: var(--ink); }
+
+.itemControls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
+.rank { display: inline-flex; align-items: center; gap: 8px; }
+.rankLabel { color: var(--muted); }
+.rankValue { color: var(--ink); min-width: 1ch; text-align: center; }
+.step {
+  font-family: var(--font-readout);
+  font-size: 15px;
+  color: var(--ink);
+  width: 40px;
+  min-height: 40px;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  line-height: 1;
+}
+.step:hover { border-color: var(--muted); }
+.step:disabled { color: var(--rule); border-color: var(--rule-soft); cursor: default; }
+
+.remove, .quiet, .action, .save {
+  font-family: var(--font-readout);
+  font-size: 12.5px;
+  min-height: 40px;
+  white-space: nowrap;
+}
+.remove { color: var(--ink); border-bottom: 1px solid var(--rule); }
+.remove:hover { border-color: var(--muted); }
+.quiet { color: var(--muted); border-bottom: 1px solid transparent; }
+.quiet:hover { color: var(--ink); border-color: var(--rule); }
+.action { color: var(--ink); border-bottom: 1px solid var(--rule); }
+.action:hover { border-color: var(--muted); }
+.action:disabled { color: var(--muted); border-color: transparent; cursor: default; }
+.confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin: 12px 0 0; color: var(--body); }
+
+/* Prompt */
+.toggle { display: flex; align-items: center; gap: 10px; min-height: 40px; color: var(--body); cursor: pointer; }
+.toggle input { width: 18px; height: 18px; accent-color: var(--phosphor-deep); }
+
+.prompts { list-style: none; margin: 8px 0 12px; padding: 0; }
+.prompt { padding: 10px 0; border-top: 1px solid var(--rule-soft); min-width: 0; }
+.prompt:first-child { border-top: 0; }
+.promptChosen .promptName::before { content: '·'; margin-right: 0.5em; color: var(--phosphor); }
+.promptChoose { display: block; width: 100%; text-align: left; min-height: 40px; min-width: 0; }
+.promptName { display: block; color: var(--muted); }
+.promptChosen .promptName { color: var(--ink); }
+.promptWhat { display: block; color: var(--muted); font-size: 13.5px; margin-top: 2px; overflow-wrap: anywhere; }
+.promptActions { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 4px; }
+
+.form { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; min-width: 0; }
+.form label { margin-top: 6px; }
+.input {
+  background: var(--deep);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  padding: 10px 12px;
+  color: var(--ink);
+  min-height: 44px;
+  width: 100%;
+  min-width: 0;
+}
+.input:focus { border-color: var(--muted); outline: none; }
+.textarea { min-height: 200px; resize: vertical; font-size: 12px; line-height: 1.55; }
+.formActions { display: flex; gap: 16px; align-items: center; margin-top: 8px; }
+.save { color: var(--ink); border-bottom: 1px solid var(--rule); }
+.save:disabled { color: var(--muted); border-color: transparent; cursor: default; }
+
+/* Handoff */
+.handoffLine { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4em; margin: 0 0 8px; color: var(--muted); }
+.spacer { flex: 1 0 8px; }
+.preview {
+  margin: 0;
+  padding: 14px;
+  background: var(--deep);
+  border-radius: 6px;
+  color: var(--body);
+  font-size: 11.5px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 46vh;
+  overflow: auto;
+}
+
+/* Captures */
+.captures { list-style: none; margin: 10px 0 0; padding: 0; }
+.capture {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 14px;
+  padding: 8px 0;
+  border-top: 1px solid var(--rule-soft);
+  min-width: 0;
+}
+.captureName { color: var(--ink); overflow-wrap: anywhere; min-width: 0; }
+.captureMeta { color: var(--muted); }

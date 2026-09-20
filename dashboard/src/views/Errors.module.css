@@ -1,0 +1,117 @@
+/* The status reads as a lead: a word, its reason and its rates, none of them lit. The one lit
+   thing here is the trace, which is the window itself. */
+
+.status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  margin: 0;
+  color: var(--body);
+}
+.state {
+  color: var(--ink);
+  font-size: 15px;
+  letter-spacing: 0.02em;
+}
+.reason { min-width: 0; max-width: 72ch; }
+.rates { margin: 6px 0 0; color: var(--muted); max-width: 78ch; line-height: 1.6; }
+
+/* The trace: one polyline over every wall-clock bucket, on quarter marks. */
+.traceFigure { margin: 12px 0 0; }
+.trace {
+  display: block;
+  width: 100%;
+  height: 56px;
+}
+.traceTick { stroke: var(--rule-soft); stroke-width: 1; }
+.tracePath {
+  stroke: var(--phosphor);
+  stroke-width: 1.25;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 5px rgba(111, 240, 168, 0.45));
+}
+.traceScale { display: block; margin: 8px 0 0; }
+.traceEnds { display: flex; justify-content: space-between; color: var(--muted); }
+.tracePeak { display: block; margin-top: 4px; color: var(--body); }
+
+@media (min-width: 900px) {
+  .trace { height: 72px; }
+}
+
+/* Signature rows. */
+.sigRow {
+  grid-template-columns: 44px minmax(0, 1fr);
+  grid-template-areas:
+    'count description'
+    'id id';
+}
+.sigCount { grid-area: count; color: var(--ink); }
+.sigDescription { grid-area: description; min-width: 0; color: var(--ink); overflow-wrap: anywhere; }
+.sigId { grid-area: id; color: var(--muted); }
+
+@media (min-width: 900px) {
+  .sigRow {
+    grid-template-columns: 52px minmax(0, 1fr) 150px;
+    grid-template-areas: 'count description id';
+  }
+  .sigId { text-align: right; }
+}
+
+.key { overflow-wrap: anywhere; color: var(--body); }
+.sampleLabel { display: block; margin: 14px 0 4px; }
+.sample {
+  margin: 0;
+  padding: 10px 12px;
+  background: var(--deep);
+  border-radius: 6px;
+  white-space: pre-wrap;
+  color: var(--body);
+  font-size: 13px;
+  max-width: 78ch;
+}
+
+/* Record rows, the Record view's shape. */
+.recordRow {
+  grid-template-columns: 62px 14px minmax(0, 1fr);
+  grid-template-areas:
+    'time level id'
+    'message message message';
+}
+.time { grid-area: time; color: var(--muted); }
+.level { grid-area: level; color: var(--ink); display: inline-flex; align-items: center; height: 1em; }
+.eventId { grid-area: id; color: var(--muted); text-align: right; }
+.message {
+  grid-area: message;
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: 14px;
+}
+.quiet { color: var(--muted); }
+
+@media (min-width: 900px) {
+  .recordRow {
+    grid-template-columns: 76px 14px 52px minmax(0, 1fr);
+    grid-template-areas: 'time level id message';
+  }
+}
+
+.fullMessage { margin: 12px 0; white-space: pre-wrap; color: var(--ink); max-width: 72ch; }
+.notDecoded { margin: 0 0 10px; color: var(--muted); display: flex; align-items: center; gap: 0.4em; }
+.decoded { margin: 0 0 12px; }
+.decoded summary { cursor: pointer; list-style: none; min-height: 32px; display: flex; align-items: center; }
+.decoded summary::before { content: '›'; display: inline-block; width: 1em; transition: transform 0.15s; }
+.decoded[open] summary::before { transform: rotate(90deg); }
+.decodedBody {
+  margin-top: 8px;
+  padding: 10px 12px;
+  background: var(--deep);
+  border-radius: 6px;
+  max-height: 340px;
+  overflow: auto;
+}
+.rowActions { display: flex; gap: 16px; margin-top: 4px; }

@@ -27,7 +27,7 @@ Bugcheck 0x133 (DPC_WATCHDOG_VIOLATION) recurred in 2026-03. After the first mit
 
 ## How to query the host
 
-All Windows telemetry is gathered through `powershell.exe` from WSL with `-NoProfile -NonInteractive -ExecutionPolicy Bypass`. `backend/services/powershell.py` shows the EncodedCommand pattern for complex scripts.
+All Windows telemetry is gathered through `powershell.exe` with `-NoProfile -NonInteractive -ExecutionPolicy Bypass`, from WSL in development and natively on Windows. `sentinel/bridge.py` is the one path: the EncodedCommand pattern, the JSON prelude, and the six outcomes a query can have.
 
 - WHEA events: `Get-WinEvent -FilterHashtable @{ProviderName="Microsoft-Windows-WHEA-Logger"}`
 - Unclean restarts: `Get-WinEvent -FilterHashtable @{ProviderName="Microsoft-Windows-Kernel-Power"; Id=41}`

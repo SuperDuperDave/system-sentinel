@@ -22,7 +22,8 @@ PLACEHOLDER_SERIAL = "<serial>"
 PLACEHOLDER_MAC = "<mac>"
 
 # Field names whose values are identifiers of the physical part, not evidence of its state.
-_SERIAL_KEY = re.compile(r"(serial|uuid|productkey|product_key|hardwareid$)", re.I)
+# PlatformId and FRUId are the stable machine and part identifiers a decoded CPER record carries.
+_SERIAL_KEY = re.compile(r"(serial|uuid|productkey|product_key|hardwareid$|platformid|platform_id|fruid|fru_id)", re.I)
 _MAC_KEY = re.compile(r"(macaddress|mac_address|physicaladdress)$", re.I)
 
 _MAC_VALUE = re.compile(r"\b(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}\b")

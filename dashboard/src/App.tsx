@@ -1,6 +1,7 @@
 import { FormEvent, ReactElement, useEffect, useState } from 'react';
 import { openSession, take } from './api';
 import { Lockup, Mark } from './Mark';
+import { Live } from './Live';
 import { useApp, VIEWS, ViewId } from './store';
 import { Record } from './views/Record';
 import { Errors } from './views/Errors';
@@ -45,7 +46,7 @@ function Shell() {
     <div className={styles.shell}>
       <header className={styles.header}>
         <Lockup />
-        <Bridge />
+        <Live />
       </header>
       <div className={styles.trace} aria-hidden="true" />
       <nav className={styles.nav} aria-label="Views">
@@ -58,21 +59,6 @@ function Shell() {
       <main className={styles.main}><View /></main>
     </div>
   );
-}
-
-/** The bridge's state in the header: the one place the person sees whether the machine can be read at all. */
-function Bridge() {
-  const [text, setText] = useState<string>('');
-  useEffect(() => {
-    take<{ bridge: { available: boolean; powershell?: string; took_ms?: number; outcome: string } }>('health')
-      .then((r) => {
-        const b = r.sections[0]?.data.bridge;
-        if (r.outcome === 'ok' && b) setText(`bridge · PowerShell ${b.powershell} · ${b.took_ms} ms`);
-        else setText(`bridge · ${r.outcome}`);
-      })
-      .catch(() => setText('bridge · unreachable'));
-  }, []);
-  return <span className={`${styles.bridge} readout`}>{text}</span>;
 }
 
 function SignIn() {

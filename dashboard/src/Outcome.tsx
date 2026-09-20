@@ -56,17 +56,29 @@ export function OutcomeLine<T>({ taken, noun = 'records', emptyText }: { taken: 
         <button className={styles.action} onClick={taken.retake} disabled={taken.state === 'taking'}>Take again</button>
         <button className={styles.action} onClick={() => setShowMethod((v) => !v)} aria-expanded={showMethod}>{showMethod ? 'Hide method' : 'Method'}</button>
       </p>
+      {r.warnings.length ? (
+        <ul className={styles.warnings} aria-label="What did not answer">
+          {r.warnings.map((w, i) => (
+            <li key={i} className={`${styles.warning} readout`}><Glyph kind="warn" /> {firstLine(w)}</li>
+          ))}
+        </ul>
+      ) : null}
       {showMethod ? <Method reading={r} /> : null}
     </div>
   );
 }
 
+/** How the reading was taken: one query, several, or the readings it drew on. */
 function Method({ reading }: { reading: Reading }) {
+  const m = reading.method;
+  const queries = m.queries ?? (m.query ? [m.query] : []);
   return (
     <div className={styles.method}>
-      <p className="label">How this was read · {reading.method.kind}{reading.redacted.length ? ` · redacted: ${reading.redacted.join(', ')}` : ''}</p>
-      <pre className={`${styles.query} readout`}>{reading.method.query}</pre>
-      {reading.warnings.length ? <pre className={`${styles.query} readout`}>{reading.warnings.join('\n')}</pre> : null}
+      <p className="label">How this was read · {m.kind}{reading.redacted.length ? ` · redacted: ${reading.redacted.join(', ')}` : ''}</p>
+      {queries.map((q, i) => (
+        <pre key={i} className={`${styles.query} readout`}>{q}</pre>
+      ))}
+      {m.readings ? <pre className={`${styles.query} readout`}>{JSON.stringify(m.readings, null, 1)}</pre> : null}
     </div>
   );
 }

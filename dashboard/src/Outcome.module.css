@@ -20,6 +20,16 @@
 }
 .action:hover { border-color: var(--muted); }
 .action:disabled { color: var(--muted); cursor: default; }
+.warnings { list-style: none; margin: 4px 0 0; padding: 0; }
+.warning {
+  display: flex;
+  gap: 0.45em;
+  align-items: baseline;
+  color: var(--body);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
 .method { margin-top: 12px; }
 .method p { margin: 0 0 6px; }
 .query {

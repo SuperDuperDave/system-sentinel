@@ -9,23 +9,6 @@
 .title { font-size: 28px; margin: 0; line-height: 1.1; }
 
 .controls { display: flex; flex-wrap: wrap; gap: 8px; }
-.segmented {
-  display: inline-flex;
-  border: 1px solid var(--rule);
-  border-radius: 6px;
-  overflow: hidden;
-}
-.segment {
-  font-family: var(--font-readout);
-  font-size: 12px;
-  color: var(--muted);
-  padding: 0 12px;
-  min-height: 36px;
-  white-space: nowrap;
-}
-.segment + .segment { border-left: 1px solid var(--rule-soft); }
-.segment:hover { color: var(--ink); }
-.segmentOn { color: var(--ink); background: rgba(234, 243, 238, 0.07); }
 
 .rows { list-style: none; margin: 0; padding: 0; }
 .day { padding: 18px 0 6px; }

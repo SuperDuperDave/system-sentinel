@@ -16,11 +16,23 @@ from ..reading import Param, Reading, Spec, from_bridge, register
 
 LOGS = ("System", "Application")
 
-# One projection for every log reading, so every client sees the same record shape.
-_SELECT = """Select-Object RecordId, Id, LevelDisplayName, Level, ProviderName, MachineName, TaskDisplayName,
-    @{Name='TimeCreated'; Expression={ $_.TimeCreated.ToUniversalTime().ToString('o') }},
-    Message,
-    @{Name='Properties'; Expression={ @($_.Properties | ForEach-Object { if ($_.Value -is [byte[]]) { [System.BitConverter]::ToString($_.Value).Replace('-','') } else { $_.Value } }) }}"""
+# One projection for every log reading (events, record, whea, the stream), so every client sees the
+# same record shape. It is built as a pscustomobject rather than Select-Object's calculated properties:
+# Windows PowerShell 5.1 serializes a calculated property that holds an array as {"value": [...], "Count": n},
+# and this way Properties is the array it is.
+RECORD_FIELDS = """RecordId = $_.RecordId; Id = $_.Id; Level = $_.Level; LevelDisplayName = $_.LevelDisplayName;
+        ProviderName = $_.ProviderName; MachineName = $_.MachineName; TaskDisplayName = $_.TaskDisplayName;
+        TimeCreated = $_.TimeCreated.ToUniversalTime().ToString('o'); Message = $_.Message;
+        Properties = @($_.Properties | ForEach-Object { if ($_.Value -is [byte[]]) { [System.BitConverter]::ToString($_.Value).Replace('-','') } else { $_.Value } })"""
+
+
+def record_projection(extra: str = "") -> str:
+    """The pipeline stage that turns an event into the shared record; ``extra`` adds fields after it."""
+    fields = RECORD_FIELDS + (f";\n        {extra}" if extra else "")
+    return f"ForEach-Object {{ [pscustomobject]@{{ {fields} }} }}"
+
+
+RECORD_SELECT = record_projection()
 
 
 def winevent(query: str) -> str:
@@ -32,7 +44,7 @@ def events_script(log: str, levels: list[int], count: int) -> str:
     level_list = ",".join(str(int(l)) for l in levels)
     return winevent(
         f"""Get-WinEvent -FilterHashtable @{{LogName='{log}'; Level={level_list}}} -MaxEvents {int(count)} -ErrorAction Stop |
-    {_SELECT}"""
+    {RECORD_SELECT}"""
     )
 
 
@@ -44,7 +56,7 @@ def record_script(log: str, before: str, count: int) -> str:
 "@
 """ + winevent(
         f"""Get-WinEvent -FilterXml $xml -MaxEvents {int(count)} -ErrorAction Stop |
-    {_SELECT}"""
+    {RECORD_SELECT}"""
     )
 
 
