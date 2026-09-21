@@ -77,20 +77,30 @@ jobs:
       - name: Install the package, its test extra and the tray
         run: python -m pip install --upgrade pip && python -m pip install -e ".[test,launcher]"
 
+      # tests/test_bridge.py is left out here, and only here: its fake powershell.exe is a
+      # Python script made executable by its mode bit, which Windows cannot run at all
+      # ("[WinError 216] This version of %1 is not compatible"). That file exercises the
+      # bridge's own parsing, which has nothing Windows-specific in it, and the Linux job
+      # runs it whole. Everything else runs here, host tests included.
       - name: The whole suite, host tests included
-        run: python -m pytest
+        run: python -m pytest --ignore=tests/test_bridge.py
 
+      # From here the steps run even after a failure above: one run should say whether the
+      # machine answered AND whether the executable builds, not only which came first.
       - name: The health reading on this runner
+        if: ${{ !cancelled() }}
         shell: pwsh
         run: system-sentinel check
 
       - name: The executable
+        if: ${{ !cancelled() }}
         shell: pwsh
         run: |
           $python = (Get-Command python).Source
           build\windows\build.ps1 -Python $python
 
       - name: Keep the executable
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: SystemSentinel-${{ github.sha }}
