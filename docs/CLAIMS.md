@@ -73,6 +73,7 @@ Every claim the page at mainthread.ai/work/system-sentinel/ could make about the
 | Double-click and it runs: one file, the browser opens on the dashboard already signed in, the mark in the tray with Open dashboard, Copy address for agents, Start with Windows and Quit; the person never types or reads the token (Copy address for agents places the agent's registration line, token included, on the clipboard on purpose) | `sentinel/launcher.py`, `build/windows/build.ps1`; observed 2026-09-20 on the Windows side from a local disk: the dashboard answered within seconds, nineteen readings, the decoder present inside the bundle, 401 without the token, a second launch opened the dashboard and exited, no listener after Quit |
 | The browser is let in by a one-time code signed with the token and spent once, only from this machine | `sentinel/auth.py` (`mint_code`, `code_valid`), `sentinel/app.py` (`GET /api/session/open`); `tests/test_launcher.py` |
 | Reaching it from a phone is a transport in front of the token boundary; Tailscale recommended, a tunnel documented | `docs/DEPLOY.md` ("Optional: reach it from your phone"); `_sessions/PLANNING.md` ("The remote path") |
+| Reached from a phone over a private network with HTTPS, the API still refusing anything without the token | Observed 2026-09-20: the dashboard opened on a phone over cellular through Tailscale serve (tailnet only, Funnel off), signed in by a one-time code; `GET /api/readings` over the same path answered 401 without the token |
 
 ## Deliberate absences, unchanged
 

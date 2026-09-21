@@ -53,8 +53,10 @@ export function OutcomeLine<T>({ taken, noun = 'records', emptyText }: { taken: 
         {body}
         {taken.state === 'taking' ? <span className={styles.taking}> · taking again…</span> : null}
         <span className={styles.sep} />
-        <button className={styles.action} onClick={taken.retake} disabled={taken.state === 'taking'}>Take again</button>
-        <button className={styles.action} onClick={() => setShowMethod((v) => !v)} aria-expanded={showMethod}>{showMethod ? 'Hide method' : 'Method'}</button>
+        <span className={styles.actions}>
+          <button className={styles.action} onClick={taken.retake} disabled={taken.state === 'taking'}>Take again</button>
+          <button className={styles.action} onClick={() => setShowMethod((v) => !v)} aria-expanded={showMethod}>{showMethod ? 'Hide method' : 'Method'}</button>
+        </span>
       </p>
       {r.warnings.length ? (
         <ul className={styles.warnings} aria-label="What did not answer">
