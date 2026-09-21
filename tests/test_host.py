@@ -206,7 +206,7 @@ def test_the_pool_survives_the_whole_catalog_taken_twice(monkeypatch):
     assert report["answered"] >= 2 * len(REGISTRY)
     assert report["alive"] <= report["size"]
     assert report["discarded"].get("died", 0) == 0, report
-    assert report["fell_back"] == 0 and report["start_failures"] == 0, report
+    assert report["fell_back"] == 0 and report["start_failures"] == 0, f"pool: {report!r}"
     assert len(seen) == len(REGISTRY)
 
 

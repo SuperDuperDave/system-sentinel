@@ -53,8 +53,10 @@ _KNOWN_LOCATIONS = (
 )
 
 # WSL's interop layer failing to hand the process over; seen on this machine on 2026-09-20 as
-# "<3>WSL (pid - ) ERROR: UtilAcceptVsock:271: accept4 failed 110". Not a Windows error.
+# "<3>WSL (pid - ) ERROR: UtilAcceptVsock:271: accept4 failed 110". A restricted
+# launch can fail earlier at UtilBindVsockAnyPort. Neither is a Windows error.
 WSL_INTEROP = "UtilAcceptVsock"
+WSL_INTEROP_ERRORS = (WSL_INTEROP, "UtilBindVsockAnyPort")
 WSL_INTEROP_ATTEMPTS = 3
 
 # Under WSL a launch takes a slot shared by every process that uses the bridge: a test suite, a
@@ -97,6 +99,10 @@ class SlotTimeout(Exception):
 class SessionStartFailed(Exception):
     """A live session could not be started, or would not answer its first question. The question
     goes to the one-shot transport; never lose a reading because a session would not start."""
+
+    def __init__(self, reason: str, detail: str) -> None:
+        super().__init__(detail)
+        self.reason = reason
 
 
 class SessionLost(Exception):
@@ -180,7 +186,7 @@ def classify(stdout: str, stderr: str, returncode: int | None, took_ms: int) -> 
     out = _clean_stdout(stdout)
     err = clean_stderr(stderr)
 
-    if not out and WSL_INTEROP in err:
+    if not out and _wsl_interop_error(err):
         return BridgeResult("unavailable", took_ms=took_ms, returncode=returncode, error=f"WSL could not start powershell.exe: {err}")
 
     if returncode is not None and returncode != 0 and not out:
@@ -239,7 +245,7 @@ class Bridge:
             return BridgeResult("unavailable", error="powershell.exe was not found")
         result = self._answer(script, timeout=timeout, depth=depth)
         for attempt in range(1, WSL_INTEROP_ATTEMPTS):
-            if not (result.outcome == "unavailable" and result.error and WSL_INTEROP in result.error):
+            if not (result.outcome == "unavailable" and result.error and _wsl_interop_error(result.error)):
                 break
             time.sleep(0.5 * attempt)
             result = self._answer(script, timeout=timeout, depth=depth)
@@ -306,12 +312,6 @@ SESSION_QUESTIONS = 200
 
 #: How long a new session has to answer its first question before it is judged not to have started.
 SESSION_START_TIMEOUT = 20.0
-
-#: The longest a question waits for its stderr to close. The two pipes are not ordered against
-#: each other, so the mark that ends a frame on stdout can arrive before the lines the script
-#: wrote on stderr; the frame closes stderr with a mark of its own, and this is the bound on
-#: waiting for it rather than a pause every question pays.
-STDERR_GRACE = 0.05
 
 #: How long the pool waits before trying to start a session again after one would not start. Until
 #: then questions go through the one-shot transport rather than paying a failed launch each time.
@@ -408,7 +408,7 @@ class Session:
         raises, and the question that wanted it goes to the one-shot transport.
         """
         if bridge.exe is None:
-            raise SessionStartFailed("powershell.exe was not found")
+            raise SessionStartFailed("missing_executable", "powershell.exe was not found")
         cmd = [bridge.exe, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", "-"]
         try:
             with _launch_slot(timeout):
@@ -426,16 +426,17 @@ class Session:
                     probe = session.ask("", timeout=min(timeout, SESSION_START_TIMEOUT), depth=1)
                 except SessionLost as exc:
                     session.discard("start")
-                    raise SessionStartFailed(f"the session ended before it answered: {exc}") from exc
+                    raise SessionStartFailed("probe_lost", f"the session ended before it answered: {exc}") from exc
                 if not probe.observed:
                     session.discard("start")
-                    raise SessionStartFailed(f"the session did not answer its first question: {probe.outcome}")
+                    reason = "wsl_interop" if probe.error and _wsl_interop_error(probe.error) else f"probe_{probe.outcome}"
+                    raise SessionStartFailed(reason, f"the session did not answer its first question: {probe.outcome}")
                 session.answered = 0  # the probe is nobody's question
                 return session
         except SlotTimeout as exc:
-            raise SessionStartFailed(str(exc)) from exc
+            raise SessionStartFailed("launch_slot_timeout", str(exc)) from exc
         except OSError as exc:
-            raise SessionStartFailed(f"powershell.exe did not start: {exc}") from exc
+            raise SessionStartFailed("process_start_error", f"powershell.exe did not start: {exc}") from exc
 
     @property
     def alive(self) -> bool:
@@ -478,8 +479,15 @@ class Session:
                 break
             lines.append(line)
 
+        stderr = self._stderr_for_this_question(mark, deadline)
+        if stderr is None:
+            # A stdout mark alone is not an answer: the error stream may still hold the reason
+            # this question failed. Never turn an incomplete frame into an observed empty result.
+            self.discard("stderr")
+            return BridgeResult("unavailable", took_ms=_ms(started), error="the session's error stream did not close this answer")
+
         self.answered += 1
-        return classify("\n".join(lines), self._stderr_for_this_question(mark), code, _ms(started))
+        return classify("\n".join(lines), stderr, code, _ms(started))
 
     def discard(self, why: str, *, grace: float = 0.0) -> None:
         """End this session. Idempotent, and the first reason given is the one kept.
@@ -532,35 +540,34 @@ class Session:
             self.discard("died")
             raise SessionLost(f"the session stopped listening: {exc}") from exc
 
-    def _stderr_for_this_question(self, mark: str) -> str:
+    def _stderr_for_this_question(self, mark: str, deadline: float) -> str | None:
         """The lines stderr carried while this question was being answered, up to its own mark.
 
         Questions in a session are serialized, so a line that arrives between sending a question
         and seeing its answer belongs to it. Which lines those are is not left to timing: the
         frame writes the mark to stderr before it writes it to stdout, so by the time the answer
-        has been read the end of its stderr is already on the way. :data:`STDERR_GRACE` bounds the
-        wait for it, because a session that is answering questions must never be waiting on a
-        stream that has stopped.
+        has been read the end of its stderr is already on the way. The question's own deadline
+        bounds the wait. If the mark never arrives, the answer is incomplete and the session
+        cannot be reused.
         """
         parts: list[str] = []
-        deadline = time.monotonic() + STDERR_GRACE
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                break
+                return None
             try:
                 line = self._err.get(timeout=remaining)
             except queue.Empty:
-                break
-            if line is None or line.startswith(mark):
-                break
+                return None
+            if line is None:
+                return None
+            if line.startswith(mark):
+                return "\n".join(parts)
             parts.append(line)
-        return "\n".join(parts)
 
     def _drop_stale_stderr(self) -> None:
-        """Anything still queued belongs to a question that has already been answered — it had its
-        grace period and missed it. Dropping it is right where attributing it to the next question
-        would be wrong."""
+        """A line after the previous frame's mark cannot belong to the next question. Drop it
+        rather than attach an old error to a new answer."""
         while True:
             try:
                 self._err.get_nowait()
@@ -590,6 +597,7 @@ class Pool:
         self.answered = 0
         self.fell_back = 0
         self.start_failures = 0
+        self.last_start_failure: str | None = None
         self.discarded: dict[str, int] = {}
 
     def ask(self, script: str, *, timeout: float, depth: int) -> BridgeResult | None:
@@ -644,6 +652,7 @@ class Pool:
                 "oldest_seconds": oldest,
                 "fell_back": self.fell_back,
                 "start_failures": self.start_failures,
+                "last_start_failure": self.last_start_failure,
             }
 
     # --- the lending itself ---
@@ -694,10 +703,11 @@ class Pool:
             return None
         try:
             started = Session.start(self.bridge, timeout=timeout)
-        except SessionStartFailed:
+        except SessionStartFailed as exc:
             with self._lock:
                 self._starting -= 1
                 self.start_failures += 1
+                self.last_start_failure = exc.reason
                 self._cooldown_until = time.monotonic() + START_RETRY_SECONDS
                 self._lock.notify()
             return None
@@ -794,8 +804,9 @@ def sessions_report(bridge: Bridge | None = None) -> dict[str, Any]:
     sessions are alive and how old the oldest is, how many questions they have answered, how many
     sessions were discarded and for which reason, and how many questions fell back to a launch.
 
-    Counts, never a verdict. A fallback is a number here and a warning on the reading that reports
-    it; the reading of what that means belongs to whoever is holding the evidence.
+    Counts, never a verdict. The last session-start failure is a bounded reason, with no path or
+    raw stderr. A fallback is a number here and a warning on the reading that reports it; the
+    reading of what that means belongs to whoever is holding the evidence.
     """
     with _POOLS_LOCK:
         pools = [pool for key, pool in _POOLS.items() if bridge is None or key == bridge]
@@ -809,12 +820,15 @@ def sessions_report(bridge: Bridge | None = None) -> dict[str, Any]:
         "oldest_seconds": None,
         "fell_back": 0,
         "start_failures": 0,
+        "last_start_failure": None,
     }
     oldest: float | None = None
     for pool in pools:
         stats = pool.stats()
         for key in ("alive", "idle", "answered", "fell_back", "start_failures"):
             report[key] += stats[key]
+        if stats["last_start_failure"] is not None:
+            report["last_start_failure"] = stats["last_start_failure"]
         for why, count in stats["discarded"].items():
             report["discarded"][why] = report["discarded"].get(why, 0) + count
         if stats["oldest_seconds"] is not None:
@@ -858,6 +872,10 @@ def clean_stderr(text: str) -> str:
         text = "\n".join(p for p in parts if p.strip())
     lines = [ln.rstrip() for ln in text.split("\n")]
     return "\n".join(ln for ln in lines if ln.strip()).strip()
+
+
+def _wsl_interop_error(text: str) -> bool:
+    return any(marker in text for marker in WSL_INTEROP_ERRORS)
 
 
 def _unescape(s: str) -> str:

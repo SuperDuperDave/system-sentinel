@@ -16,6 +16,12 @@ def test_serial_fields_by_name():
     assert removed == ["serial"]
 
 
+def test_sensitive_fields_do_not_depend_on_the_values_json_type():
+    out, removed = redact({"SerialNumber": 123456, "MachineName": {"value": "PRIVATE-HOST"}, "ipv4": [3232235777, {"value": "192.168.1.1"}], "empty": None})
+    assert out == {"SerialNumber": "<serial>", "MachineName": "<host>", "ipv4": ["<address>", "<address>"], "empty": None}
+    assert removed == ["address", "host", "serial"]
+
+
 def test_mac_by_field_and_by_value():
     out, removed = redact({"MACAddress": "70-85-C2-11-22-33", "note": "adapter at 70:85:c2:11:22:33 flapped"})
     assert out["MACAddress"] == "<mac>"

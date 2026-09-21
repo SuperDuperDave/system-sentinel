@@ -44,7 +44,7 @@ def take_health(bridge: Bridge, params: dict[str, Any]) -> Reading:
     # machine still answered — but it is the difference between a reading that costs milliseconds
     # and one that costs a fifth of a second, so it is said out loud rather than left in a count.
     if sessions["fell_back"] or sessions["start_failures"]:
-        reading.warnings.append("a live session would not start, so questions are going through a one-shot launch each; the machine still answered")
+        reading.warnings.append("a live session did not start, so some questions fell back to one-shot launches; the machine still answered")
     if outcome not in ("ok", "empty"):
         reading.error = {"kind": outcome, "detail": facts.get("error") or ""}
     return reading

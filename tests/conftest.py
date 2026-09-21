@@ -25,6 +25,7 @@ STATE = {"count": 0}
 
 CLIXML = '#< CLIXML\n<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04"><S S="Error">Get-WinEvent : No events were found that match the specified selection criteria._x000D__x000A_</S><S S="Error">At line:1 char:1_x000D__x000A_</S></Objs>'
 INTEROP = "<3>WSL (530414 - ) ERROR: UtilAcceptVsock:271: accept4 failed 110"
+BIND_ERROR = "<3>WSL (530414 - ) ERROR: UtilBindVsockAnyPort:307: socket failed 1"
 
 
 def answer(script):
@@ -44,12 +45,18 @@ def answer(script):
         return "", "Get-WinEvent : Attempted to perform an unauthorized operation.", 1
     if mode == "denied-quiet":
         return "", "Access is denied.", 0
+    if mode == "delayed-stderr":
+        return "", "Get-WinEvent : The event log is unavailable.", 1
+    if mode == "missing-stderr-mark":
+        return "", "", 0
     if mode == "clixml":
         return "", CLIXML, 1
     if mode == "notjson":
         return "hello", "", 0
     if mode == "wsl-interop":
         return "", INTEROP, 1
+    if mode == "wsl-bind-error":
+        return "", BIND_ERROR, 1
     if mode == "wsl-interop-once":
         flag = os.path.join(os.path.dirname(sys.argv[0]), "interop-flag")
         if not os.path.exists(flag):
@@ -86,15 +93,25 @@ def session():
         found = frame.search(line)
         if found is None:
             continue  # the prelude, or anything else that is not a question
-        out, err, code = answer(base64.b64decode(found.group(1)).decode("utf-16le"))
-        if err:
-            sys.stderr.write(err + "\n")
-        sys.stderr.write(found.group(2) + "\n")  # the frame closes stderr with the mark first
-        sys.stderr.flush()
+        script = base64.b64decode(found.group(1)).decode("utf-16le")
+        out, err, code = answer(script)
+        mode = re.search(r"# fake: ([a-z0-9-]+)", script)
+        delayed = mode is not None and mode.group(1) == "delayed-stderr"
+        missing = mode is not None and mode.group(1) == "missing-stderr-mark"
+        if not delayed:
+            if err:
+                sys.stderr.write(err + "\n")
+            if not missing:
+                sys.stderr.write(found.group(2) + "\n")  # the frame closes stderr with the mark first
+            sys.stderr.flush()
         if out:
             sys.stdout.write(out + "\n")
         sys.stdout.write(found.group(2) + "\t" + str(code) + "\n")
         sys.stdout.flush()
+        if delayed:
+            time.sleep(0.1)  # slower than the old 50 ms grace after stdout's mark
+            sys.stderr.write(err + "\n" + found.group(2) + "\n")
+            sys.stderr.flush()
 
 
 args = sys.argv[1:]

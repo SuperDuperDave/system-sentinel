@@ -108,6 +108,9 @@ def test_wsl_interop_failure_is_unavailable_not_failed(bridge: Bridge):
     r = bridge.run("# fake: wsl-interop")
     assert r.outcome == "unavailable"
     assert "WSL could not start powershell.exe" in r.error
+    bind = bridge.run("# fake: wsl-bind-error")
+    assert bind.outcome == "unavailable"
+    assert "UtilBindVsockAnyPort" in bind.error
 
 
 def test_wsl_interop_transient_is_retried_once(bridge: Bridge):
@@ -177,6 +180,24 @@ def test_a_marker_that_is_not_this_questions_marker_never_closes_its_frame(sessi
     assert sessions_report(session_bridge)["alive"] == 1
 
 
+def test_a_late_error_stream_is_still_part_of_its_answer(session_bridge: Bridge):
+    """A slow stderr reader must never make a failed query look like an observed empty one."""
+    result = session_bridge.run("# fake: delayed-stderr", timeout=1)
+    assert result.outcome == "failed"
+    assert "event log is unavailable" in result.error
+    assert session_bridge.run("# fake: count").items == [{"n": 1}]
+    assert sessions_report(session_bridge)["alive"] == 1
+
+
+def test_a_missing_error_stream_mark_is_not_an_empty_reading(session_bridge: Bridge):
+    result = session_bridge.run("# fake: missing-stderr-mark", timeout=0.5)
+    assert result.outcome == "unavailable"
+    assert not result.observed
+    assert "error stream did not close" in result.error
+    assert sessions_report(session_bridge)["discarded"].get("stderr") == 1
+    assert session_bridge.run("# fake: count").items == [{"n": 1}]
+
+
 def test_a_session_is_retired_at_its_bound(session_bridge: Bridge, monkeypatch):
     """A session is measured steady to two hundred questions; past a bound it is replaced rather
     than trusted past the evidence."""
@@ -240,6 +261,7 @@ def test_the_one_shot_transport_answers_when_a_session_will_not_start(session_br
     report = sessions_report(session_bridge)
     assert report["transport"] == "session"  # what was asked for
     assert report["alive"] == 0 and report["start_failures"] == 1 and report["fell_back"] == 1  # what happened
+    assert report["last_start_failure"] == "probe_lost"
 
 
 def test_a_session_that_dies_in_the_middle_of_a_question_hands_it_to_a_launch(session_bridge: Bridge, monkeypatch):

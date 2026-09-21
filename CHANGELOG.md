@@ -19,6 +19,7 @@ The moment, answered in one call and one click. "It froze at 02:14" now has a re
 - The evidence a reviewer checks in a minute: dependencies pinned in a hashed lock and installed with `--require-hashes`, `pip-audit` and `npm audit`, `ruff` and strict `mypy` over the boundary files, `eslint` with accessibility rules for the dashboard, CodeQL, an SBOM beside each released executable, coverage printed, and a test that fails the day the counts written in our own prose go stale.
 
 ### Changed
+- A live PowerShell session now waits for both output streams to close within the question's timeout. An incomplete error stream makes the reading unavailable and retires the session; it can no longer make a failed query appear empty. Health reports a bounded category for the last session-start failure, so a one-shot fallback has a reason without exposing raw stderr. The bridge also recognizes WSL's socket-bind launch failure as unavailable and retries it. Redaction covers numeric and structured values under sensitive field names, not only strings.
 - `memory` gives up the bug check half of its ledger — the stops are `crash`'s to report now — and gains the result of Windows' own memory test beside the time the System log's oldest record carries, so no result says how far back that reaches instead of implying the test was never run.
 - `power` counts the log's own start and stop (EventLog 6005 and 6006) among its transitions.
 - The MCP instructions lead with the moment: what is up, then the last stops or the stop a moment announced, then the record before it.

@@ -38,6 +38,14 @@ _HOST_KEY = re.compile(r"^(machinename|machine_name|computername|computer_name|h
 _USER_KEY = re.compile(r"^(user|username|user_name|registereduser|registered_user|owner|loggedonuser|logged_on_user|account)$", re.I)
 _ADDRESS_KEY = re.compile(r"^(ip|ipv4|ipv6|ipaddress|ip_address|ip_addresses|gateway|default_gateway|dns|dns_servers|dnsservers)$", re.I)
 
+_FIELD_REPLACEMENTS = (
+    (_SERIAL_KEY, "serial", PLACEHOLDER_SERIAL),
+    (_MAC_KEY, "mac", PLACEHOLDER_MAC),
+    (_HOST_KEY, "host", PLACEHOLDER_HOST),
+    (_USER_KEY, "user", PLACEHOLDER_USER),
+    (_ADDRESS_KEY, "address", PLACEHOLDER_ADDRESS),
+)
+
 _MAC_VALUE = re.compile(r"\b(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}\b")
 _PROFILE_PATH = re.compile(r"(?i)((?:[A-Z]:\\|/mnt/[a-z]/)Users[\\/])([^\\/\"'<>|]+)")
 _WSL_HOME = re.compile(r"(?i)((?:\\\\wsl(?:\.localhost)?\\[^\\]+\\|/)home[\\/])([^\\/\"'<>|]+)")
@@ -82,6 +90,14 @@ class Redactor:
         return body
 
     def _walk(self, value: Any, removed: set[str], key: str | None) -> Any:
+        # A field's name classifies the value, whatever JSON type Windows used for it. Numeric
+        # serials and structured identity fields must not escape just because they are not text.
+        if key is not None and value is not None and not isinstance(value, (list, str)):
+            replacement = _field_replacement(key)
+            if replacement is not None:
+                kind, placeholder = replacement
+                removed.add(kind)
+                return placeholder
         if isinstance(value, dict):
             # The key is walked too, by the value layer alone: a tree keyed by the machine's own
             # name would otherwise carry it out whole. The field policy is deliberately not applied
@@ -96,21 +112,11 @@ class Redactor:
 
     def _string(self, s: str, removed: set[str], key: str | None) -> str:
         if key is not None and s.strip():
-            if _SERIAL_KEY.search(key):
-                removed.add("serial")
-                return PLACEHOLDER_SERIAL
-            if _MAC_KEY.search(key):
-                removed.add("mac")
-                return PLACEHOLDER_MAC
-            if _HOST_KEY.match(key):
-                removed.add("host")
-                return PLACEHOLDER_HOST
-            if _USER_KEY.match(key):
-                removed.add("user")
-                return PLACEHOLDER_USER
-            if _ADDRESS_KEY.match(key):
-                removed.add("address")
-                return PLACEHOLDER_ADDRESS
+            replacement = _field_replacement(key)
+            if replacement is not None:
+                kind, placeholder = replacement
+                removed.add(kind)
+                return placeholder
         if _MAC_VALUE.search(s):
             s = _MAC_VALUE.sub(PLACEHOLDER_MAC, s)
             removed.add("mac")
@@ -125,6 +131,13 @@ class Redactor:
                 s = pattern.sub(placeholder, s)
                 removed.add("host" if placeholder == PLACEHOLDER_HOST else "user")
         return s
+
+
+def _field_replacement(key: str) -> tuple[str, str] | None:
+    for pattern, kind, placeholder in _FIELD_REPLACEMENTS:
+        if pattern.search(key):
+            return kind, placeholder
+    return None
 
 
 def redact(value: Any, identity: Identity | None = None) -> tuple[Any, list[str]]:

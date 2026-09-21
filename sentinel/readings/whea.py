@@ -33,7 +33,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from ..bridge import WSL_INTEROP, Bridge
+from ..bridge import WSL_INTEROP_ERRORS, Bridge
 from ..reading import Param, Reading, Section, Spec, from_bridge, register
 from .events import record_projection, winevent
 from .health import DECODER
@@ -160,7 +160,7 @@ def _run_decoder(payload: str, timeout: float) -> tuple[str, str, int | None, st
             return "", "", None, f"the decoder did not start: {exc}"
         stdout = proc.stdout.decode("utf-8", errors="replace").strip()
         stderr = proc.stderr.decode("utf-8", errors="replace").strip()
-        if WSL_INTEROP in stderr and not stdout:
+        if not stdout and any(marker in stderr for marker in WSL_INTEROP_ERRORS):
             if attempt + 1 < _INTEROP_ATTEMPTS:
                 time.sleep(0.5 * (attempt + 1))
                 continue
