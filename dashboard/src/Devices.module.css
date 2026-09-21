@@ -1,0 +1,57 @@
+/* A way in for another device: opened over the work, closed back onto it. The tile is the one
+   light surface in the tool, because a camera reads dark modules on light and not the reverse. */
+
+.dialog {
+  width: min(420px, calc(100vw - 2 * var(--gutter)));
+  max-height: calc(100dvh - 48px);
+  padding: 20px;
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  background: var(--field);
+  color: var(--body);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.dialog::backdrop { background: rgba(6, 16, 13, 0.72); }
+
+.title { font-size: 19px; margin: 0 0 14px; }
+
+.tile {
+  width: 208px;
+  max-width: 100%;
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--ink);
+  color: var(--deep);
+}
+.tile svg { display: block; width: 100%; height: auto; }
+
+.linkRow { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; margin: 14px 0 0; min-width: 0; }
+.url {
+  flex: 1 1 240px;
+  min-width: 0;
+  padding: 10px 12px;
+  background: var(--deep);
+  border-radius: 6px;
+  color: var(--ink);
+  font-size: 11.5px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+.line { margin: 14px 0 0; color: var(--body); }
+.note { margin: 8px 0 0; color: var(--muted); font-size: 13.5px; overflow-wrap: anywhere; }
+.inline { font-family: var(--font-readout); font-size: 0.9em; color: var(--ink); overflow-wrap: anywhere; }
+
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0 18px; margin: 16px 0 0; }
+.action {
+  font-family: var(--font-readout);
+  font-size: 12.5px;
+  color: var(--ink);
+  border-bottom: 1px solid var(--rule);
+  padding: 0 0 1px;
+  min-height: 40px;
+  white-space: nowrap;
+}
+.action:hover { border-color: var(--muted); }

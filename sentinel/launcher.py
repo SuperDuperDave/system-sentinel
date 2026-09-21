@@ -6,7 +6,9 @@ The CLI, the API and the MCP address stay underneath, unchanged, for the expert 
 
 The person never sees the token. Signing the browser in is a one-time code (:func:`sentinel.auth.mint_code`)
 spent once at ``GET /api/session/open``, which only this machine may call; the token itself stays in
-the data directory where an agent reads it on purpose. Nothing in the tray ever displays it.
+the data directory where an agent reads it on purpose. Nothing in the tray ever displays it. Signing
+another device in is the same door: the tray opens the dashboard on its sign-in link, which asks the
+machine for the address it publishes on a private network and draws a fresh code as a QR code.
 
 The tray is the optional ``[launcher]`` extra (pystray and Pillow); the server itself stays
 dependency-free. Without pystray the launcher does the same work and says how to quit.
@@ -45,6 +47,7 @@ LOG = logging.getLogger("sentinel.launcher")
 
 DEFAULT_PORT = 8000
 READY_TIMEOUT = 20.0
+BROWSER_TIMEOUT = 30.0
 STARTUP_LINK = "System Sentinel.lnk"
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
@@ -134,12 +137,38 @@ class Server:
 # --- what the tray does -----------------------------------------------------------------------
 
 
-def open_dashboard(base: str, token: str) -> str:
-    """Open the dashboard in the browser, already signed in, and return the link that was opened."""
+def open_dashboard(base: str, token: str, to: str = "", wait: bool = False) -> str:
+    """Open the dashboard in the browser, already signed in, and return the link that was opened.
+
+    ``to="link"`` lands on the dashboard's sign-in link for another device, so the tray's entry for
+    it is this one door with a destination rather than a second way in. The browser is asked on its
+    own thread: on Windows the asking is ShellExecute, which can sit behind a dialog for as long as
+    nobody answers it (a machine with no handler for http shows one), and the tray must come up
+    regardless. ``wait`` is for the launcher that has nothing else to do before it exits.
+    """
     url = f"{base}/api/session/open?code={mint_code(token)}"
-    LOG.info("opening %s", url)
-    webbrowser.open(url)
+    if to == "link":
+        url += "&to=link"
+    LOG.info("opening the dashboard%s with a one-time code", " on the sign-in link" if to == "link" else "")
+    opener = threading.Thread(target=_ask_browser, args=(url,), name="sentinel-browser", daemon=True)
+    opener.start()
+    if wait:
+        opener.join(BROWSER_TIMEOUT)
     return url
+
+
+def _ask_browser(url: str) -> None:
+    """The log says whether a browser was found, never the link: the link carries a live code."""
+    home = url.split("/api/", 1)[0] + "/"
+    try:
+        found = webbrowser.open(url)
+    except OSError as exc:
+        LOG.info("the browser could not be started: %s", exc)
+        found = False
+    if found:
+        LOG.info("the browser was asked")
+    else:
+        LOG.info("no browser answered; the dashboard is at %s", home)
 
 
 def agent_line(base: str, token: str) -> str:
@@ -288,12 +317,15 @@ def write_icon(path: str | Path) -> Path:
 # --- running -------------------------------------------------------------------------------------
 
 
-def _tray(server: Server, base: str, token: str) -> None:
-    """The mark in the notification area: four things, none of them the token."""
-    icon = pystray.Icon("system-sentinel", render_mark(64), "System Sentinel")
+def tray_menu(server: Server | None, base: str, token: str):
+    """The five entries, none of them the token. Built apart from the icon so the labels can be
+    checked without a notification area to show them in."""
 
     def open_item(_icon, _item) -> None:
         open_dashboard(base, token)
+
+    def link_item(_icon, _item) -> None:
+        open_dashboard(base, token, to="link")
 
     def copy_item(_icon, _item) -> None:
         LOG.info(copy_to_clipboard(agent_line(base, token)))
@@ -303,16 +335,24 @@ def _tray(server: Server, base: str, token: str) -> None:
 
     def quit_item(tray, _item) -> None:
         LOG.info("quitting")
-        server.stop()
+        if server is not None:
+            server.stop()
         tray.stop()
 
-    icon.menu = pystray.Menu(
+    return pystray.Menu(
         pystray.MenuItem("Open dashboard", open_item, default=True),
+        pystray.MenuItem("Sign in another device…", link_item),
         pystray.MenuItem("Copy address for agents", copy_item),
         pystray.MenuItem("Start with Windows", startup_item, checked=lambda _item: startup_enabled()),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("Quit", quit_item),
     )
+
+
+def _tray(server: Server, base: str, token: str) -> None:
+    """The mark in the notification area, with :func:`tray_menu` behind it."""
+    icon = pystray.Icon("system-sentinel", render_mark(64), "System Sentinel")
+    icon.menu = tray_menu(server, base, token)
     icon.run()
 
 
@@ -345,7 +385,7 @@ def main() -> int:
 
     if already_serving(base, token):
         _say(f"System Sentinel is already running at {base}/; opening the dashboard.")
-        open_dashboard(base, token)
+        open_dashboard(base, token, wait=True)
         return 0
 
     server = Server("127.0.0.1", listen_port)

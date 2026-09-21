@@ -79,6 +79,8 @@
 }
 .navItem:hover { color: var(--ink); }
 .navActive { color: var(--ink); background: rgba(234, 243, 238, 0.06); }
+/* Not a view: the same control, set apart by the gap rather than by a rule. */
+.navAside { margin-left: 18px; }
 
 .main {
   grid-area: main;
@@ -102,6 +104,7 @@
     border-right: 1px solid var(--rule-soft);
   }
   .navItem { padding: 8px 12px; }
+  .navAside { margin: 18px 0 0; }
   .main { padding: 28px 32px 64px; }
 }
 

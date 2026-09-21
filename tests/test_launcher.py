@@ -1,5 +1,6 @@
 """The launcher's door: a one-time code signs the browser in once, from this machine only."""
 
+import threading
 import time
 
 import pytest
@@ -82,14 +83,55 @@ def test_nothing_listening_is_not_a_running_server():
     assert launcher.already_serving("http://127.0.0.1:1", TOKEN) is False
 
 
+def _browser_asked() -> None:
+    """The browser is asked on its own thread; a test waits for that thread before looking."""
+    for thread in threading.enumerate():
+        if thread.name == "sentinel-browser":
+            thread.join(5)
+
+
 def test_the_link_the_launcher_opens_carries_a_code_and_not_the_token(monkeypatch: pytest.MonkeyPatch):
     opened: list[str] = []
     monkeypatch.setattr(launcher.webbrowser, "open", opened.append)
     url = launcher.open_dashboard("http://127.0.0.1:8000", TOKEN)
+    _browser_asked()
     assert opened == [url]
     assert url.startswith(f"http://127.0.0.1:8000{OPEN}?code=")
     assert TOKEN not in url
     assert auth.code_valid(TOKEN, url.split("code=", 1)[1])
+
+
+def test_the_tray_can_open_the_dashboard_on_the_sign_in_link_for_another_device(monkeypatch: pytest.MonkeyPatch):
+    opened: list[str] = []
+    monkeypatch.setattr(launcher.webbrowser, "open", opened.append)
+    url = launcher.open_dashboard("http://127.0.0.1:8000", TOKEN, to="link")
+    _browser_asked()
+    assert opened == [url]
+    assert url.startswith(f"http://127.0.0.1:8000{OPEN}?code=") and url.endswith("&to=link")
+    assert TOKEN not in url
+
+
+def test_a_browser_that_never_answers_does_not_hold_the_launcher(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture):
+    """On a machine with no handler for http, Windows shows a dialog and the call sits behind it
+    until someone answers; the tray must not wait for that, and the log must not carry the code."""
+    stuck = threading.Event()
+    monkeypatch.setattr(launcher.webbrowser, "open", lambda _url: stuck.wait(10))
+    started = time.monotonic()
+    with caplog.at_level("INFO", logger="sentinel.launcher"):
+        url = launcher.open_dashboard("http://127.0.0.1:8000", TOKEN)
+    assert time.monotonic() - started < 1
+    stuck.set()
+    _browser_asked()
+    assert url.split("code=", 1)[1].split("&")[0] not in caplog.text
+    assert "one-time code" in caplog.text
+
+
+def test_the_tray_has_five_entries_and_none_of_them_is_the_token():
+    if launcher.pystray is None:
+        pytest.skip("pystray is not installed here; the tray is checked on the Windows side")
+    labels = [item.text for item in launcher.tray_menu(None, "http://127.0.0.1:8000", TOKEN).items if item.text]
+    assert labels == ["Open dashboard", "Sign in another device…", "Copy address for agents", "Start with Windows", "Quit"]
+    assert TOKEN not in " ".join(labels)
 
 
 def test_start_with_windows_reads_its_own_file_and_never_raises():

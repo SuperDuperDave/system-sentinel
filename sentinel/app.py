@@ -6,6 +6,7 @@ The built dashboard is served from ``sentinel/static`` at ``/`` when present.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import ipaddress
 import time
@@ -18,8 +19,9 @@ from pydantic import BaseModel
 from starlette.staticfiles import StaticFiles
 
 from . import __version__, capture, readings  # noqa: F401  (readings registers the catalog)
-from .auth import CODE_TTL, TokenMiddleware, clear_session_cookie, code_valid, load_or_create_token, matches, session_cookie
+from .auth import LINK_TTL, TokenMiddleware, clear_session_cookie, code_expiry, code_valid, load_or_create_token, matches, session_cookie
 from .bridge import Bridge
+from .link import qr_svg, reach, sign_in_link
 from .reading import REGISTRY, Reading, take
 from .readings.health import learn_identity
 from .redact import Identity, Redactor
@@ -28,6 +30,7 @@ from .stream import Stream
 
 STATIC = Path(__file__).parent / "static"
 RELEARN_SECONDS = 60.0
+DEFAULT_PORT = 8000
 
 
 def _loopback(host: str | None) -> bool:
@@ -37,6 +40,17 @@ def _loopback(host: str | None) -> bool:
         return ipaddress.ip_address(host.split("%")[0]).is_loopback
     except ValueError:
         return False
+
+
+def _served_port(request: Request) -> int:
+    """The port this connection arrived on — the one Tailscale has to publish for a link to work.
+
+    Not configuration: a proxy on this machine dials the loopback listener, so a request that came
+    through Tailscale arrives on exactly the port Tailscale was pointed at. Every ASGI server sets
+    it; the tool's own default stands in if one ever does not."""
+    server = request.scope.get("server")
+    return int(server[1]) if server and server[1] else DEFAULT_PORT
+
 
 SSE_HEADERS = {"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"}
 
@@ -114,14 +128,17 @@ class State:
     def spend_code(self, code: str) -> bool:
         """Accept a launcher's one-time code once: minted from this token, unexpired, unspent.
 
-        Spent codes are remembered only as long as an unspent one could still be worth anything,
-        so the dict stays the size of one double-click rather than growing with the session.
+        A spent code is remembered until its own expiry, not for a fixed while: a code minted to
+        cross to another device outlives the launcher's by minutes, and remembering it for less
+        than it is valid for would let it be spent twice. Once it has run out, ``code_valid``
+        refuses it on its own and the dict drops it, so this stays the size of one double-click
+        rather than growing with the session.
         """
         now = time.time()
         self.spent_codes = {spent: until for spent, until in self.spent_codes.items() if until > now}
         if not code or code in self.spent_codes or not code_valid(self.token, code, now):
             return False
-        self.spent_codes[code] = now + CODE_TTL
+        self.spent_codes[code] = code_expiry(code)
         return True
 
     def learn(self) -> None:
@@ -190,15 +207,57 @@ def create_app(state: State | None = None, mcp: bool = True) -> FastAPI:
         return response
 
     @app.get("/api/session/open", tags=["session"])
-    def open_session_by_code(request: Request, code: str = "") -> Response:
+    def open_session_by_code(request: Request, code: str = "", to: str = "") -> Response:
         """The launcher's door: spend a one-time code minted on this machine for the session cookie
         and land on the dashboard. A person who double-clicks the tool never holds the token; a
-        caller from anywhere else is refused before the code is spent, so it survives for its owner."""
+        caller from anywhere else is refused before the code is spent, so it survives for its owner.
+
+        ``to=link`` lands on the dashboard's sign-in link for another device, which is how the tray
+        hands a phone over. It is the only value with a destination of its own; anything else lands
+        on the dashboard, so the parameter cannot send anyone anywhere but here."""
         if not state.is_local(request) or not state.spend_code(code):
             return JSONResponse({"error": "unauthorized"}, status_code=401)
-        response = RedirectResponse("/", status_code=303)
+        response = RedirectResponse("/#link" if to == "link" else "/", status_code=303)
         session_cookie(response, state.token, secure=request.url.scheme == "https")
         return response
+
+    @app.post("/api/session/link", tags=["session"])
+    async def session_link(request: Request) -> Response:
+        """A sign-in link for another device: the address this machine publishes on a private
+        network, a one-time code that lasts five minutes and is spent by the first device to
+        follow it, and a QR code of the link so a camera can carry it across.
+
+        The answer is a reading of the machine rather than a setting. ``outcome`` is ``ok`` when
+        Tailscale publishes the port this request arrived on, ``empty`` when the machine answered
+        and publishes nothing for it (``installed`` says whether Tailscale is there at all, and
+        ``port`` is the port it would have to publish), and ``unavailable`` or ``failed`` when it
+        could not be asked — three different things, and ``detail`` says which in a sentence a
+        person can act on. ``url``, ``expires_at`` and ``qr`` are null unless there is an address.
+
+        Whoever is signed in here may sign in another device, so this needs the session cookie or
+        the bearer header like any other route and nothing more. The token is never in the answer.
+        Agents have no use for it: they send the header.
+        """
+        port = _served_port(request)
+        found = await asyncio.to_thread(reach, state.bridge, port)
+        url, expires_at = sign_in_link(state.token, found.address) if found.outcome == "ok" and found.address else (None, None)
+        # Not through guarded(): a tailnet name usually derives from the computer name, and
+        # replacing it with <host> would hand the person a link that goes nowhere. This one answer
+        # is the machine's address, for the person already signed in to the machine.
+        return JSONResponse(
+            {
+                "outcome": found.outcome,
+                "installed": found.installed,
+                "port": port,
+                "address": found.address,
+                "via": found.via,
+                "detail": found.detail,
+                "url": url,
+                "expires_at": expires_at,
+                "ttl_seconds": int(LINK_TTL),
+                "qr": qr_svg(url) if url else None,
+            }
+        )
 
     @app.delete("/api/session", tags=["session"])
     def close_session() -> Response:

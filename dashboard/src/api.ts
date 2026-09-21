@@ -51,6 +51,26 @@ export interface CatalogEntry {
   heavy: boolean;
 }
 
+/**
+ * A way in for another device: what this machine publishes on a private network, and a one-time
+ * link to it. `outcome` is the reading's: `ok` when there is an address, `empty` when the machine
+ * answered and publishes nothing (`installed` says whether Tailscale is there at all, `port` what
+ * it would have to publish), `unavailable` or `failed` when it could not be asked. `url`,
+ * `expires_at` and `qr` are null unless it is `ok`. The token is never in it.
+ */
+export interface SignInLink {
+  outcome: string;
+  installed: boolean | null;
+  port: number;
+  address: string | null;
+  via: string | null;
+  detail: string;
+  url: string | null;
+  expires_at: string | null;
+  ttl_seconds: number;
+  qr: string | null;
+}
+
 export class Unauthorized extends Error {
   constructor() {
     super('unauthorized');
@@ -104,6 +124,11 @@ export async function openSession(token: string): Promise<boolean> {
     credentials: 'same-origin',
   });
   return res.ok;
+}
+
+/** Ask this machine for a sign-in link for another device. Each call mints a fresh code. */
+export function signInLink(): Promise<SignInLink> {
+  return request<SignInLink>('/api/session/link', { method: 'POST' });
 }
 
 export async function closeSession(): Promise<void> {

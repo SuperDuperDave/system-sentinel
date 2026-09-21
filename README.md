@@ -19,9 +19,11 @@ Every reading comes back in one envelope. Its **outcome** says whether the machi
 
 The **stack** is the evidence you or your agent chose to hand on. It lives on the machine, so the desktop, the phone and the agent see one stack. It composes into one text, led by a prompt from a library you can edit; the dashboard copies it to the clipboard, and an agent reads the same text from a route. A **capture** is every reading, the stack and the composed text in one ZIP on disk, with a manifest that says exactly what is in it. Nothing leaves the machine unless a person sends it.
 
-## Running it
+## Installing it
 
-On the Windows machine, with Python 3.11 or newer and Node 22 or newer:
+Download `SystemSentinel.exe` from [the latest release](https://github.com/SuperDuperDave/system-sentinel/releases/latest) and double-click it. It is the whole tool in one file: the server starts on `http://127.0.0.1:8000/`, the browser opens on the dashboard already signed in, and the mark sits in the system tray with *Open dashboard*, *Sign in another device*, *Copy address for agents*, *Start with Windows* and *Quit*. Nothing else needs to be installed. [docs/DEPLOY.md](docs/DEPLOY.md) has the details, the two prompts you can paste to your agent instead (one installs the release, one installs from source), and the optional steps for running at logon and reaching the machine from your phone.
+
+From source, on the Windows machine, with Python 3.11 or newer and Node 22 or newer:
 
 ```
 git clone https://github.com/SuperDuperDave/system-sentinel.git
@@ -33,7 +35,7 @@ cd dashboard && npm ci && npm run build && cd ..
 .venv\Scripts\system-sentinel serve
 ```
 
-`check` proves the bridge to Windows before anything is asked of it. `serve` runs the API and the dashboard on `http://127.0.0.1:8000/`; the dashboard asks once for the access token the tool created on first start, which `system-sentinel token` prints. [docs/DEPLOY.md](docs/DEPLOY.md) is the same procedure as a prompt you paste to your agent, with the optional steps for running at logon and reaching the machine from your phone.
+`check` proves the bridge to Windows before anything is asked of it. `serve` runs the API and the dashboard; the dashboard asks once for the access token the tool created on first start, which `system-sentinel token` prints. `system-sentinel launch` is the tray launcher from source, with the `[launcher]` extra installed.
 
 From WSL on the same machine the tool runs the same way, reading Windows through `powershell.exe`; that is how it is developed.
 

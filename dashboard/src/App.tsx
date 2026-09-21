@@ -1,5 +1,6 @@
 import { FormEvent, ReactElement, useEffect, useState } from 'react';
 import { catalog, openSession } from './api';
+import { Devices } from './Devices';
 import { Lockup, Mark } from './Mark';
 import { Live } from './Live';
 import { useApp, VIEWS, ViewId } from './store';
@@ -41,7 +42,17 @@ export function App() {
 function Shell() {
   const view = useApp((s) => s.view);
   const setView = useApp((s) => s.setView);
+  const [devices, setDevices] = useState(false);
   const View = VIEW_COMPONENTS[view];
+
+  // The tray hands a phone over by landing here on #link. The hash is spent like the code that
+  // came with it, so a reload is the dashboard and not this dialog again.
+  useEffect(() => {
+    if (window.location.hash !== '#link') return;
+    setDevices(true);
+    history.replaceState(null, '', window.location.pathname + window.location.search);
+  }, []);
+
   return (
     <div className={styles.shell}>
       <header className={styles.header}>
@@ -55,8 +66,12 @@ function Shell() {
             {v.label}
           </button>
         ))}
+        <button className={`${styles.navItem} ${styles.navAside}`} onClick={() => setDevices(true)} aria-haspopup="dialog">
+          Sign in another device
+        </button>
       </nav>
       <main className={styles.main}><View /></main>
+      <Devices open={devices} onClose={() => setDevices(false)} />
     </div>
   );
 }

@@ -28,6 +28,8 @@ TOKEN_FILE = "token"
 PROTECTED_PREFIXES = ("/api/", "/mcp")
 OPEN_PATHS = ("/api/session", "/api/session/open")
 CODE_TTL = 60.0
+#: A code carried to another device has to survive being read off a screen and scanned.
+LINK_TTL = 300.0
 
 
 def token_path() -> Path:
@@ -60,7 +62,7 @@ def matches(expected: str, presented: str | None) -> bool:
     return presented is not None and hmac.compare_digest(expected.encode(), presented.encode())
 
 
-def mint_code(token: str, now: float | None = None) -> str:
+def mint_code(token: str, now: float | None = None, ttl: float = CODE_TTL) -> str:
     """A one-time code the launcher spends at ``GET /api/session/open``, so the person never sees
     the token.
 
@@ -68,8 +70,12 @@ def mint_code(token: str, now: float | None = None) -> str:
     starting the server, or a second double-click finding it already running — can mint one, and the
     server needs no shared state to trust it. Whether a code has been spent is the serving process's
     to remember; this side only says what a valid, unexpired code looks like.
+
+    The code carries its own expiry, so how long one lasts is the minting side's choice: a moment for
+    the browser this machine is about to open (:data:`CODE_TTL`), longer for one crossing to another
+    device by hand or by camera (:data:`LINK_TTL`).
     """
-    body = f"{int((time.time() if now is None else now) + CODE_TTL)}.{secrets.token_urlsafe(12)}"
+    body = f"{int((time.time() if now is None else now) + ttl)}.{secrets.token_urlsafe(12)}"
     return f"{body}.{_signature(token, body)}"
 
 
@@ -82,6 +88,17 @@ def code_valid(token: str, code: str, now: float | None = None) -> bool:
     if int(expires) < (time.time() if now is None else now):
         return False
     return hmac.compare_digest(_signature(token, body), signature)
+
+
+def code_expiry(code: str) -> float:
+    """When this code runs out, as a Unix time. Anything that is not a code at all runs out at 0.0.
+
+    Unsigned on purpose: the caller has already decided whether to trust the code, and a spent one
+    only has to be remembered for as long as it could still be worth spending.
+    """
+    body, _, _ = code.rpartition(".")
+    expires, _, nonce = body.partition(".")
+    return float(expires) if nonce and expires.isdigit() else 0.0
 
 
 def _signature(token: str, body: str) -> str:
