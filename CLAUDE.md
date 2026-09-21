@@ -1,9 +1,7 @@
 # System Sentinel
 
-@AGENTS.md
+A stethoscope for a Windows computer: the machine's own record, in one place, for a person and for a local agent. Start with [README.md](README.md); [CONTRIBUTING.md](CONTRIBUTING.md) says how work here is verified.
 
-That file is the single maintained core for this repository: mission, boundaries, working principles and the routing table for everything else. This file exists only so Claude Code reaches it; it carries no guidance of its own, and nothing should be added here that AGENTS.md does not already own.
+The working method behind the project (the agent agreement, the session records, the skills) is a private repository mounted at `_sessions/` when it is present. It loads from there, and this file says nothing more when it is absent:
 
-The workspace agreement at `../CLAUDE.md`, one level above this repository, also applies: how David and I work together, the design heuristic, and the always-on product, UI and UX principles. AGENTS.md covers how this project is worked.
-
-Start with [_sessions/HANDOFF.md](_sessions/HANDOFF.md). Do not pull in session history at startup.
+@_sessions/CLAUDE.md

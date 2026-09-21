@@ -56,3 +56,8 @@ build/windows/work/
 build/windows/SystemSentinel.ico
 build/windows/version.txt
 /*.spec
+
+# The working method: a private repository mounted here, and the links into it
+_sessions/
+.claude/skills
+.agents/

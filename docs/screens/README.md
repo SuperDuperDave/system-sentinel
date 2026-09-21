@@ -1,8 +1,7 @@
 # Sanitized screenshots
 
 Five images of the real dashboard, rendering fixture data through the real code, for the studio
-page's hero: a monitor housing and a phone housing drawn in code, per
-[the brief](../../_sessions/OVERHAUL-BRIEF.md#what-the-page-will-show-once-the-tool-exists).
+page's hero: a monitor housing and a phone housing drawn in code, as the overhaul's brief asked.
 
 **The data on screen is synthetic.** Nothing here was read from any real machine. Two fixtures
 feed the app's own bridge seam, so what's on screen is the same code that renders a real reading,
