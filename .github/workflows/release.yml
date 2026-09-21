@@ -1,8 +1,9 @@
 name: Release
 
 # A tag builds the executable from that commit on a Windows runner, writes the checksum beside it,
-# attests where it came from, and leaves a draft release for a person to read and publish. Nothing
-# here publishes anything: the draft is the handoff. A manual run builds and attests the same way
+# attests where it came from, and leaves a draft release. Nothing here publishes anything: the
+# draft is checked (its digest against the list, its attestation) and then published by whoever
+# cut the tag. A manual run builds and attests the same way
 # and keeps the executable as a workflow artifact, which is how a build is checked before tagging.
 
 "on":
