@@ -32,6 +32,7 @@ The screens show the tool rendering a synthetic record built from Windows' own p
 | `pcie`, `power`, `memory`, `constraints` | The PCIe fabric, power configuration and transitions, physical memory, devices present and not working |
 | `reliability` | Windows' own record of this machine: the failures the Reliability Analysis Component counted and its hourly stability index, rolled up by day |
 | `signals` | Leads across the readings and the recent log: suppressions, gaps, pressure, transitions, mismatches |
+| `health` | Whether the tool can reach Windows at all, and how: the shell it found, a round trip, the decoder, and the live sessions carrying your questions |
 
 Every reading comes back in one envelope. Its **outcome** says whether the machine was observed (`ok`, `empty`) or not (`failed`, `unavailable`, `denied`, `timeout`), so a collection failure is never mistaken for a clean machine. Its **sections** keep what Windows said (`raw`) apart from what the tool computed (`derived`), what does not change (`invariant`) and what is only a lead (`inferred`). Its **method** is the query, so the evidence can be reproduced by hand. By default nothing in a response carries a serial number, the computer name, a user name or a MAC address; a caller asks for those by name.
 
