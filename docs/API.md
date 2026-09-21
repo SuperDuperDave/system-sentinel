@@ -15,6 +15,8 @@ The file `token` in that directory holds it. Send it as `Authorization: Bearer <
 
 `system-sentinel token` prints it. `system-sentinel check` tells you whether the bridge to Windows works before you ask for anything.
 
+The launcher signs a browser in without showing anyone the token: `GET /api/session/open?code=<one-time code>` accepts a code signed with the token, once, within a minute, and only for a connection made on this machine (a loopback client, or a connection accepted on the loopback listener, which is how a private-network proxy such as Tailscale serve reaches the tool). It sets the session cookie and redirects to the dashboard. Agents have no use for it; they send the header.
+
 ### Claude Code
 
 ```

@@ -7,6 +7,7 @@ The built dashboard is served from ``sentinel/static`` at ``/`` when present.
 from __future__ import annotations
 
 import contextlib
+import ipaddress
 import time
 from pathlib import Path
 from typing import Any, Literal
@@ -27,6 +28,15 @@ from .stream import Stream
 
 STATIC = Path(__file__).parent / "static"
 RELEARN_SECONDS = 60.0
+
+
+def _loopback(host: str | None) -> bool:
+    if not host:
+        return False
+    try:
+        return ipaddress.ip_address(host.split("%")[0]).is_loopback
+    except ValueError:
+        return False
 
 SSE_HEADERS = {"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"}
 
@@ -91,9 +101,15 @@ class State:
         self.spent_codes: dict[str, float] = {}
 
     def is_local(self, request: Request) -> bool:
-        """Whether the request came from this machine. A method so a test can say otherwise."""
+        """Whether the request came from this machine. A method so a test can say otherwise.
+
+        Local means the client is a loopback address, or the connection was accepted on one:
+        a server bound to loopback can only be reached from this machine, whether by a browser
+        the launcher opened or by a proxy running here for an authenticated private network
+        (Tailscale serve dials the loopback listener, not from 127.0.0.1)."""
         client = request.client
-        return client is not None and client.host in ("127.0.0.1", "::1")
+        server = request.scope.get("server")
+        return _loopback(client.host if client else None) or _loopback(server[0] if server else None)
 
     def spend_code(self, code: str) -> bool:
         """Accept a launcher's one-time code once: minted from this token, unexpired, unspent.

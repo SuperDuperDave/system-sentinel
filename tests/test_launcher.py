@@ -97,3 +97,24 @@ def test_start_with_windows_reads_its_own_file_and_never_raises():
     if launcher.startup_dir() is None:  # not Windows: the menu item is present and says so
         assert "Windows-only" in launcher.set_startup(True)
         assert launcher.startup_enabled() is False
+
+
+def test_local_means_a_loopback_client_or_a_connection_accepted_on_loopback():
+    """Tailscale serve dials the loopback listener from the machine's own address: local by construction."""
+    from types import SimpleNamespace
+
+    from sentinel.app import State
+    from sentinel.bridge import Bridge
+
+    state = State(bridge=Bridge(exe=None), token="t")
+
+    def request(client_host, server_host):
+        return SimpleNamespace(client=SimpleNamespace(host=client_host) if client_host else None, scope={"server": (server_host, 8000) if server_host else None})
+
+    assert state.is_local(request("127.0.0.1", "127.0.0.1"))
+    assert state.is_local(request("::1", "::1"))
+    assert state.is_local(request("100.76.48.118", "127.0.0.1"))  # a proxy on this machine reaching the loopback listener
+    assert state.is_local(request("127.0.0.1", "0.0.0.0"))  # a loopback client on a wide listener
+    assert not state.is_local(request("100.81.173.116", "100.76.48.118"))  # a peer reaching a wide listener directly
+    assert not state.is_local(request("testclient", "testserver"))
+    assert not state.is_local(request(None, None))
