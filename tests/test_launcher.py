@@ -1,12 +1,13 @@
-"""The launcher's door: a one-time code signs the browser in once, from this machine only."""
+"""The launcher: the door a one-time code opens, and the decision a start makes about itself."""
 
 import threading
 import time
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
-from sentinel import auth, launcher
+from sentinel import __version__, auth, launcher
 from sentinel.app import State, create_app
 from sentinel.bridge import BridgeResult
 from tests.conftest import FakeBridge, identity_result
@@ -71,16 +72,28 @@ def test_a_caller_from_elsewhere_is_refused_before_the_code_is_spent(elsewhere: 
     assert elsewhere.get(f"{OPEN}?code={code}", follow_redirects=False).status_code == 303
 
 
-def test_already_serving_knows_this_machines_server(client: TestClient):
-    def get(url: str, headers: dict) -> int:
-        return client.get(url, headers=headers).status_code
+def _through(client: TestClient):
+    """The launcher's one request seam, answered by the app itself."""
 
-    assert launcher.already_serving("http://testserver", TOKEN, get) is True
-    assert launcher.already_serving("http://testserver", "another-machines-token", get) is False
+    def ask(url: str, headers: dict, method: str = "GET"):
+        response = client.request(method, url, headers=headers)
+        return response.status_code, response.text
+
+    return ask
+
+
+def test_already_serving_knows_this_machines_server_and_which_version_it_is(client: TestClient):
+    ask = _through(client)
+    assert launcher.serving_version("http://testserver", TOKEN, ask) == __version__
+    assert launcher.already_serving("http://testserver", TOKEN, ask) is True
+    assert launcher.serving_version("http://testserver", "another-machines-token", ask) is None
+    assert launcher.already_serving("http://testserver", "another-machines-token", ask) is False
 
 
 def test_nothing_listening_is_not_a_running_server():
     assert launcher.already_serving("http://127.0.0.1:1", TOKEN) is False
+    assert launcher.serving_version("http://127.0.0.1:1", TOKEN) is None
+    assert launcher.port_free(1) is True
 
 
 def _browser_asked() -> None:
@@ -126,12 +139,82 @@ def test_a_browser_that_never_answers_does_not_hold_the_launcher(monkeypatch: py
     assert "one-time code" in caplog.text
 
 
-def test_the_tray_has_five_entries_and_none_of_them_is_the_token():
+def test_the_tray_says_what_it_does_and_never_the_token():
+    """Four things done often, then the version — which is both the answer to *which one am I
+    running* and where the two things done once live — then Quit."""
     if launcher.pystray is None:
         pytest.skip("pystray is not installed here; the tray is checked on the Windows side")
-    labels = [item.text for item in launcher.tray_menu(None, "http://127.0.0.1:8000", TOKEN).items if item.text]
-    assert labels == ["Open dashboard", "Sign in another device…", "Copy address for agents", "Start with Windows", "Quit"]
+    menu = launcher.tray_menu(None, "http://127.0.0.1:8000", TOKEN)
+    labels = [item.text for item in menu.items if item is not launcher.pystray.Menu.SEPARATOR]  # the separator has a label of its own
+    assert labels == [
+        "Open dashboard",
+        "Sign in another device…",
+        "Copy address for agents",
+        "Start with Windows",
+        f"System Sentinel {__version__}",
+        "Quit",
+    ]
+    version_item = next(item for item in menu.items if item.text == f"System Sentinel {__version__}")
+    assert [item.text for item in version_item.submenu.items] == ["Check for updates…", "Remove from this computer…"]
     assert TOKEN not in " ".join(labels)
+
+
+def test_checking_for_updates_opens_the_releases_page_and_asks_nothing_itself(monkeypatch: pytest.MonkeyPatch):
+    opened: list[str] = []
+    monkeypatch.setattr(launcher.webbrowser, "open", opened.append)
+    assert launcher.open_releases() == launcher.RELEASES
+    _browser_asked()
+    assert opened == [launcher.RELEASES]
+    assert launcher.RELEASES.startswith("https://github.com/")
+
+
+def test_removing_names_what_goes_and_what_stays(private_home: Path):
+    question = launcher.removal_question(private_home)
+    for named in (str(private_home), "the program", "the access token", "every capture", "Start with Windows", "claude mcp remove system-sentinel"):
+        assert named in question
+    assert "the copy you downloaded" in question
+
+
+PLACEMENTS = [
+    # frozen, at home, serving, the installed copy's version, the installed copy is these bytes
+    ("a development run is never an install", dict(frozen=False, at_home=False, serving=None, installed_version=None, same=False), launcher.SERVE),
+    ("the installed copy with nothing serving serves", dict(frozen=True, at_home=True, serving=None, installed_version=None, same=False), launcher.SERVE),
+    ("the installed copy with the tool already up opens it", dict(frozen=True, at_home=True, serving="1.0.1", installed_version=None, same=False), launcher.OPEN),
+    ("a download with no installed copy installs", dict(frozen=True, at_home=False, serving=None, installed_version=None, same=False), launcher.INSTALL),
+    ("a download already installed byte for byte just starts it", dict(frozen=True, at_home=False, serving=None, installed_version="1.0.1", same=True), launcher.START),
+    ("a download over an older installed copy installs", dict(frozen=True, at_home=False, serving=None, installed_version="1.0.0", same=False), launcher.INSTALL),
+    ("a download over an installed copy whose version cannot be read installs", dict(frozen=True, at_home=False, serving=None, installed_version=None, same=False), launcher.INSTALL),
+    ("a download older than the installed copy starts that one instead", dict(frozen=True, at_home=False, serving=None, installed_version="1.1.0", same=False), launcher.START),
+    ("a download while the same version serves opens the dashboard", dict(frozen=True, at_home=False, serving="1.0.1", installed_version=None, same=False), launcher.OPEN),
+    ("a download while an older version serves takes over", dict(frozen=True, at_home=False, serving="1.0.0", installed_version="1.0.0", same=False), launcher.REPLACE),
+    ("a download while a newer version serves does not downgrade", dict(frozen=True, at_home=False, serving="1.2.0", installed_version="1.2.0", same=False), launcher.NEWER),
+]
+
+
+@pytest.mark.parametrize("name, situation, expected", PLACEMENTS, ids=[case[0] for case in PLACEMENTS])
+def test_the_placement_decision(name: str, situation: dict, expected: str):
+    """Where a start goes is one function of what it can see, so every branch can be asked for
+    without an executable, a port or a machine."""
+    step = launcher.plan(mine="1.0.1", **situation)
+    assert step.do == expected, f"{name}: {step}"
+    assert step.why  # every branch can say why, because one of them says it to the person
+
+
+def test_a_version_that_cannot_be_read_is_never_the_newer_one():
+    assert launcher._parts("1.0.10") > launcher._parts("1.0.9")
+    assert launcher._parts("1.0.1") > launcher._parts(None) < launcher._parts("0.0.1")
+    assert launcher.file_version(Path(__file__)) is None  # not a Windows executable, and not Windows
+
+
+def test_the_startup_shortcut_points_at_the_installed_copy(monkeypatch: pytest.MonkeyPatch):
+    """Never at whichever file was double-clicked: a download can be moved or tidied away, and the
+    copy in the data directory is the one every update replaces."""
+    home = launcher.installed_exe()
+    monkeypatch.setattr(launcher, "frozen", lambda: True)
+    home.write_bytes(b"the installed copy")
+    assert launcher.launch_command() == (str(home), "")
+    home.unlink()
+    assert launcher.launch_command()[0] != str(home)  # nothing installed: the interpreter, as in development
 
 
 def test_start_with_windows_reads_its_own_file_and_never_raises():

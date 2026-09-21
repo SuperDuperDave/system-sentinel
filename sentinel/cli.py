@@ -55,8 +55,6 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _serve(host: str, port: int, reload: bool) -> int:
-    import uvicorn
-
     load_or_create_token()
     print(f"System Sentinel {__version__}")
     print(f"  dashboard  http://{host}:{port}/")
@@ -65,8 +63,23 @@ def _serve(host: str, port: int, reload: bool) -> int:
     print(f"  token      {token_path()}")
     if host not in ("127.0.0.1", "localhost"):
         print("  listening beyond this machine: every /api and /mcp request still needs the token")
+    if reload:
+        print("  --reload owns its own lifetime: this one is stopped here, not through POST /api/quit")
     sys.stdout.flush()
-    uvicorn.run("sentinel.app:create_app", factory=True, host=host, port=port, reload=reload, log_level="info")
+
+    if reload:
+        # The reloader needs the app by name so it can build it again after every change, and it
+        # owns the process it restarts; there is nothing for a quit callback to stop.
+        import uvicorn
+
+        uvicorn.run("sentinel.app:create_app", factory=True, host=host, port=port, reload=True, log_level="info")
+        return 0
+
+    # The same server the launcher runs, on this thread: one way uvicorn is started, so quitting
+    # means the same thing whether the tool was started from a terminal or by double-clicking it.
+    from .launcher import Server
+
+    Server(host, port, console=True).run()
     return 0
 
 

@@ -105,6 +105,45 @@ def test_session_cookie_flow(client: TestClient):
     assert client.get("/api/readings").status_code == 401
 
 
+def test_quitting_needs_the_token_itself_and_this_machine(client: TestClient, monkeypatch: pytest.MonkeyPatch):
+    """The dashboard's cookie opens the dashboard. Switching the machine's tool off is the token's,
+    which is to say the launcher's and a local agent's: a browser on any device cannot do it."""
+    monkeypatch.setattr(State, "is_local", lambda self, request: True)  # a browser here, not elsewhere
+    asked: list[str] = []
+    client.app.state.sentinel.on_quit = lambda: asked.append("quit")
+
+    client.post("/api/session", json={"token": TOKEN})  # a browser, properly signed in
+    refused = client.post("/api/quit")
+    assert refused.status_code == 401 and "token" in refused.json()["detail"]
+    assert client.get("/api/readings").status_code == 200  # the same cookie still reads the machine
+    assert asked == []
+
+    accepted = client.post("/api/quit", headers=AUTH)
+    assert accepted.status_code == 202 and accepted.json() == {"quitting": True}
+    assert asked == ["quit"]  # the task runs once the answer is on the wire
+
+
+def test_quitting_is_refused_from_anywhere_but_this_machine(monkeypatch: pytest.MonkeyPatch):
+    asked: list[str] = []
+    state = State(bridge=FakeBridge(), token=TOKEN)
+    state.on_quit = lambda: asked.append("quit")
+    with TestClient(create_app(state)) as elsewhere:  # TestClient's client host is not loopback
+        assert elsewhere.post("/api/quit", headers=AUTH).status_code == 401
+        assert asked == []
+        monkeypatch.setattr(State, "is_local", lambda self, request: True)
+        assert elsewhere.post("/api/quit", headers=AUTH).status_code == 202
+    assert asked == ["quit"]
+
+
+def test_a_server_that_cannot_stop_itself_says_so(client: TestClient, monkeypatch: pytest.MonkeyPatch):
+    """``serve --reload`` owns the process it restarts, so nothing set a quit callback. The route
+    answers what is true rather than accepting and never going."""
+    monkeypatch.setattr(State, "is_local", lambda self, request: True)
+    assert client.app.state.sentinel.on_quit is None
+    refused = client.post("/api/quit", headers=AUTH)
+    assert refused.status_code == 409 and "reload" in refused.json()["detail"]
+
+
 def test_health_reading_reports_the_bridge(client: TestClient):
     body = client.get("/api/readings/health", headers=AUTH).json()
     assert body["outcome"] == "ok"

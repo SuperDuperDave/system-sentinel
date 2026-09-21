@@ -54,4 +54,5 @@ sentinel/static/
 dist/
 build/windows/work/
 build/windows/SystemSentinel.ico
+build/windows/version.txt
 /*.spec

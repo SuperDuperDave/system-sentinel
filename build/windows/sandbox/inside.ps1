@@ -300,11 +300,25 @@ function Invoke-Api {
     return Invoke-WebRequest -UseBasicParsing -Uri ($API + $Path) -Headers $h -TimeoutSec $TimeoutSec
 }
 
+# Which version is answering, or '' when nothing is. The catalog carries it, so this is the same
+# question a downloaded copy asks before it decides whether it is an update.
+function Get-ServedVersion {
+    param([string]$Token, [int]$TimeoutSec = 10)
+    try { return [string]((Invoke-Api -Path '/api/readings' -Token $Token -TimeoutSec $TimeoutSec).Content | ConvertFrom-Json).version } catch { return '' }
+}
+
 # ============================================================================================
 
 try {
 
-Add-Result -step '0-image' -ok $true -note ("PowerShell $($PSVersionTable.PSVersion); $((Get-CimInstance Win32_OperatingSystem).Caption) build $((Get-CimInstance Win32_OperatingSystem).BuildNumber); user $env:USERNAME; SkipSource=$($SkipSource.IsPresent); Release=$(if ($Release) { $Release } else { '(none: the staged executable)' })")
+# What Defender was doing matters to everything below it: a timing, or a file that was never
+# blocked, means one thing with real-time protection on and another with it off.
+try {
+    $mp = Get-MpComputerStatus -ErrorAction Stop
+    $defender = "Defender RealTimeProtectionEnabled=$($mp.RealTimeProtectionEnabled), AntivirusEnabled=$($mp.AntivirusEnabled)"
+} catch { $defender = "Get-MpComputerStatus did not answer, so the state of Defender on this image is unknown: $_" }
+
+Add-Result -step '0-image' -ok $true -note ("PowerShell $($PSVersionTable.PSVersion); $((Get-CimInstance Win32_OperatingSystem).Caption) build $((Get-CimInstance Win32_OperatingSystem).BuildNumber); user $env:USERNAME; SkipSource=$($SkipSource.IsPresent); Release=$(if ($Release) { $Release } else { '(none: the staged executable)' }); $defender")
 
 # --- the network ---------------------------------------------------------------------------
 
@@ -455,6 +469,65 @@ Add-Result -step 'p1-screenshot' -ok ($shot -notlike 'screenshot failed*') `
 $dismissed = Close-WindowByTitle '*open this*link*'
 if ($dismissed) {
     Add-Result -step 'p1-browser-dialog' -ok $false -note "a modal dialog was on screen instead of the dashboard and was closed by the harness: $dismissed"
+}
+
+# --- the update: a newer copy arrives while the downloaded one is serving ---------------------
+# Only when there is something to update from and something to update to: a release was
+# downloaded and is answering, and another executable is staged beside it in C:\in. That staged
+# file stands in for the next download, started the way a person starts one - from wherever it
+# landed, not from the data directory.
+
+$staged = Join-Path $IN 'SystemSentinel.exe'
+if ($Release -and (Test-Path $staged) -and $token -and (Test-Budget 'update-start')) {
+    $t0 = Get-Date
+
+    $before = Get-ServedVersion -Token $token -TimeoutSec 20
+    $stagedVersion = ''
+    try { $stagedVersion = [string](Get-Item $staged).VersionInfo.ProductVersion } catch {}
+    $stagedVersion = $stagedVersion.Trim()
+
+    $launched = $true
+    try { Start-Process -FilePath $staged } catch { $launched = $false }
+    Add-Result -step 'update-start' -ok $launched -seconds (((Get-Date) - $t0).TotalSeconds) `
+        -note ("the copy already serving reports version $(if ($before) { $before } else { '(unreadable)' }); the staged executable in C:\in carries $(if ($stagedVersion) { $stagedVersion } else { 'no version in its file properties' }); it was started from where it sits, as a download would be")
+
+    $t0 = Get-Date
+    $after = $before
+    # Not $deadline: that name is the whole run's budget, and PowerShell would have it back.
+    $updateUntil = (Get-Date).AddSeconds(90)
+    while ((Get-Date) -lt $updateUntil) {
+        Start-Sleep -Seconds 2
+        $now = Get-ServedVersion -Token $token -TimeoutSec 5
+        if ($now -and $now -ne $before) { $after = $now; break }
+    }
+
+    # When nothing changed, say why rather than leaving a bare failure: a copy whose version
+    # predates the quit route cannot be asked to stop, and the person has to quit it themselves.
+    $why = ''
+    if ($after -eq $before) {
+        $code = 'no answer'
+        try {
+            $q = Invoke-WebRequest -UseBasicParsing -Method Post -Uri "$API/api/quit" -Headers @{ Authorization = "Bearer $token" } -TimeoutSec 10
+            $code = $q.StatusCode
+        } catch { try { $code = $_.Exception.Response.StatusCode.value__ } catch { $code = 'no answer' } }
+        $why = "; asked afterwards, POST /api/quit against the copy that was serving answers $code (404 or 405 means that version has no quit route at all, so a newer copy cannot ask it to stop and the person has to quit it themselves)"
+    }
+
+    $installed = Join-Path $dataDir 'SystemSentinel.exe'
+    $sameFile = $false
+    try { $sameFile = ((Get-FileHash -Algorithm SHA256 $installed).Hash -ieq (Get-FileHash -Algorithm SHA256 $staged).Hash) } catch {}
+    $windows = Get-TopLevelWindows
+    $shot = Save-Screenshot '1b-update.png'
+    Add-Result -step 'update-took-over' -ok (($after -ne $before) -and $stagedVersion -and ($after -eq $stagedVersion)) -seconds (((Get-Date) - $t0).TotalSeconds) `
+        -note ("the server now reports $(if ($after) { $after } else { '(nothing answered)' }), where it reported $(if ($before) { $before } else { '(unreadable)' }); the installed copy is the staged executable byte for byte: $sameFile$why; $shot") `
+        -tail (Get-Tail $windows 24)
+
+    $closed = Close-WindowByTitle '*System Sentinel*'
+    if ($closed) {
+        Add-Result -step 'update-dialog' -ok $false -note "a message box was on screen rather than a silent update, and the harness closed it: $closed"
+    }
+} elseif ($Release -and (Test-Path $staged)) {
+    Add-Result -step 'update-start' -ok $false -note 'not attempted: the downloaded release never answered, so there was nothing to update'
 }
 
 # Free port 8000 and leave the machine clean of the tool's state, so Part 2 exercises the

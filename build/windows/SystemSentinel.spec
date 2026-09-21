@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""One windowed file: dist\\SystemSentinel.exe.
+"""One windowed file: dist\\SystemSentinel.exe, stamped with the version it was built from.
 
 The package, the built dashboard and the CPER decoder go in under ``sentinel/`` so that the
 package's own relative resolution finds them inside the bundle exactly as it finds them on disk:
@@ -8,12 +8,21 @@ package's own relative resolution finds them inside the bundle exactly as it fin
 under ``sys._MEIPASS``, so both resolve without the code knowing it was frozen.
 """
 
+import sys
 from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_submodules
 
 HERE = Path(SPECPATH)  # noqa: F821 - PyInstaller injects SPECPATH
 ROOT = HERE.parent.parent
+
+# The version resource is written here rather than kept as a file in the repository, so what
+# Windows shows in the file's properties is the version this build was made from and cannot be
+# left behind at an older one. A copy deciding whether it is an update reads it back.
+sys.path.insert(0, str(HERE))
+from make_version_file import write_version_file  # noqa: E402
+
+VERSION_FILE = write_version_file(HERE / "version.txt")
 
 datas = [
     (str(ROOT / "sentinel" / "static"), "sentinel/static"),
@@ -63,4 +72,5 @@ exe = EXE(  # noqa: F821
     console=False,
     disable_windowed_traceback=False,
     icon=str(HERE / "SystemSentinel.ico"),
+    version=str(VERSION_FILE),
 )

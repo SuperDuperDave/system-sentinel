@@ -51,11 +51,17 @@ def load_or_create_token() -> str:
     return value
 
 
-def presented_token(request: Request) -> str | None:
+def bearer(request: Request) -> str | None:
+    """The token presented in an ``Authorization`` header, or None when none was.
+
+    A request carrying only the session cookie presents no token: the cookie holds a value derived
+    from it, which opens the dashboard and nothing else. Keeping the two apart is what lets one
+    route — quitting the machine's tool — ask for the token itself and refuse a browser.
+    """
     header = request.headers.get("authorization", "")
-    if header.lower().startswith("bearer "):
-        return header[7:].strip() or None
-    return request.cookies.get(COOKIE)
+    if not header.lower().startswith("bearer "):
+        return None
+    return header[7:].strip() or None
 
 
 def matches(expected: str, presented: str | None) -> bool:
@@ -128,9 +134,8 @@ def session_value(token: str) -> str:
 
 def authorized(token: str, request: Request) -> bool:
     """A bearer header carrying the token, or the session cookie carrying the value derived from it."""
-    header = request.headers.get("authorization", "")
-    if header.lower().startswith("bearer "):
-        return matches(token, header[7:].strip() or None)
+    if request.headers.get("authorization", "").lower().startswith("bearer "):
+        return matches(token, bearer(request))
     return matches(session_value(token), request.cookies.get(COOKIE))
 
 

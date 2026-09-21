@@ -11,15 +11,16 @@ import contextlib
 import ipaddress
 import time
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from pydantic import BaseModel
+from starlette.background import BackgroundTask
 from starlette.staticfiles import StaticFiles
 
 from . import __version__, capture, readings  # noqa: F401  (readings registers the catalog)
-from .auth import LINK_TTL, TokenMiddleware, clear_session_cookie, code_expiry, code_valid, load_or_create_token, matches, session_cookie
+from .auth import LINK_TTL, TokenMiddleware, bearer, clear_session_cookie, code_expiry, code_valid, load_or_create_token, matches, session_cookie
 from .bridge import Bridge
 from .link import qr_svg, reach, sign_in_link
 from .reading import REGISTRY, Reading, take
@@ -106,6 +107,11 @@ class State:
     def __init__(self, bridge: Bridge | None = None, token: str | None = None):
         self.bridge = bridge or Bridge.locate()
         self.token = token or load_or_create_token()
+        #: How this process ends when it is asked to. Whoever runs the server sets it — the tray
+        #: launcher and ``serve`` both do — and ``POST /api/quit`` is the only caller. Left unset
+        #: (``serve --reload``, a test app), there is no way to stop this process from inside it,
+        #: and the route says so rather than pretending.
+        self.on_quit: Callable[[], None] | None = None
         self.identity = Identity()
         self._redactor = Redactor(self.identity)
         self._learned_at: float | None = None
@@ -264,6 +270,38 @@ def create_app(state: State | None = None, mcp: bool = True) -> FastAPI:
         response = JSONResponse({"ok": True})
         clear_session_cookie(response)
         return response
+
+    @app.post("/api/quit", tags=["server"], status_code=202)
+    def quit_server(request: Request) -> Response:
+        """Stop the tool on this machine. It answers first and exits a moment later, gracefully.
+
+        Two conditions, and the second is the interesting one. The caller must be on this machine,
+        like the launcher's door. And it must carry the access token in an ``Authorization``
+        header: the session cookie a browser holds — on this machine, on a phone across a private
+        network — opens the dashboard and is refused here. Reading the machine's record from a
+        phone is one thing; switching the machine's tool off from one is another, and only
+        something holding the token, which is to say this machine's launcher or an agent running
+        on it, may do it.
+
+        This is how a downloaded newer copy replaces a running older one: ask, wait for the port,
+        then take its place.
+        """
+        if not matches(state.token, bearer(request)):
+            return JSONResponse(
+                {"error": "unauthorized", "detail": "quitting needs the access token in an Authorization header; the dashboard's session cookie cannot stop the tool"},
+                status_code=401,
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        if not state.is_local(request):
+            return JSONResponse({"error": "unauthorized", "detail": "quitting is for this machine"}, status_code=401)
+        if state.on_quit is None:
+            return JSONResponse(
+                {"error": "unsupported", "detail": "this server cannot stop itself; it was started in a way that owns its own lifetime (serve --reload). Stop it where it was started."},
+                status_code=409,
+            )
+        # The task runs once the answer is on the wire, so the caller learns the tool is going
+        # rather than losing the connection and having to guess whether it heard.
+        return JSONResponse({"quitting": True}, status_code=202, background=BackgroundTask(state.on_quit))
 
     @app.get("/api/readings", tags=["readings"])
     def catalog() -> dict[str, Any]:
