@@ -1,0 +1,47 @@
+# Pinning without a way to move is how a lock becomes the oldest thing in the repository. Weekly,
+# grouped into one pull request per ecosystem, because twelve separate bumps is a review nobody
+# does. The checks decide whether a bump is safe: the suite, the types, the lint and the audits all
+# run on the branch.
+#
+# A bump to a range in pyproject.toml is not in effect until requirements.lock is regenerated with
+# the command in its own header; `pip check` in the checks says when the two have parted company.
+
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    # Every action here is pinned to a commit, which is right and also means nothing tells us when
+    # one has moved. This does.
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      actions:
+        patterns: ["*"]
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "actions"
+
+  - package-ecosystem: npm
+    directory: "/dashboard"
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      dashboard:
+        patterns: ["*"]
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "dashboard"
+
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      python:
+        patterns: ["*"]
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "python"

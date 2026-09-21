@@ -14,9 +14,10 @@ from __future__ import annotations
 import asyncio
 import inspect
 import textwrap
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any, Awaitable, Callable, Literal
+from datetime import UTC, datetime
+from typing import Any, Literal
 
 from .bridge import Bridge, BridgeResult, Outcome
 
@@ -171,9 +172,11 @@ async def take(name: str, bridge: Bridge, raw_params: dict[str, Any] | None = No
     """
     spec = REGISTRY[name]
     params = spec.coerce(raw_params or {})
-    if inspect.iscoroutinefunction(spec.take):
-        return await spec.take(bridge, params)
-    return await asyncio.to_thread(spec.take, bridge, params)
+    # Which of the two a taker is decides where it runs; what it hands back decides whether there is
+    # anything left to await. Asking the value rather than the function is also what lets a type
+    # checker follow this.
+    taken = spec.take(bridge, params) if inspect.iscoroutinefunction(spec.take) else await asyncio.to_thread(spec.take, bridge, params)
+    return await taken if inspect.isawaitable(taken) else taken
 
 
 def from_bridge(
@@ -240,4 +243,4 @@ def from_object(
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")

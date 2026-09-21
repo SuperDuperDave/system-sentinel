@@ -1,4 +1,4 @@
-import { FormEvent, ReactElement, useEffect, useState } from 'react';
+import { FormEvent, ReactElement, useEffect, useRef, useState } from 'react';
 import { catalog, openSession } from './api';
 import { Devices } from './Devices';
 import { Lockup, Mark } from './Mark';
@@ -81,6 +81,11 @@ function SignIn() {
   const [token, setToken] = useState('');
   const [wrong, setWrong] = useState(false);
   const [busy, setBusy] = useState(false);
+  const field = useRef<HTMLInputElement>(null);
+
+  // This screen is one field, so focus belongs in it. Moved here rather than by the autoFocus
+  // attribute: focus is a thing that happens at a moment, and this is the moment.
+  useEffect(() => { field.current?.focus(); }, []);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -98,7 +103,7 @@ function SignIn() {
         <h1 className={`${styles.signInTitle} display`}>System Sentinel</h1>
         <p className={styles.signInLede}>A stethoscope for your computer. Enter the access token this machine created when the tool first ran.</p>
         <label className="label" htmlFor="token">Access token</label>
-        <input id="token" className={`${styles.tokenInput} readout`} type="password" autoComplete="current-password" value={token} onChange={(e) => { setToken(e.target.value); setWrong(false); }} autoFocus />
+        <input id="token" className={`${styles.tokenInput} readout`} type="password" autoComplete="current-password" ref={field} value={token} onChange={(e) => { setToken(e.target.value); setWrong(false); }} />
         {wrong ? <p className={`${styles.wrong} readout`}>That token was not accepted.</p> : null}
         <button className={styles.signInButton} type="submit" disabled={busy || !token.trim()}>Open</button>
         {/* Two ways in, and the token is the second one. The executable signs a browser in by

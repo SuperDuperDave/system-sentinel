@@ -37,7 +37,7 @@ Codex takes a bearer token from the environment rather than from a header, so `S
 
 ### Other MCP clients
 
-Streamable HTTP at `http://127.0.0.1:8000/mcp` with the same header. Every reading below is one tool, named as the reading is named, except that a dot becomes an underscore because MCP tool names allow only letters, digits, underscore and hyphen: `hardware.cpu` is the tool `hardware_cpu`. The stack and the composer are tools too: `stack_list`, `stack_add`, `stack_update`, `stack_remove`, `stack_clear`, `stack_prompt`, `compose`, `prompts_list`.
+Streamable HTTP at `http://127.0.0.1:8000/mcp` with the same header. Every reading below is one tool, named as the reading is named, except that a dot becomes an underscore because MCP tool names allow only letters, digits, underscore and hyphen: `hardware.cpu` is the tool `hardware_cpu`. The stack, the composer and the captures are tools too: `stack_list`, `stack_add`, `stack_update`, `stack_remove`, `stack_clear`, `stack_prompt`, `compose`, `prompts_list`, `capture_create`, `capture_list`. Every tool is annotated with what it does to the machine, so a client can stop confirming the readings and keep confirming `stack_remove` and `stack_clear`; every reading answers with typed structured content beside its text, against one shared schema for the envelope. The six presets are also MCP prompts, and the catalog and the composed handoff are resources (`sentinel://catalog`, `sentinel://handoff`). Asking for `unredacted` requires a `reason`, which is carried into the answer's warnings.
 
 ### Without MCP
 
@@ -109,7 +109,7 @@ Only `ok` and `empty` say anything about the machine. Treat the other four as "n
 
 | Reading | What it reads | Sections (class) | Parameters |
 | --- | --- | --- | --- |
-| `health` | Whether the bridge works: PowerShell found, its version, a trivial round trip, decoder present, data directory | `bridge` (raw) | |
+| `health` | Whether the bridge works: PowerShell found, its version, a trivial round trip, decoder present, data directory, and how questions are reaching the machine (the transport, sessions alive and idle, questions answered, sessions discarded by reason, the oldest session's age, questions that fell back to a launch) | `bridge` (raw) | |
 | `events` | Records from a Windows log by level, and from a moment or this session's start | `records` (raw) | `log` (System, Application), `levels` (1 critical, 2 error, 3 warning, 4 information; default 1,2), `count` (default 50), `since` (an ISO timestamp or the word `boot`; empty for the most recent records) |
 | `record` | The log around a moment: the records before a timestamp, oldest first | `records` (raw) | `before` (ISO timestamp, required: `422` without it), `count` (default 50), `log` (default System) |
 | `crash` | The stops the machine did not plan, each composed from the records of its session: when it stopped as Windows estimated it, when it started again, the bug check if one was written, the dump that belongs to it, and the last record before it | `records` (raw, from both logs, each carrying `Log`), `decoded` (derived: one entry per record, its named fields and the bug check where it carries one), `stops` (derived: one entry per stop, newest first, or forward from `moment`; `basis` states the rule that composed it, and `count` on the envelope is how many stops there were) | `count` (default 5, 1 to 20), `moment` (an ISO timestamp; the first start at or after it is reported instead) |

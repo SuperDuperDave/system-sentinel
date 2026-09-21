@@ -11,7 +11,7 @@ import contextlib
 import ipaddress
 import time
 from pathlib import Path
-from typing import Any, Callable, Literal
+from typing import Any, AsyncIterator, Callable, Literal
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
@@ -21,7 +21,7 @@ from starlette.staticfiles import StaticFiles
 
 from . import __version__, capture, readings  # noqa: F401  (readings registers the catalog)
 from .auth import LINK_TTL, TokenMiddleware, bearer, clear_session_cookie, code_expiry, code_valid, load_or_create_token, matches, session_cookie
-from .bridge import Bridge
+from .bridge import Bridge, shutdown_sessions
 from .link import qr_svg, reach, sign_in_link
 from .reading import REGISTRY, Reading, take
 from .readings.health import learn_identity
@@ -174,13 +174,19 @@ def create_app(state: State | None = None, mcp: bool = True) -> FastAPI:
         mcp_app = build_mcp(state)
 
     @contextlib.asynccontextmanager
-    async def lifespan(app: FastAPI):
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         state.learn()
-        async with contextlib.AsyncExitStack() as stack:
-            if mcp_app is not None:
-                # A mounted app's lifespan does not run by itself; the MCP session manager needs it.
-                await stack.enter_async_context(mcp_app.router.lifespan_context(mcp_app))
-            yield
+        try:
+            async with contextlib.AsyncExitStack() as stack:
+                if mcp_app is not None:
+                    # A mounted app's lifespan does not run by itself; the MCP session manager needs it.
+                    await stack.enter_async_context(mcp_app.router.lifespan_context(mcp_app))
+                yield
+        finally:
+            # The bridge's live sessions are child processes of this one. They end here, however
+            # this server ends: a powershell.exe left behind by a stopped server would be exactly
+            # the kind of thing this tool exists to make visible.
+            await asyncio.to_thread(shutdown_sessions)
 
     app = FastAPI(
         title="System Sentinel",

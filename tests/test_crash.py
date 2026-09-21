@@ -511,7 +511,8 @@ def test_a_stop_arrives_redacted_like_every_other_reading(client: TestClient):
 # ---------------------------------------------------------------- on the host
 
 STOP_KEYS = {
-    "started_at", "announced_at", "stopped_at", "down_seconds", "bugcheck", "no_bugcheck_recorded",
+    "started_at", "announced_at", "stopped_at",
+    "reported_at", "down_seconds", "bugcheck", "no_bugcheck_recorded",
     "power", "dump", "last_record_before", "quiet_seconds", "records",
 }
 

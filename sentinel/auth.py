@@ -17,9 +17,10 @@ import stat
 import time
 from pathlib import Path
 
-from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
+from starlette.types import ASGIApp
 
 from .paths import data_dir
 
@@ -112,11 +113,11 @@ def _signature(token: str, body: str) -> str:
 
 
 class TokenMiddleware(BaseHTTPMiddleware):
-    def __init__(self, app, token: str):
+    def __init__(self, app: ASGIApp, token: str) -> None:
         super().__init__(app)
         self.token = token
 
-    async def dispatch(self, request: Request, call_next) -> Response:
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         path = request.url.path
         if path.startswith(PROTECTED_PREFIXES) and path not in OPEN_PATHS:
             if not authorized(self.token, request):

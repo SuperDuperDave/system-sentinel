@@ -9,51 +9,99 @@ from typing import Any
 
 import pytest
 
+import sentinel.bridge
 from sentinel.bridge import Bridge, BridgeResult
 
 FAKE_POWERSHELL = r'''#!/usr/bin/env python3
-"""A powershell.exe that answers by the directive it finds in the decoded script: `# fake: <mode>`."""
-import base64, json, re, sys, time
-args = sys.argv[1:]
-encoded = args[args.index("-EncodedCommand") + 1]
-script = base64.b64decode(encoded).decode("utf-16le")
-m = re.search(r"# fake: ([a-z0-9-]+)", script)
-mode = m.group(1) if m else "ok-list"
-if mode == "ok-list":
-    sys.stdout.write(json.dumps([{"Id": 41, "ProviderName": "Microsoft-Windows-Kernel-Power"}, {"Id": 6008, "ProviderName": "EventLog"}]))
-elif mode == "ok-object":
-    sys.stdout.write(json.dumps({"CPU": "x"}))
-elif mode == "empty":
-    pass
-elif mode == "warn":
-    sys.stdout.write(json.dumps([{"Id": 1}]))
-    sys.stderr.write("Get-CimInstance : Invalid class\n")
-elif mode == "failed":
-    sys.stderr.write("Get-WinEvent : There is not an event log on the localhost computer that matches \"Nope\".\n")
-    sys.exit(1)
-elif mode == "denied":
-    sys.stderr.write("Get-WinEvent : Attempted to perform an unauthorized operation.\n")
-    sys.exit(1)
-elif mode == "denied-quiet":
-    sys.stderr.write("Access is denied.\n")
-elif mode == "clixml":
-    sys.stderr.write('#< CLIXML\n<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04"><S S="Error">Get-WinEvent : No events were found that match the specified selection criteria._x000D__x000A_</S><S S="Error">At line:1 char:1_x000D__x000A_</S></Objs>')
-    sys.exit(1)
-elif mode == "notjson":
-    sys.stdout.write("hello")
-elif mode == "wsl-interop":
-    sys.stderr.write("<3>WSL (530414 - ) ERROR: UtilAcceptVsock:271: accept4 failed 110\n")
-    sys.exit(1)
-elif mode == "wsl-interop-once":
-    import os
-    flag = os.path.join(os.path.dirname(sys.argv[0]), "interop-flag")
-    if not os.path.exists(flag):
-        open(flag, "w").close()
-        sys.stderr.write("<3>WSL (530414 - ) ERROR: UtilAcceptVsock:271: accept4 failed 110\n")
+"""A powershell.exe that answers by the directive it finds in the script: `# fake: <mode>`.
+
+Both of the bridge's transports arrive here: a one-shot launch carrying `-EncodedCommand`, and a
+live session started with `-Command -` and fed framed questions on stdin. One table of modes
+answers both, so a mode written once is exercised through both and neither can drift from the other.
+"""
+import base64, json, os, re, sys, time
+
+STATE = {"count": 0}
+
+CLIXML = '#< CLIXML\n<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04"><S S="Error">Get-WinEvent : No events were found that match the specified selection criteria._x000D__x000A_</S><S S="Error">At line:1 char:1_x000D__x000A_</S></Objs>'
+INTEROP = "<3>WSL (530414 - ) ERROR: UtilAcceptVsock:271: accept4 failed 110"
+
+
+def answer(script):
+    """What the machine says to this script: (stdout, stderr, exit code). A mode that raises in a
+    launch exits non-zero; in a session the frame's catch reports exactly the same two things."""
+    m = re.search(r"# fake: ([a-z0-9-]+)", script)
+    mode = m.group(1) if m else "ok-list"
+    if mode == "ok-list":
+        return json.dumps([{"Id": 41, "ProviderName": "Microsoft-Windows-Kernel-Power"}, {"Id": 6008, "ProviderName": "EventLog"}]), "", 0
+    if mode == "ok-object":
+        return json.dumps({"CPU": "x"}), "", 0
+    if mode == "warn":
+        return json.dumps([{"Id": 1}]), "Get-CimInstance : Invalid class", 0
+    if mode == "failed":
+        return "", 'Get-WinEvent : There is not an event log on the localhost computer that matches "Nope".', 1
+    if mode == "denied":
+        return "", "Get-WinEvent : Attempted to perform an unauthorized operation.", 1
+    if mode == "denied-quiet":
+        return "", "Access is denied.", 0
+    if mode == "clixml":
+        return "", CLIXML, 1
+    if mode == "notjson":
+        return "hello", "", 0
+    if mode == "wsl-interop":
+        return "", INTEROP, 1
+    if mode == "wsl-interop-once":
+        flag = os.path.join(os.path.dirname(sys.argv[0]), "interop-flag")
+        if not os.path.exists(flag):
+            open(flag, "w").close()
+            return "", INTEROP, 1
+        return json.dumps([{"Id": 7}]), "", 0
+    if mode == "count":
+        # How many times this process has been asked: one per launch, one more per question in a session.
+        STATE["count"] += 1
+        return json.dumps([{"n": STATE["count"]}]), "", 0
+    if mode == "mark-lookalike":
+        # A line shaped exactly like the session's own frame marker, before the real answer.
+        return "d" * 32 + "\t0\n" + json.dumps([{"Id": 1}]), "", 0
+    if mode == "sleep":
+        time.sleep(5)
+    return "", "", 0
+
+
+def one_shot(args):
+    script = base64.b64decode(args[args.index("-EncodedCommand") + 1]).decode("utf-16le")
+    out, err, code = answer(script)
+    sys.stdout.write(out)
+    if err:
+        sys.stderr.write(err + "\n")
+    sys.exit(code)
+
+
+def session():
+    """Read framed questions on stdin and answer each one, then write its mark back."""
+    if os.environ.get("SENTINEL_FAKE_NO_SESSION"):  # a machine where a session will not start
         sys.exit(1)
-    sys.stdout.write(json.dumps([{"Id": 7}]))
-elif mode == "sleep":
-    time.sleep(5)
+    frame = re.compile(r"FromBase64String\('([A-Za-z0-9+/=]*)'\).*WriteLine\(\"([0-9a-f]+)\"\)")
+    for line in sys.stdin:
+        found = frame.search(line)
+        if found is None:
+            continue  # the prelude, or anything else that is not a question
+        out, err, code = answer(base64.b64decode(found.group(1)).decode("utf-16le"))
+        if err:
+            sys.stderr.write(err + "\n")
+        sys.stderr.write(found.group(2) + "\n")  # the frame closes stderr with the mark first
+        sys.stderr.flush()
+        if out:
+            sys.stdout.write(out + "\n")
+        sys.stdout.write(found.group(2) + "\t" + str(code) + "\n")
+        sys.stdout.flush()
+
+
+args = sys.argv[1:]
+if "-EncodedCommand" in args:
+    one_shot(args)
+else:
+    session()
 sys.exit(0)
 '''
 
@@ -65,6 +113,14 @@ def private_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return home
 
 
+@pytest.fixture(autouse=True)
+def no_session_outlives_a_test():
+    """A live session is a process: no test may leave one running, and none may inherit one."""
+    sentinel.bridge.shutdown_sessions()
+    yield
+    sentinel.bridge.shutdown_sessions()
+
+
 @pytest.fixture
 def fake_powershell(tmp_path: Path) -> Path:
     exe = tmp_path / "powershell.exe"
@@ -73,8 +129,27 @@ def fake_powershell(tmp_path: Path) -> Path:
     return exe
 
 
+@pytest.fixture(params=("one-shot", "session"))
+def bridge(request: pytest.FixtureRequest, fake_powershell: Path, monkeypatch: pytest.MonkeyPatch) -> Bridge:
+    """The bridge, through each of its two transports in turn.
+
+    Every outcome is the same outcome whichever way the question was asked, so every test that
+    takes this fixture states that twice: once against a process per question, once against a
+    live session. A test that is about one transport takes ``one_shot_bridge`` or ``session_bridge``.
+    """
+    monkeypatch.setattr(sentinel.bridge, "POOL_SIZE", 0 if request.param == "one-shot" else 4)
+    return Bridge(exe=str(fake_powershell), cwd=None)
+
+
 @pytest.fixture
-def bridge(fake_powershell: Path) -> Bridge:
+def one_shot_bridge(fake_powershell: Path, monkeypatch: pytest.MonkeyPatch) -> Bridge:
+    monkeypatch.setattr(sentinel.bridge, "POOL_SIZE", 0)
+    return Bridge(exe=str(fake_powershell), cwd=None)
+
+
+@pytest.fixture
+def session_bridge(fake_powershell: Path, monkeypatch: pytest.MonkeyPatch) -> Bridge:
+    monkeypatch.setattr(sentinel.bridge, "POOL_SIZE", 4)
     return Bridge(exe=str(fake_powershell), cwd=None)
 
 

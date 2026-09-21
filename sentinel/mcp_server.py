@@ -2,23 +2,38 @@
 
 The catalog in :data:`sentinel.reading.REGISTRY` is the only source of reading tools; nothing is
 listed here that is not also a route. A tool returns the same envelope a route does, redacted the
-same way. The stack tools are the same projection of the stack routes: an agent chooses evidence
-and reads the composed handoff where a person would copy it to the clipboard.
+same way. The stack and capture tools are the same projection of the stack and capture routes: an
+agent chooses evidence, reads the composed handoff and takes a capture where a person would use
+the dashboard.
+
+The surface an agent meets is the whole protocol, not only tools. Each tool says what it does to
+the machine (``readOnlyHint``, ``destructiveHint``) so a client that confirms destructive calls
+stops confirming the harmless ones; every reading declares one shared ``outputSchema`` and answers
+with ``structuredContent`` beside its text, so a client branches on ``outcome`` and ``class`` as
+typed fields instead of parsing a string; the prompt library is offered as prompts; and the
+catalog and the composed handoff are resources, so a client can hold the handoff open beside the
+work instead of calling a tool for it. What a change to the handoff publishes, and why nothing is
+subscribed to it yet, is in :func:`build_mcp`.
+
+:class:`Surface` holds every method, over one ``State``; :func:`build_mcp` wires it to the
+transport. Nothing in the surface knows about JSON-RPC.
 """
 
 from __future__ import annotations
 
 import json
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from mcp import types
 from mcp.server.lowlevel import Server
+from mcp.server.subscriptions import InMemorySubscriptionBus, ResourceUpdated
 from mcp.server.transport_security import TransportSecuritySettings
+from mcp.shared.exceptions import MCPError
 from starlette.applications import Starlette
 
-from . import __version__
+from . import __version__, capture, readings  # noqa: F401  (readings registers the catalog)
 from .reading import REGISTRY, Spec, take
 from .redact import Redactor
 from .stack import Duplicate, compose, new_item
@@ -36,22 +51,99 @@ INSTRUCTIONS = (
     "last word, or 'crash' with a 'moment' when the person names a time. Then 'record' before a stop's started_at, "
     "'faults' for what went wrong while it kept running, 'whea' and 'storms' for hardware errors, 'signals' last. "
     "A burst, a gap or a correlation is a lead, never a diagnosis. "
-    "The stack tools hold the evidence you have chosen; 'compose' returns it as the handoff text, with each item's provenance."
+    "The stack tools hold the evidence you have chosen; 'compose' returns it as the handoff text, with each item's provenance. "
+    "The catalog and that handoff are also resources: sentinel://catalog and sentinel://handoff."
 )
+
+CATALOG_URI = "sentinel://catalog"
+HANDOFF_URI = "sentinel://handoff"
 
 _NO_ARGUMENTS: dict[str, Any] = {"type": "object", "properties": {}}
 
+# What a tool does to the machine. ``openWorldHint`` is false on every one of them: this tool reads
+# the computer it runs on and writes files on it, and reaches nothing beyond it. ``destructiveHint``
+# is stated rather than left out because its default is true — saying "this one only adds" is what
+# stops a client asking the person to confirm twenty-two harmless calls.
+ANNOTATIONS: dict[str, types.ToolAnnotations] = {
+    "reads": types.ToolAnnotations(read_only_hint=True, open_world_hint=False),
+    "changes": types.ToolAnnotations(read_only_hint=False, destructive_hint=False, open_world_hint=False),
+    "destroys": types.ToolAnnotations(read_only_hint=False, destructive_hint=True, open_world_hint=False),
+}
+READS = ANNOTATIONS["reads"]
+
+NEEDS_REASON = (
+    "an unredacted answer needs a 'reason' beside 'unredacted': it carries serial numbers, the computer name, "
+    "user names and MAC addresses, and the reason is recorded in the answer's warnings so whoever reads it later "
+    "knows why the real values were taken"
+)
+
+ENVELOPE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "description": "The reading envelope: what was asked, whether the machine was observed, and the evidence kept apart by class.",
+    "properties": {
+        "reading": {"type": "string", "description": "The reading's name in the catalog."},
+        "params": {"type": "object", "description": "What was asked for, after the catalog's defaults and coercion."},
+        "asked_at": {"type": "string", "description": "When the question was put to the machine, UTC."},
+        "took_ms": {"type": "integer", "description": "How long the answer took."},
+        "outcome": {
+            "type": "string",
+            "enum": ["ok", "empty", "failed", "unavailable", "denied", "timeout"],
+            "description": "'ok' and 'empty' mean the machine was observed and there were findings or none; the other four mean it was not observed, and they are four different reasons.",
+        },
+        "method": {"type": "object", "description": "How it was taken, so the evidence can be reproduced by hand."},
+        "count": {"type": ["integer", "null"], "description": "Records in the reading, where it counts records. Null is not zero."},
+        "sections": {
+            "type": "array",
+            "description": "The evidence. A section's class says what kind of claim it is.",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "class": {
+                        "type": "string",
+                        "enum": ["raw", "derived", "invariant", "inferred"],
+                        "description": "Raw is what Windows said; invariant is what does not change; derived and inferred were computed here and carry a basis.",
+                    },
+                    "basis": {"type": "string", "description": "For derived and inferred sections: the inputs and the rule, in one sentence."},
+                    "data": {"description": "The section's payload; the shape is the reading's own."},
+                },
+                "required": ["name", "class", "data"],
+            },
+        },
+        "error": {"type": ["object", "null"], "description": "Why the machine was not observed. Null when it was."},
+        "warnings": {"type": "array", "items": {"type": "string"}, "description": "What the tool noticed and did not let stop the reading."},
+        "redacted": {"type": "array", "items": {"type": "string"}, "description": "What the redaction removed, by name."},
+    },
+    "required": ["reading", "asked_at", "took_ms", "outcome", "method", "sections", "warnings", "redacted"],
+}
+
 
 @dataclass(frozen=True)
-class StackTool:
-    """A tool over the stack rather than the machine. Each one is a route as well."""
+class Answer:
+    """A tool's answer where the text a caller reads and the data a caller branches on differ.
+
+    ``compose`` is the case: the text is the handoff Markdown, and the data is the route's object
+    around it. Everything else answers with one payload and needs no pair.
+    """
+
+    text: str
+    data: dict[str, Any] | None = None
+
+
+@dataclass(frozen=True)
+class RouteTool:
+    """A tool over a route rather than over the machine. Each one is a route as well."""
 
     name: str
     description: str
     schema: dict[str, Any]
     call: Callable[["State", dict[str, Any], Redactor | None], Awaitable[Any]]
+    effect: Literal["reads", "changes", "destroys"] = "reads"
+    """What this tool does to the machine: ``reads``, ``changes`` or ``destroys``. :data:`ANNOTATIONS` says it in the protocol's words."""
     carries_machine_data: bool = True
-    """Whether what it returns passes through the redaction, and so takes the ``unredacted`` argument."""
+    """Whether what it returns passes through the redaction, and so takes ``unredacted``."""
+    updates: str | None = None
+    """The resource this tool changes, published on the surface's bus once the call has succeeded."""
 
 
 async def _stack_list(state: "State", _arguments: dict[str, Any], redactor: Redactor | None) -> Any:
@@ -74,7 +166,8 @@ async def _stack_clear(state: "State", _arguments: dict[str, Any], redactor: Red
 
 
 async def _compose(state: "State", _arguments: dict[str, Any], redactor: Redactor | None) -> Any:
-    return compose(state.stack, state.prompts, redactor)["text"]
+    composed = compose(state.stack, state.prompts, redactor)
+    return Answer(text=composed["text"], data=composed)
 
 
 async def _prompts_list(state: "State", _arguments: dict[str, Any], _redactor: Redactor | None) -> Any:
@@ -91,11 +184,26 @@ async def _stack_prompt(state: "State", arguments: dict[str, Any], redactor: Red
     return _redacted(chosen, redactor)
 
 
-STACK_TOOLS: dict[str, StackTool] = {
+async def _capture_create(state: "State", _arguments: dict[str, Any], redactor: Redactor | None) -> Any:
+    """Take the whole catalog into one ZIP on this machine and say where it landed.
+
+    The route hands back the file itself; a tool cannot, so it answers with the capture's name and
+    its manifest — which already says whether it was written unredacted and what was removed — and
+    the file stays on the machine for a person to send.
+    """
+    made = await capture.create(state.bridge, state.stack, state.prompts, redactor)
+    return {"capture": made.name, "manifest": made.manifest}
+
+
+async def _capture_list(_state: "State", _arguments: dict[str, Any], _redactor: Redactor | None) -> Any:
+    return {"captures": capture.listing()}
+
+
+STACK_TOOLS: dict[str, RouteTool] = {
     tool.name: tool
     for tool in (
-        StackTool("stack_list", "The evidence currently chosen for handoff, with the prompt it leads with.", _NO_ARGUMENTS, _stack_list),
-        StackTool(
+        RouteTool("stack_list", "The evidence currently chosen for handoff, with the prompt it leads with.", _NO_ARGUMENTS, _stack_list),
+        RouteTool(
             "stack_add",
             "Add evidence to the stack: a reading the tool takes now ('take'), a reading you already hold ('envelope'), "
             "some of its records ('selection' with 'ids'), or a note you wrote. The same reading with the same parameters "
@@ -119,10 +227,19 @@ STACK_TOOLS: dict[str, StackTool] = {
                 },
             },
             _stack_add,
+            effect="changes",
+            updates=HANDOFF_URI,
         ),
-        StackTool("stack_remove", "Remove one item from the stack by its id.", {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}, _stack_remove),
-        StackTool("stack_clear", "Remove every item from the stack.", _NO_ARGUMENTS, _stack_clear),
-        StackTool(
+        RouteTool(
+            "stack_remove",
+            "Remove one item from the stack by its id.",
+            {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]},
+            _stack_remove,
+            effect="destroys",
+            updates=HANDOFF_URI,
+        ),
+        RouteTool("stack_clear", "Remove every item from the stack.", _NO_ARGUMENTS, _stack_clear, effect="destroys", updates=HANDOFF_URI),
+        RouteTool(
             "stack_update",
             "Change one item's place in the handoff (rank 1 first to 5 last), how much of it is rendered (verbosity summary or full), or its title.",
             {
@@ -136,17 +253,55 @@ STACK_TOOLS: dict[str, StackTool] = {
                 "required": ["id"],
             },
             _stack_update,
+            effect="changes",
+            updates=HANDOFF_URI,
         ),
-        StackTool(
+        RouteTool(
             "stack_prompt",
             "Choose the prompt that leads the handoff (by id from prompts_list; null for none) or whether one leads it at all.",
             {"type": "object", "properties": {"prompt_id": {"type": ["string", "null"]}, "system_prompt": {"type": "boolean"}}},
             _stack_prompt,
+            effect="changes",
+            updates=HANDOFF_URI,
         ),
-        StackTool("compose", "The handoff as Markdown: the prompt, then the evidence by rank, each with its provenance and outcome.", _NO_ARGUMENTS, _compose),
-        StackTool("prompts_list", "The prompt library: the six the tool ships with and any that were added.", _NO_ARGUMENTS, _prompts_list, carries_machine_data=False),
+        RouteTool("compose", "The handoff as Markdown: the prompt, then the evidence by rank, each with its provenance and outcome.", _NO_ARGUMENTS, _compose),
+        RouteTool("prompts_list", "The prompt library: the six the tool ships with and any that were added.", _NO_ARGUMENTS, _prompts_list, carries_machine_data=False),
     )
 }
+
+CAPTURE_TOOLS: dict[str, RouteTool] = {
+    tool.name: tool
+    for tool in (
+        RouteTool(
+            "capture_create",
+            "Take every reading in the catalog now and write them, the stack, the composed handoff and a manifest into "
+            "one ZIP in the captures directory. Takes as long as the slowest query on this machine. Nothing is sent anywhere.",
+            _NO_ARGUMENTS,
+            _capture_create,
+            effect="changes",
+        ),
+        RouteTool("capture_list", "The captures on disk, newest first. Captures are never deleted by the tool.", _NO_ARGUMENTS, _capture_list, carries_machine_data=False),
+    )
+}
+
+ROUTE_TOOLS: dict[str, RouteTool] = {**STACK_TOOLS, **CAPTURE_TOOLS}
+
+RESOURCES: tuple[types.Resource, ...] = (
+    types.Resource(
+        uri=CATALOG_URI,
+        name="catalog",
+        title="The catalog",
+        description="Every reading this machine offers: name, description, classes, parameters and what the redaction removes. The same answer as GET /api/readings.",
+        mime_type="application/json",
+    ),
+    types.Resource(
+        uri=HANDOFF_URI,
+        name="handoff",
+        title="The composed handoff",
+        description="The evidence on the stack as Markdown, in rank order, each item with its provenance. It changes whenever the stack does, so read it again after a stack tool. Always redacted: a resource takes no arguments, so there is no way to ask it for the real values.",
+        mime_type="text/markdown",
+    ),
+)
 
 
 def _redacted(payload: Any, redactor: Redactor | None) -> Any:
@@ -168,13 +323,29 @@ def input_schema(spec: Spec) -> dict[str, Any]:
 
 
 def _with_unredacted(schema: dict[str, Any]) -> dict[str, Any]:
+    """Add the two arguments that go together: the real values, and why they were asked for.
+
+    ``reason`` is required only when ``unredacted`` is true, said as JSON Schema so a client can
+    see the rule, and enforced in :meth:`Surface.call_tool` so a client that cannot read the rule
+    is still refused. A required field rather than an elicitation: elicitation is a capability a
+    client may not have, and this is certain.
+    """
     properties = dict(schema.get("properties") or {})
     properties["unredacted"] = {
         "type": "boolean",
         "default": False,
         "description": "Include serial numbers, the computer name, user names and MAC addresses. Only with a reason.",
     }
-    return {**schema, "properties": properties}
+    properties["reason"] = {
+        "type": "string",
+        "description": "Why the real values are needed. Required with 'unredacted', and recorded in the answer's warnings.",
+    }
+    return {
+        **schema,
+        "properties": properties,
+        "if": {"properties": {"unredacted": {"const": True}}, "required": ["unredacted"]},
+        "then": {"required": ["reason"]},
+    }
 
 
 def tool_name(reading: str) -> str:
@@ -187,42 +358,195 @@ def reading_for(tool: str) -> str | None:
     return next((name for name in REGISTRY if tool_name(name) == tool), None)
 
 
+def check_tool_names(catalog: Iterable[str], route_tools: Iterable[str]) -> None:
+    """One tool name per reading, and no reading hidden behind a route tool.
+
+    ``tool_name`` is not injective on its own: a reading named ``hardware_cpu`` beside
+    ``hardware.cpu`` would claim one tool name, and ``reading_for`` would hand every call to
+    whichever came first in the catalog — a tool that answers a different question than the one
+    asked, with a clean outcome. Route tools are checked in the same namespace because a call is
+    matched against them first. Run when this module is imported, so it cannot ship.
+    """
+    claimed: dict[str, str] = {name: name for name in route_tools}
+    for name in catalog:
+        tool = tool_name(name)
+        if tool in claimed:
+            raise RuntimeError(f"two things claim the MCP tool name {tool!r}: {claimed[tool]!r} and {name!r}")
+        claimed[tool] = name
+
+
+check_tool_names(REGISTRY, ROUTE_TOOLS)
+
+
 def tools() -> list[types.Tool]:
-    reading_tools = [types.Tool(name=tool_name(spec.name), description=spec.description, input_schema=input_schema(spec)) for spec in REGISTRY.values()]
-    stack_tools = [types.Tool(name=t.name, description=t.description, input_schema=_with_unredacted(t.schema) if t.carries_machine_data else t.schema) for t in STACK_TOOLS.values()]
-    return reading_tools + stack_tools
+    reading_tools = [
+        types.Tool(
+            name=tool_name(spec.name),
+            description=spec.description,
+            input_schema=input_schema(spec),
+            output_schema=ENVELOPE_SCHEMA,
+            annotations=READS,
+        )
+        for spec in REGISTRY.values()
+    ]
+    route_tools = [
+        types.Tool(
+            name=t.name,
+            description=t.description,
+            input_schema=_with_unredacted(t.schema) if t.carries_machine_data else t.schema,
+            annotations=ANNOTATIONS[t.effect],
+        )
+        for t in ROUTE_TOOLS.values()
+    ]
+    return reading_tools + route_tools
+
+
+def _answer(payload: Any) -> types.CallToolResult:
+    """One answer, twice: the text a client without structured output reads, and the same fact typed.
+
+    A client that understands ``structuredContent`` branches on ``outcome`` and on a section's
+    ``class`` as fields; one that does not reads exactly what it read before.
+    """
+    if isinstance(payload, Answer):
+        text, data = payload.text, payload.data
+    else:
+        # Structured output is a JSON object before 2026-07-28, so anything else travels as text alone.
+        text, data = json.dumps(payload, indent=1), payload if isinstance(payload, dict) else None
+    return types.CallToolResult(content=[types.TextContent(type="text", text=text)], structured_content=data)
+
+
+def _refused(detail: str) -> types.CallToolResult:
+    """A refusal the model can see and correct, rather than a protocol error it cannot."""
+    return types.CallToolResult(content=[types.TextContent(type="text", text=detail)], is_error=True)
+
+
+def _warned(payload: Any, reason: str) -> Any:
+    """Record why the real values were asked for, in the answer itself.
+
+    The envelope already has a ``warnings`` list for what the tool noticed; an unredacted view is
+    exactly that. An answer that is a text (the composed handoff) carries the note on its data.
+    """
+    if not reason:
+        return payload
+    note = f"unredacted, because: {reason}"
+    if isinstance(payload, Answer):
+        data = {**(payload.data or {})}
+        data["warnings"] = [*data.get("warnings", []), note]
+        return Answer(text=payload.text, data=data)
+    if isinstance(payload, dict):
+        payload["warnings"] = [*payload.get("warnings", []), note]
+    return payload
+
+
+class Surface:
+    """Every method an agent can reach, over one :class:`sentinel.app.State`.
+
+    Kept apart from the transport so what an agent is offered can be read, and tested, without a
+    wire: :func:`build_mcp` hands these to the SDK's ``Server``. The bus is the one place a change
+    made here is announced; what is listening on it is the transport's business, not this class's.
+    """
+
+    def __init__(self, state: "State"):
+        self.state = state
+        self.bus = InMemorySubscriptionBus()
+
+    async def list_tools(self, _ctx: Any = None, _params: Any = None) -> types.ListToolsResult:
+        return types.ListToolsResult(tools=tools())
+
+    async def call_tool(self, _ctx: Any, params: types.CallToolRequestParams) -> types.CallToolResult:
+        arguments = dict(params.arguments or {})
+        unredacted = bool(arguments.pop("unredacted", False))
+        # Popped whether or not it was asked for: a reading refuses a parameter it does not have,
+        # and 'reason' belongs to this boundary rather than to the query. It is recorded only on an
+        # answer that is actually unredacted; on a redacted one it would be a note about nothing.
+        reason = str(arguments.pop("reason", "") or "").strip()
+        if not unredacted:
+            reason = ""
+        elif not reason:
+            return _refused(NEEDS_REASON)
+        redactor = None if unredacted else self.state.redactor
+
+        tool = ROUTE_TOOLS.get(params.name)
+        if tool is not None:
+            try:
+                payload = await tool.call(self.state, arguments, redactor)
+            except Duplicate:
+                return _refused("this evidence is already on the stack")
+            except KeyError as exc:
+                return _refused(f"nothing on the stack with id {exc}")
+            except ValueError as exc:
+                return _refused(str(exc))
+            if tool.updates:
+                await self.bus.publish(ResourceUpdated(tool.updates))
+            return _answer(_warned(payload, reason))
+
+        reading_name = reading_for(params.name)
+        if reading_name is None:
+            return _refused(f"no reading named {params.name!r}")
+        try:
+            reading = await take(reading_name, self.state.bridge, arguments)
+        except ValueError as exc:
+            return _refused(str(exc))
+        body = reading.to_dict() if unredacted else self.state.redactor.attach(reading.to_dict())
+        return _answer(_warned(body, reason))
+
+    async def list_prompts(self, _ctx: Any = None, _params: Any = None) -> types.ListPromptsResult:
+        """The prompt library, as prompts. The id is the name a client calls back with; the person's
+        own title and description are what they see."""
+        return types.ListPromptsResult(
+            prompts=[types.Prompt(name=p["id"], title=p.get("name"), description=p.get("description") or None) for p in self.state.prompts.all()]
+        )
+
+    async def get_prompt(self, _ctx: Any, params: types.GetPromptRequestParams) -> types.GetPromptResult:
+        prompt = self.state.prompts.get(params.name)
+        if prompt is None:
+            raise MCPError(types.INVALID_PARAMS, f"no prompt {params.name!r}")
+        return types.GetPromptResult(
+            description=prompt.get("description") or None,
+            messages=[types.PromptMessage(role="user", content=types.TextContent(type="text", text=prompt.get("content") or ""))],
+        )
+
+    async def list_resources(self, _ctx: Any = None, _params: Any = None) -> types.ListResourcesResult:
+        return types.ListResourcesResult(resources=list(RESOURCES))
+
+    async def read_resource(self, _ctx: Any, params: types.ReadResourceRequestParams) -> types.ReadResourceResult:
+        uri = str(params.uri)
+        if uri == CATALOG_URI:
+            body = json.dumps({"readings": [spec.to_dict() for spec in REGISTRY.values()], "version": __version__}, indent=1)
+            return _resource(uri, "application/json", body)
+        if uri == HANDOFF_URI:
+            return _resource(uri, "text/markdown", compose(self.state.stack, self.state.prompts, self.state.redactor)["text"])
+        raise MCPError(types.INVALID_PARAMS, f"no resource at {uri!r}")
+
+
+def _resource(uri: str, mime_type: str, text: str) -> types.ReadResourceResult:
+    return types.ReadResourceResult(contents=[types.TextResourceContents(uri=uri, mime_type=mime_type, text=text)])
 
 
 def build_mcp(state: "State") -> Starlette:
-    async def on_list_tools(_ctx, _params) -> types.ListToolsResult:
-        return types.ListToolsResult(tools=tools())
-
-    async def on_call_tool(_ctx, params: types.CallToolRequestParams) -> types.CallToolResult:
-        arguments = dict(params.arguments or {})
-        unredacted = bool(arguments.pop("unredacted", False))
-        stack_tool = STACK_TOOLS.get(params.name)
-        if stack_tool is not None:
-            try:
-                payload = await stack_tool.call(state, arguments, None if unredacted else state.redactor)
-            except Duplicate:
-                return types.CallToolResult(content=[types.TextContent(type="text", text="this evidence is already on the stack")], is_error=True)
-            except KeyError as exc:
-                return types.CallToolResult(content=[types.TextContent(type="text", text=f"nothing on the stack with id {exc}")], is_error=True)
-            except ValueError as exc:
-                return types.CallToolResult(content=[types.TextContent(type="text", text=str(exc))], is_error=True)
-            text = payload if isinstance(payload, str) else json.dumps(payload, indent=1)
-            return types.CallToolResult(content=[types.TextContent(type="text", text=text)])
-        reading_name = reading_for(params.name)
-        if reading_name is None:
-            return types.CallToolResult(content=[types.TextContent(type="text", text=f"no reading named {params.name!r}")], is_error=True)
-        try:
-            reading = await take(reading_name, state.bridge, arguments)
-        except ValueError as exc:
-            return types.CallToolResult(content=[types.TextContent(type="text", text=str(exc))], is_error=True)
-        body = reading.to_dict() if unredacted else state.redactor.attach(reading.to_dict())
-        return types.CallToolResult(content=[types.TextContent(type="text", text=json.dumps(body, indent=1))])
-
-    server = Server("system-sentinel", version=__version__, instructions=INSTRUCTIONS, on_list_tools=on_list_tools, on_call_tool=on_call_tool)
+    surface = Surface(state)
+    server = Server(
+        "system-sentinel",
+        version=__version__,
+        instructions=INSTRUCTIONS,
+        on_list_tools=surface.list_tools,
+        on_call_tool=surface.call_tool,
+        on_list_prompts=surface.list_prompts,
+        on_get_prompt=surface.get_prompt,
+        on_list_resources=surface.list_resources,
+        on_read_resource=surface.read_resource,
+    )
     # The token is the boundary; host-header checks would only refuse the tailnet name a phone uses.
     security = TransportSecuritySettings(enable_dns_rebinding_protection=False)
-    return server.streamable_http_app(streamable_http_path="/mcp", stateless_http=True, json_response=True, transport_security=security)
+    # One JSON body per request: no session to keep, nothing to resume. The one thing a body
+    # cannot carry is a stream, and a subscription is a stream — a client subscribes by sending
+    # 'subscriptions/listen', whose own response is the channel the change notifications ride. So
+    # the surface publishes every stack change on its bus (RouteTool.updates) and nothing is
+    # subscribed to it yet. Turning it on is one line, `on_subscriptions_listen=ListenHandler(
+    # surface.bus)` with json_response left at its default, and that default changes what every
+    # client reads off this wire — so it is a decision about the wire, not about this module.
+    app = server.streamable_http_app(
+        streamable_http_path="/mcp", stateless_http=True, json_response=True, transport_security=security
+    )
+    app.state.surface = surface
+    return app

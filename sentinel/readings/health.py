@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from ..bridge import Bridge
+from ..bridge import Bridge, sessions_report
 from ..paths import data_dir
 from ..reading import Reading, Section, Spec, register
 from ..redact import Identity
@@ -31,14 +31,20 @@ def learn_identity(bridge: Bridge) -> tuple[Identity, dict[str, Any]]:
 
 def take_health(bridge: Bridge, params: dict[str, Any]) -> Reading:
     _, facts = learn_identity(bridge)
+    sessions = sessions_report(bridge)
     data = {
-        "bridge": {"available": bridge.available, "exe": bool(bridge.exe), **facts},
+        "bridge": {"available": bridge.available, "exe": bool(bridge.exe), **facts, "sessions": sessions},
         "decoder": {"present": os.path.exists(DECODER)},
         "data_dir": {"present": data_dir().is_dir()},
     }
     outcome = facts["outcome"]
     reading = Reading(reading="health", params={}, outcome=outcome, method={"kind": "powershell", "query": IDENTITY_SCRIPT}, took_ms=facts.get("took_ms", 0))
     reading.sections = [Section("bridge", "raw", data)]
+    # A question that had to be launched because no live session would start is not a failure — the
+    # machine still answered — but it is the difference between a reading that costs milliseconds
+    # and one that costs a fifth of a second, so it is said out loud rather than left in a count.
+    if sessions["fell_back"] or sessions["start_failures"]:
+        reading.warnings.append("a live session would not start, so questions are going through a one-shot launch each; the machine still answered")
     if outcome not in ("ok", "empty"):
         reading.error = {"kind": outcome, "detail": facts.get("error") or ""}
     return reading
@@ -47,7 +53,7 @@ def take_health(bridge: Bridge, params: dict[str, Any]) -> Reading:
 register(
     Spec(
         name="health",
-        description="Whether the bridge works: PowerShell found and answering, its version, the decoder present, the data directory writable. Take this first.",
+        description="Whether the bridge works: PowerShell found and answering, its version, how questions are reaching the machine and how the live sessions are doing, the decoder present, the data directory writable. Take this first.",
         classes=("raw",),
         take=take_health,
     )

@@ -1,10 +1,10 @@
 name: Release
 
-# A tag builds the executable from that commit on a Windows runner, writes the checksum beside it,
-# attests where it came from, and leaves a draft release. Nothing here publishes anything: the
-# draft is checked (its digest against the list, its attestation) and then published by whoever
-# cut the tag. A manual run builds and attests the same way
-# and keeps the executable as a workflow artifact, which is how a build is checked before tagging.
+# A tag builds the executable from that commit on a Windows runner, writes the checksum and the
+# bill of materials beside it, attests where both came from, and leaves a draft release. Nothing
+# here publishes anything: the draft is checked (its digest against the list, its attestation) and
+# then published by whoever cut the tag. A manual run builds and attests the same way and keeps the
+# build as a workflow artifact, which is how a build is checked before tagging.
 
 "on":
   push:
@@ -79,14 +79,29 @@ jobs:
           $python = (Get-Command python).Source
           build\windows\build.ps1 -Python $python
 
-      - name: The checksum beside it
+      # What is inside the file, as a list a scanner can read: every Python package PyInstaller
+      # froze into it, with its version and its licence. Taken from the environment the build used,
+      # because that environment is what ended up in the executable — a list made from the
+      # repository would describe what the source asks for, which is not the same claim.
+      - name: The bill of materials for what is inside it
+        shell: pwsh
+        run: |
+          python -m pip install --quiet cyclonedx-bom==7.4.0
+          python -m cyclonedx_py environment .venv-win\Scripts\python.exe `
+            --pyproject pyproject.toml --mc-type application --of JSON -o dist\SystemSentinel.cdx.json
+          if ($LASTEXITCODE -ne 0) { throw "the bill of materials could not be written" }
+
+      - name: The checksums beside them
         id: checksum
         shell: pwsh
         run: |
+          $lines = foreach ($name in "SystemSentinel.exe", "SystemSentinel.cdx.json") {
+            "{0}  {1}" -f (Get-FileHash "dist\$name" -Algorithm SHA256).Hash.ToLower(), $name
+          }
+          [IO.File]::WriteAllText("dist\SHA256SUMS.txt", ($lines -join "`n") + "`n")
           $hash = (Get-FileHash dist\SystemSentinel.exe -Algorithm SHA256).Hash.ToLower()
-          [IO.File]::WriteAllText("dist\SHA256SUMS.txt", "$hash  SystemSentinel.exe`n")
           "sha256=$hash" >> $env:GITHUB_OUTPUT
-          Write-Host "$hash  SystemSentinel.exe"
+          Write-Host ($lines -join "`n")
 
       - name: The notes, rendered from the template
         shell: pwsh
@@ -102,7 +117,9 @@ jobs:
       - name: Where the executable came from
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
-          subject-path: dist/SystemSentinel.exe
+          subject-path: |
+            dist/SystemSentinel.exe
+            dist/SystemSentinel.cdx.json
 
       - name: Keep the build
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -110,6 +127,7 @@ jobs:
           name: SystemSentinel-${{ steps.version.outputs.version }}
           path: |
             dist/SystemSentinel.exe
+            dist/SystemSentinel.cdx.json
             dist/SHA256SUMS.txt
             dist/notes.md
           if-no-files-found: error
@@ -138,4 +156,4 @@ jobs:
             --draft \
             --title "System Sentinel ${{ needs.build.outputs.version }}" \
             --notes-file dist/notes.md \
-            dist/SystemSentinel.exe dist/SHA256SUMS.txt
+            dist/SystemSentinel.exe dist/SystemSentinel.cdx.json dist/SHA256SUMS.txt

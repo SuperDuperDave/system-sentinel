@@ -46,6 +46,7 @@ from typing import Callable
 
 from . import __version__
 from .auth import load_or_create_token, mint_code
+from .bridge import shutdown_sessions
 from .paths import data_dir
 
 try:  # the tray and the mark are the optional extra
@@ -776,6 +777,10 @@ def _quit(server: Server | None, tray=None) -> None:
     LOG.info("quitting")
     if server is not None:
         server.quit()
+    # The server's own shutdown ends the bridge's live sessions, but this door is also the one a
+    # launcher without a server behind it goes through, and a session is a process: end them here
+    # too. Both paths are idempotent.
+    shutdown_sessions()
     if tray is not None:
         tray.stop()
 

@@ -1,4 +1,4 @@
-"""``system-sentinel``: serve, token, check, launch.
+"""``system-sentinel``: serve, token, check, launch, bench.
 
 ``serve`` runs the API on 127.0.0.1:8000 and prints where it is and where the
 token lives. ``launch`` is the same server for someone who did not open a
@@ -6,16 +6,21 @@ terminal: it opens the dashboard already signed in and sits in the tray.
 ``token`` prints the token for an agent to read. ``check`` takes the health
 reading without starting the server and exits non-zero unless the bridge
 answered, so a deploy prompt can prove the install before anyone opens a page.
+``bench`` takes every reading against the real bridge and writes what each one
+costs, so a claim about speed points at the command that produces it.
 """
 
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import sys
+from pathlib import Path
 
 from . import __version__
 from .auth import load_or_create_token, token_path
+from .bench import DEFAULT_RUNS, DOC_PATH, TRANSPORTS
 from .bridge import Bridge
 from .paths import data_dir
 
@@ -35,6 +40,13 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("check", help="take the health reading and exit 0 only if the bridge answered")
     sub.add_parser("where", help="print the data directory")
 
+    bench = sub.add_parser("bench", help="take every reading against the real bridge and report what each one costs")
+    bench.add_argument("--runs", type=int, default=DEFAULT_RUNS, help=f"how many times to take each reading (default {DEFAULT_RUNS})")
+    bench.add_argument("--readings", default="", help="comma-separated reading names to narrow to (default: every reading in the catalog)")
+    bench.add_argument("--transport", choices=TRANSPORTS, default=TRANSPORTS[0], help=f"which bridge transport to measure (default {TRANSPORTS[0]})")
+    bench.add_argument("--json", dest="as_json", action="store_true", help="print the run as JSON, samples included, for a machine")
+    bench.add_argument("--out", default=None, help=f"write the result to this file instead of standard output (the document is {DOC_PATH})")
+
     args = parser.parse_args(argv)
     if args.command == "serve":
         return _serve(args.host, args.port, args.reload)
@@ -50,6 +62,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "check":
         return _check()
+    if args.command == "bench":
+        return _bench(args.runs, args.readings, args.transport, args.as_json, args.out)
     parser.print_help()
     return 2
 
@@ -91,6 +105,57 @@ def _check() -> int:
     reading = REGISTRY["health"].take(bridge, {})
     print(json.dumps(reading.to_dict(), indent=1))
     return 0 if reading.observed else 1
+
+
+def _bench(runs: int, readings: str, transport: str, as_json: bool, out: str | None) -> int:
+    """Measure the selection and emit it, as the document or as JSON.
+
+    Exits non-zero when the machine was never observed: a bench that measured nothing has nothing
+    to report, and a table of em dashes should not be mistaken for a result.
+    """
+    from . import bench
+    from . import readings as _catalog  # noqa: F401 - importing the package fills the registry
+
+    if runs < 1:
+        print("--runs takes at least 1", file=sys.stderr)
+        return 2
+    try:
+        names = bench.select(readings)
+    except ValueError as exc:
+        print(exc, file=sys.stderr)
+        return 2
+
+    report = asyncio.run(bench.measure(Bridge.locate(), names=names, runs=runs, transport=transport))
+    try:
+        if out is None:
+            text = bench.as_json(report) if as_json else bench.section(report)
+            bench.check_clean(text)
+            _say(text)
+        else:
+            path = Path(out)
+            if as_json:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(bench.as_json(report) + "\n", encoding="utf-8")
+            else:
+                bench.write(report, path)
+            _say(f"{transport} transport, {len(report.rows)} reading(s) x {report.runs} run(s) -> {out}")
+    except bench.Leak as exc:
+        print(exc, file=sys.stderr)
+        return 2
+    return 0 if report.observed else 1
+
+
+def _say(text: str) -> None:
+    """Print, on a console that may not be able to spell what the document says.
+
+    The measurement is written as UTF-8 and reads as typography; a Windows console is still
+    sometimes a legacy code page, and a table is not worth ending the command over.
+    """
+    try:
+        print(text)
+    except UnicodeEncodeError:
+        encoding = sys.stdout.encoding or "ascii"
+        print(text.encode(encoding, "replace").decode(encoding))
 
 
 if __name__ == "__main__":

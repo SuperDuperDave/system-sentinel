@@ -5,12 +5,14 @@ envelope and that the outcome is one the machine can answer with.
 """
 
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
+import sentinel.bridge
 from sentinel import readings  # noqa: F401
-from sentinel.reading import take
+from sentinel.bridge import OUTCOMES, sessions_report
+from sentinel.reading import REGISTRY, take
 from sentinel.readings.health import learn_identity
 from tests.conftest import real_bridge_or_skip
 
@@ -138,6 +140,74 @@ def test_signals_draws_on_the_stops_and_on_windows_own_record():
     inputs = {entry["name"]: entry["outcome"] for entry in r.method["readings"]}
     assert {"crash", "reliability"} <= set(inputs)
     assert inputs["crash"] in ("ok", "empty") and inputs["reliability"] in ("ok", "empty"), inputs
+
+
+# --- the two transports, against the real machine -------------------------------------------------
+
+
+def test_a_reading_through_a_live_session_matches_one_through_a_launch(monkeypatch):
+    """The transport is not part of the contract: the same question asked both ways comes back the
+    same. A raw script for the exact items, and a reading for what the catalog answers with."""
+    bridge = real_bridge_or_skip()
+    script = "[pscustomobject]@{ name = 'one'; n = 1 }, [pscustomobject]@{ name = 'two'; n = 2 }"
+
+    monkeypatch.setattr(sentinel.bridge, "POOL_SIZE", 0)
+    launched = bridge.run(script)
+    launched_snapshot = asyncio.run(take("system", bridge, {}))
+
+    monkeypatch.setattr(sentinel.bridge, "POOL_SIZE", 4)
+    answered = bridge.run(script)
+    session_snapshot = asyncio.run(take("system", bridge, {}))
+
+    assert launched.outcome == answered.outcome == "ok", (launched.error, answered.error)
+    assert launched.items == answered.items == [{"name": "one", "n": 1}, {"name": "two", "n": 2}]
+    assert sessions_report(bridge)["answered"] >= 2  # the second pair really did go through a session
+
+    assert launched_snapshot.outcome == session_snapshot.outcome == "ok"
+    assert [s.name for s in launched_snapshot.sections] == [s.name for s in session_snapshot.sections]
+    # The machine did not restart between the two takes, so this is the same fact twice.
+    assert launched_snapshot.section("snapshot").data["boot_time"] == session_snapshot.section("snapshot").data["boot_time"]
+
+
+def test_a_question_in_a_live_session_cannot_see_the_one_before_it(monkeypatch):
+    """Each question runs in a child scope, which is the whole of the isolation a session needs:
+    one process answering everything must not let one reading's variables reach the next."""
+    bridge = real_bridge_or_skip()
+    monkeypatch.setattr(sentinel.bridge, "POOL_SIZE", 1)  # one session, so both questions go to it
+
+    first = bridge.run("$__sentinel_probe = 41; [pscustomobject]@{ set = $true }")
+    assert first.outcome == "ok", first.error
+    second = bridge.run("[pscustomobject]@{ leaked = ($null -ne $__sentinel_probe) }")
+    assert second.outcome == "ok", second.error
+    assert second.items == [{"leaked": False}]
+
+    report = sessions_report(bridge)
+    assert report["alive"] == 1 and report["answered"] == 2  # and it was one session that answered both
+
+
+def test_the_pool_survives_the_whole_catalog_taken_twice(monkeypatch):
+    """The whole catalog, twice, through one pool: no session dies, none has to be replaced, and
+    nothing falls back to a launch. This is the run that would show a leak or a wedged frame."""
+    bridge = real_bridge_or_skip()
+    monkeypatch.setattr(sentinel.bridge, "POOL_SIZE", 4)
+    moment = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    params = {"record": {"before": moment}}
+
+    seen: dict[str, list[str]] = {}
+    for _ in range(2):
+        for name in list(REGISTRY):
+            reading = asyncio.run(take(name, bridge, params.get(name, {})))
+            assert reading.outcome in OUTCOMES, (name, reading.outcome)
+            assert reading.outcome != "unavailable", (name, reading.error)  # the bridge itself never stopped answering
+            seen.setdefault(name, []).append(reading.outcome)
+
+    report = sessions_report(bridge)
+    assert report["transport"] == "session"
+    assert report["answered"] >= 2 * len(REGISTRY)
+    assert report["alive"] <= report["size"]
+    assert report["discarded"].get("died", 0) == 0, report
+    assert report["fell_back"] == 0 and report["start_failures"] == 0, report
+    assert len(seen) == len(REGISTRY)
 
 
 def _moment(stamp: str) -> datetime:

@@ -46,6 +46,10 @@ npm-debug.log*
 # Python packaging
 *.egg-info/
 
+# What the checks leave behind (the cache directories ignore themselves)
+.coverage
+coverage.xml
+
 # Built dashboard (dashboard/ builds into it)
 sentinel/static/
 

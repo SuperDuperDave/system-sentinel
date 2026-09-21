@@ -280,13 +280,18 @@ function PromptForm({ initial, onSave, onCancel }: { initial: Fields; onSave: (f
   const id = useId();
   const [fields, setFields] = useState<Fields>({ name: initial.name, description: initial.description, content: initial.content });
   const set = (key: keyof Fields) => (e: { target: { value: string } }) => setFields((f) => ({ ...f, [key]: e.target.value }));
+  const nameField = useRef<HTMLInputElement>(null);
+
+  // The form appears where a button was, so the focus that button held has to go somewhere.
+  useEffect(() => { nameField.current?.focus(); }, []);
+
   return (
     <form
       className={styles.form}
       onSubmit={(e) => { e.preventDefault(); onSave(fields); }}
     >
       <label className="label" htmlFor={`${id}-name`}>Name</label>
-      <input id={`${id}-name`} className={styles.input} value={fields.name} onChange={set('name')} autoFocus />
+      <input id={`${id}-name`} className={styles.input} ref={nameField} value={fields.name} onChange={set('name')} />
       <label className="label" htmlFor={`${id}-what`}>What it is for</label>
       <input id={`${id}-what`} className={styles.input} value={fields.description} onChange={set('description')} />
       <label className="label" htmlFor={`${id}-content`}>The prompt</label>
@@ -311,7 +316,7 @@ function Handoff({ handoff }: { handoff: Composed | null }) {
         <span className={styles.spacer} />
         <CopyButton text={handoff.text} selectRef={preview} />
       </p>
-      <pre className={`${styles.preview} readout`} ref={preview} tabIndex={0}>{handoff.text}</pre>
+      <pre className={`${styles.preview} readout`} ref={preview} tabIndex={0} role="region" aria-label="The composed handoff">{handoff.text}</pre>
     </>
   );
 }

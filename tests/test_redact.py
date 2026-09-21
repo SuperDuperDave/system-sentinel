@@ -1,5 +1,10 @@
 """The redaction policy: serials, the machine's names, MAC addresses and profile paths go; evidence stays."""
 
+import string
+
+from hypothesis import given, settings
+from hypothesis import strategies as st
+
 from sentinel.redact import Identity, redact
 
 
@@ -89,3 +94,105 @@ def test_attach_records_what_was_removed_on_the_object():
     body = Redactor().attach({"MachineName": "X-1", "plain": 1})
     assert body == {"MachineName": "<host>", "plain": 1, "redacted": ["host"]}
     assert Redactor().attach(["a"]) == ["a"]
+
+
+# --- The property, over trees nobody wrote by hand ----------------------------------------------
+#
+# The tests above name the shapes this machine's readings actually produce. These two say something
+# stronger about any shape at all: a tree with the machine's name planted anywhere in it comes back
+# without it, and a tree that has been redacted once does not change if it is redacted again. The
+# names here are invented, as every name in tests/ is.
+
+HOST = "MACHINE-7QX"
+USER = "corvus"
+IDENTITY = Identity(host=HOST, user=USER)
+
+_ASCII_ALNUM = set(string.ascii_letters + string.digits)
+
+#: The same name as the machine says it, as a log says it, and as a path says it. Case is not a
+#: hiding place: the policy matches case-insensitively, so the property has to hold for all of them.
+_NAMES = st.sampled_from([HOST, HOST.lower(), HOST.title(), USER, USER.upper(), USER.title()])
+
+_LEAVES = st.one_of(
+    st.none(),
+    st.booleans(),
+    st.integers(),
+    st.floats(allow_nan=False, allow_infinity=False),
+    st.text(max_size=12),
+)
+_KEYS = st.text(min_size=1, max_size=12)
+_TREES = st.recursive(
+    _LEAVES,
+    lambda children: st.one_of(st.lists(children, max_size=4), st.dictionaries(_KEYS, children, max_size=4)),
+    max_leaves=12,
+)
+
+
+def _at_a_word_boundary(text: str, trailing: bool) -> str:
+    """Text that ends (or begins) where a word does.
+
+    A name inside a longer run of letters and digits is deliberately not replaced — ``davenport``
+    keeps its ``dave`` — so text planted beside a name has to stop at a boundary for the property to
+    be about redaction rather than about that rule.
+    """
+    if not text:
+        return text
+    edge = text[-1] if trailing else text[0]
+    if edge not in _ASCII_ALNUM:
+        return text
+    return text + " " if trailing else " " + text
+
+
+@st.composite
+def _seeded(draw: st.DrawFn) -> tuple[str, object]:
+    """A tree of any shape with one of the machine's names somewhere inside it."""
+    name = draw(_NAMES)
+    before = _at_a_word_boundary(draw(st.text(max_size=16)), trailing=True)
+    after = _at_a_word_boundary(draw(st.text(max_size=16)), trailing=False)
+    carrier = draw(
+        st.one_of(
+            st.just(name),  # the whole value is the name
+            st.just(f"{before}{name}{after}"),  # the name inside a sentence
+            st.just(rf"C:\Users\{name}\AppData\Local\CrashDumps\x.dmp"),  # the name inside a path
+        )
+    )
+    node: object = {carrier: draw(_TREES)} if draw(st.booleans()) else carrier
+    for _ in range(draw(st.integers(min_value=0, max_value=4))):  # then bury it
+        node = [draw(_TREES), node] if draw(st.booleans()) else {draw(_KEYS): node, "beside": draw(_TREES)}
+    return name, node
+
+
+def _strings(value):
+    """Every string in a tree, keys as well as values: everything a reader could see."""
+    if isinstance(value, dict):
+        for k, v in value.items():
+            if isinstance(k, str):
+                yield k
+            yield from _strings(v)
+    elif isinstance(value, list):
+        for v in value:
+            yield from _strings(v)
+    elif isinstance(value, str):
+        yield value
+
+
+@settings(deadline=None)  # a tree can be large and a shared runner can stall; the result is what matters
+@given(_seeded())
+def test_a_planted_name_never_survives_at_any_depth(seeded):
+    """Whatever the shape, in a key or a value, alone or inside text: the name does not come back."""
+    name, tree = seeded
+    out, removed = redact(tree, IDENTITY)
+    assert not any(name.lower() in s.lower() for s in _strings(out))
+    assert removed, "something was removed, so the envelope has to say so"
+
+
+@settings(deadline=None)
+@given(_TREES)
+def test_redacting_twice_changes_nothing(tree):
+    """The placeholders are a fixed point: composing or capturing already-redacted evidence is safe."""
+    once, first = redact(tree, IDENTITY)
+    twice, second = redact(once, IDENTITY)
+    assert twice == once
+    # A field is redacted by its name, so a second pass can name the same field again; what it must
+    # never do is find a kind of thing the first pass left behind.
+    assert set(second) <= set(first)

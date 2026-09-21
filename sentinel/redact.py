@@ -8,9 +8,9 @@ Device instance identifiers are kept: they are how PCIe endpoints are told apart
 Two layers, so the policy cannot fail open. Fields are redacted **by name** wherever
 they appear (``MachineName``, ``SerialNumber``, ``mac_address``, ``ipv4`` and their
 kin), which needs nothing learned about the machine. Then the machine's own names,
-once learned from it, are replaced **by value** wherever they occur inside text, so a
-host name quoted in a message goes too. If the names were never learned, the first
-layer still holds.
+once learned from it, are replaced **by value** wherever they occur in text, so a host
+name quoted in a message goes too, and so does one used as a key. If the names were
+never learned, the first layer still holds.
 
 One function, :func:`redact`, walks a JSON tree and returns a new one plus the list
 of what it removed. Every route, the composed handoff and the capture pack pass
@@ -83,7 +83,11 @@ class Redactor:
 
     def _walk(self, value: Any, removed: set[str], key: str | None) -> Any:
         if isinstance(value, dict):
-            return {k: self._walk(v, removed, key=str(k)) for k, v in value.items()}
+            # The key is walked too, by the value layer alone: a tree keyed by the machine's own
+            # name would otherwise carry it out whole. The field policy is deliberately not applied
+            # to a key, because ``SerialNumber`` has to stay ``SerialNumber`` for a reader to know
+            # which field was removed.
+            return {(self._string(k, removed, None) if isinstance(k, str) else k): self._walk(v, removed, key=str(k)) for k, v in value.items()}
         if isinstance(value, list):
             return [self._walk(v, removed, key=key) for v in value]
         if isinstance(value, str):
