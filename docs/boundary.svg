@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="700" height="638" viewBox="0 0 520 474" role="img" aria-labelledby="t d">
+  <title id="t">One boundary, three clients</title>
+  <desc id="d">The dashboard on the desk, a phone on a private network and a local agent are three clients of one API. Below the API, one path leads through powershell.exe to the machine's record: the event log, hardware-error records, crash dumps and configuration. The outer edge is the line nothing crosses unless a person sends it.</desc>
+
+  <defs>
+    <!-- The identity: field, lit region upper left, graticule in one zone, phosphor as light only. -->
+    <radialGradient id="lit" cx="0" cy="0" r="1" gradientTransform="translate(40 20) scale(420 300)">
+      <stop offset="0" stop-color="#163429" stop-opacity=".9"/>
+      <stop offset="1" stop-color="#163429" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="grat" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M0 .5H40M.5 0V40" stroke="#9cffc4" stroke-opacity=".13" stroke-width="1"/>
+    </pattern>
+    <linearGradient id="fade" x1="1" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff"/>
+      <stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    </linearGradient>
+    <mask id="zone"><rect x="300" y="18" width="212" height="140" fill="url(#fade)"/></mask>
+    <filter id="glow" x="-50%" y="-300%" width="200%" height="700%">
+      <feGaussianBlur stdDeviation="2.4"/>
+    </filter>
+  </defs>
+
+  <style>
+    .card  { fill: #163429; }
+    .name  { font: 300 16px 'Azeret Mono','JetBrains Mono',ui-monospace,Menlo,Consolas,monospace; fill: #eaf3ee; letter-spacing: -.01em; }
+    .sub   { font: 400 12px 'JetBrains Mono','Azeret Mono',ui-monospace,Menlo,Consolas,monospace; fill: #8fb0a3; }
+    .head  { font: 300 18px 'Azeret Mono','JetBrains Mono',ui-monospace,Menlo,Consolas,monospace; fill: #eaf3ee; }
+    .edge  { font: 400 13px 'JetBrains Mono','Azeret Mono',ui-monospace,Menlo,Consolas,monospace; fill: #c3d6cd; }
+    .wire  { fill: none; stroke: rgba(234,243,238,.28); stroke-width: 1; stroke-linejoin: round; }
+    .rim   { fill: none; stroke: rgba(234,243,238,.28); stroke-width: 1; }
+    .lite  { fill: none; stroke: #c9ffe1; stroke-width: 2; stroke-linecap: round; }
+    .halo  { fill: none; stroke: #6ff0a8; stroke-width: 6; stroke-linecap: round; opacity: .5; }
+  </style>
+
+  <rect width="520" height="474" fill="#0b1a16"/>
+  <rect width="520" height="474" fill="url(#lit)"/>
+  <rect x="300" y="18" width="212" height="140" fill="url(#grat)" mask="url(#zone)"/>
+
+  <!-- The outer edge. -->
+  <rect class="rim" x="8.5" y="18.5" width="503" height="417" rx="12"/>
+
+  <!-- Three clients. -->
+  <g>
+    <rect class="card" x="18" y="48" width="154" height="62" rx="4"/>
+    <text class="name" x="95" y="77" text-anchor="middle">Dashboard</text>
+    <text class="sub" x="95" y="97" text-anchor="middle">on the desk</text>
+
+    <rect class="card" x="183" y="48" width="154" height="62" rx="4"/>
+    <text class="name" x="260" y="77" text-anchor="middle">Phone</text>
+    <text class="sub" x="260" y="97" text-anchor="middle">private network</text>
+
+    <rect class="card" x="348" y="48" width="154" height="62" rx="4"/>
+    <text class="name" x="425" y="77" text-anchor="middle">Local agent</text>
+    <text class="sub" x="425" y="97" text-anchor="middle">Claude Code, Codex</text>
+  </g>
+
+  <!-- They converge on one point. -->
+  <path class="wire" d="M95 110v18l165 22M260 110v40M425 110v18l-165 22M260 150v16"/>
+  <circle cx="260" cy="150" r="6" fill="#6ff0a8" opacity=".55" filter="url(#glow)"/>
+  <circle cx="260" cy="150" r="2.6" fill="#c9ffe1"/>
+
+  <!-- The boundary: the one lit line. -->
+  <path class="halo" d="M18 166h484" filter="url(#glow)"/>
+  <path class="lite" d="M18 166h484"/>
+
+  <text class="head" x="260" y="193" text-anchor="middle">One API</text>
+  <text class="sub" x="260" y="215" text-anchor="middle">the token on every route · redacted by field name</text>
+  <text class="sub" x="260" y="233" text-anchor="middle">every outcome says whether the machine was observed</text>
+
+  <!-- One path down to the machine. -->
+  <path class="wire" d="M260 250v18M260 306v24"/>
+  <rect class="card" x="170" y="268" width="180" height="38" rx="4"/>
+  <text class="name" x="260" y="293" text-anchor="middle">powershell.exe</text>
+
+  <rect class="card" x="60" y="330" width="400" height="86" rx="4"/>
+  <text class="name" x="260" y="360" text-anchor="middle">The machine's record</text>
+  <text class="sub" x="260" y="382" text-anchor="middle">event log · hardware-error records</text>
+  <text class="sub" x="260" y="400" text-anchor="middle">crash dumps · configuration</text>
+
+  <!-- What the outer edge means. -->
+  <path class="wire" d="M260 436v12"/>
+  <text class="edge" x="260" y="465" text-anchor="middle">Nothing crosses this line unless a person sends it</text>
+</svg>

@@ -83,6 +83,25 @@ summary line are the last things visible). Status and trace took priority, as in
 `fixture-server.py` finds the repository root by walking up from its own path (three levels, as
 committed); `SENTINEL_REPO_ROOT` overrides that if the script is copied somewhere else.
 
+## The social preview
+
+`social-preview.png` is the card a shared link to the repository shows: 1280×640, the identity's
+field with the graticule in one zone, the mark drawn by the tool's own
+`sentinel.launcher.render_mark`, the wordmark, one line, and a crop of
+`desktop-hardware-errors.png` in a thin frame — which is why it inherits that image's privacy
+check above, and why it carries no date. It is made by
+[`make_social_preview.py`](make_social_preview.py), so a new capture or a changed mark is one
+command away:
+
+```
+./.venv/bin/python docs/screens/make_social_preview.py
+```
+
+It needs Pillow (`pip install pillow`, or the `[launcher]` extra, which the mark needs anyway).
+The display face is Azeret Mono when a TTF or OTF of it is on disk; only the WOFF2 the dashboard
+serves is in this repository and Pillow cannot read that, so the card as committed is set in
+DejaVu Sans Mono. GitHub takes it under *Settings → General → Social preview*.
+
 ## Privacy check
 
 Every image was inspected directly (not just its source data) for a serial number, a host name

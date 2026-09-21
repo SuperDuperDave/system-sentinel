@@ -1,0 +1,37 @@
+# Security
+
+## The boundary
+
+System Sentinel reads one machine and runs on it. The server binds to `127.0.0.1` unless it is told otherwise (`sentinel/cli.py`, `serve --host`), and asks nothing of anything off the machine — the only HTTP client in the package is the launcher talking to its own server. On first start it creates one access token in the data directory (`%LOCALAPPDATA%\SystemSentinel\` on Windows, `~/.system-sentinel/` elsewhere), and every route under `/api/` and the MCP endpoint refuse a request carrying neither it nor the session cookie made from it (`sentinel/auth.py`). The cookie holds a value derived from the token and not the token, which is what lets a browser or a phone read the machine's record and not stop the tool: `POST /api/quit` takes the bearer token, from this machine, and refuses the cookie (`sentinel/app.py`). The token is never displayed — the launcher signs the browser in with a one-time code, and *Copy address for agents* puts the registration line on the clipboard without showing it. Everything leaving the API is redacted first, **by field name** — serial and platform identifiers, the computer name, user account names, MAC addresses, network addresses, and the user segment of a profile path — with the list of what was removed attached to the response (`sentinel/redact.py`). Matching on names needs nothing learned about the machine, so the policy cannot fail open; the machine's own names, once learned, are then replaced by value inside text as well. Message text is kept: it is the evidence. Real values come back only when a caller asks for `unredacted` by name, which is a parameter on an already authenticated route — whatever holds the token can ask for them.
+
+## What someone could do
+
+### Someone on the same network
+
+**Cannot** reach the tool at all in the default configuration: the listener is on loopback, so there is no address on the network to connect to. **Can** reach it if you deliberately put a transport in front of the boundary — `serve --host <a tailnet address>`, or a tunnel — which is how a phone reaches it (`docs/DEPLOY.md`). Then the token is what stands between them and the record: every `/api/` and `/mcp` request without the token or the session cookie is answered `401` by `TokenMiddleware` (`sentinel/auth.py`), including from a device that can route to the address. The sign-in link a phone scans carries a five-minute one-time code, signed with the token and spent once (`sentinel/link.py`, `sentinel/auth.py`, `State.spend_code` in `sentinel/app.py`), so the token itself never crosses the network in a form a bystander can reuse. A transport that authenticates — a private network, not an open port forward — is the recommended one for the same reason: this boundary is a lock, not a perimeter.
+
+### Someone with an account on the machine
+
+**Can**, if they are you or an administrator, read everything the tool reads, with or without it: Windows hands the event log, the hardware error records and the crash dumps to any process running with those rights. The tool's boundary is there so the record does not leave the machine by accident, not to hold one process on the machine away from another. Three things are worth knowing about all the same: a file, the clipboard and a log. The token file sits in the data directory under your profile (`sentinel/auth.py`, `sentinel/paths.py`); Windows' default permissions on a user profile keep another standard account out of it and let an administrator in, and the owner-only mode the code sets applies where the platform enforces it. *Copy address for agents* places the registration line, token included, on the clipboard on purpose, so the person never types it — anything on the machine that watches the clipboard reads it until something replaces it (`sentinel/launcher.py`, `agent_line`, `copy_to_clipboard`). `launcher.log`, beside the token, records what the launcher did — that it opened the dashboard with a one-time code, whether a browser answered, the address it serves on — and never the token or the code: codes are signed rather than stored, and the log lines name the act, not the value (`sentinel/launcher.py`). **Cannot** be shut out by hiding any of the three: an account that can read your profile has already won. The useful response is the one for any other credential on the machine — delete the token file, which the tool creates again on its next start, leaving the stack, the prompts and the captures where they are.
+
+### Someone holding a capture or a handoff you sent
+
+**Can** read exactly what the manifest says they hold. A capture is one ZIP: every reading taken at that moment, the stack, the composed handoff, and `manifest.json` naming each member, each reading's outcome, and what redaction removed (`sentinel/capture.py`). By default the identifying fields are gone — serials, the computer name, account names, MAC and IP addresses, the user in a profile path — and the manifest's `redacted` list says which kinds were found and taken out, with `unredacted: false`. **Can** still learn a good deal from what remains, because it is the evidence: event ids, providers and message text, timestamps precise enough to say when the machine was in use, device instance identifiers, driver names and versions, firmware versions, part models — a configuration fingerprint. **Cannot** obtain the identifying fields from a redacted capture at all; they were removed before the bytes were written. A capture taken `unredacted` adds them back — check `manifest.json` for `"unredacted": true` and for an empty `redacted` list before sending one on. Nothing sends either artifact anywhere: the handoff goes to the clipboard, captures are files in the data directory, and a person moves them.
+
+## Verifying a release
+
+Three checks, each stronger than the one before. From 1.0.1 on, the executable is built by the repository's own workflow on a GitHub Windows runner and published from a tag (`.github/workflows/release.yml`).
+
+```
+Get-FileHash SystemSentinel.exe
+gh release view <tag> --repo SuperDuperDave/system-sentinel --json assets --jq '.assets[].digest'
+gh attestation verify SystemSentinel.exe --repo SuperDuperDave/system-sentinel
+```
+
+`Get-FileHash` prints your copy's SHA-256, to compare with `SHA256SUMS.txt` from the same release — but that file travels with the file it describes, so agreement proves only that the two agree. The digest is GitHub's own record of the bytes it received. The attestation ties the file to the workflow run and the commit that built it, and is the one that answers *who built this*. The file is not code-signed, so Windows asks once before running it.
+
+## Reporting a vulnerability
+
+Use GitHub's private vulnerability reporting on this repository: the **Security** tab, *Report a vulnerability*. It stays private until there is a fix. Say what you did, what you saw, and which file you think is responsible — `source inspected`, `run locally`, `tested` and `observed on a host` are four different claims here too, and saying which one you are making saves a round trip.
+
+Fixes land in [CHANGELOG.md](CHANGELOG.md) under the version that carries them.
