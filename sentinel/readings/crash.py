@@ -23,7 +23,7 @@ from __future__ import annotations
 import re
 import struct
 from collections import Counter
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from ..bridge import Bridge
@@ -455,7 +455,7 @@ def stop_times(properties: list[Any]) -> tuple[str, str] | None:
     local = systemtime(blob, LOCAL_AT)
     if utc is None or local is None:
         return None
-    return _iso(utc.replace(tzinfo=timezone.utc)), local.isoformat(timespec="milliseconds")
+    return _iso(utc.replace(tzinfo=UTC)), local.isoformat(timespec="milliseconds")
 
 
 def systemtime(blob: Any, offset: int) -> datetime | None:
@@ -666,7 +666,7 @@ def report_groups(reports: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "facts": report_facts(named(list(latest.get("Properties") or []), WER_REPORT)),
             }
         )
-    out.sort(key=lambda g: (g["at"] or datetime.min.replace(tzinfo=timezone.utc)))
+    out.sort(key=lambda g: (g["at"] or datetime.min.replace(tzinfo=UTC)))
     return out
 
 
@@ -1121,14 +1121,14 @@ def _parse(stamp: Any) -> datetime | None:
         return None
     json_date = _JSON_DATE.match(text)
     if json_date:
-        return datetime.fromtimestamp(int(json_date.group(1)) / 1000, timezone.utc)
+        return datetime.fromtimestamp(int(json_date.group(1)) / 1000, UTC)
     if text.endswith("Z"):
         text = text[:-1] + "+00:00"
     try:
         moment = datetime.fromisoformat(text)
     except ValueError:
         return None
-    return moment if moment.tzinfo else moment.replace(tzinfo=timezone.utc)
+    return moment if moment.tzinfo else moment.replace(tzinfo=UTC)
 
 
 def _iso(value: Any) -> str | None:
@@ -1136,8 +1136,8 @@ def _iso(value: Any) -> str | None:
     if moment is None:
         return None
     if moment.tzinfo is None:
-        moment = moment.replace(tzinfo=timezone.utc)
-    return moment.astimezone(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+        moment = moment.replace(tzinfo=UTC)
+    return moment.astimezone(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
 def _seconds(start: Any, end: Any) -> int | None:
@@ -1148,7 +1148,7 @@ def _seconds(start: Any, end: Any) -> int | None:
 
 
 def _sort_key(stamp: Any) -> datetime:
-    return _parse(stamp) or datetime.min.replace(tzinfo=timezone.utc)
+    return _parse(stamp) or datetime.min.replace(tzinfo=UTC)
 
 
 def _earlier(held: Any, other: Any) -> Any:

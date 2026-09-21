@@ -31,8 +31,9 @@ from __future__ import annotations
 import asyncio
 import re
 from collections import Counter, defaultdict
-from datetime import datetime, timezone
-from typing import Any, Iterable
+from collections.abc import Iterable
+from datetime import UTC, datetime
+from typing import Any
 
 from ..bridge import Bridge
 from ..reading import REGISTRY, Reading, Section, Spec, from_object, register, take
@@ -886,7 +887,7 @@ def _repeated_stops(stops: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def _index_fall(days: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """The day Windows' own index fell furthest below where the day before left it."""
     falls: list[tuple[float, float, dict[str, Any]]] = []
-    for before, day in zip(days, days[1:]):
+    for before, day in zip(days, days[1:], strict=False):  # a list against its own tail: the last day has no day after it
         left_at, went_to = _float(before.get("index_last")), _float(day.get("index_min"))
         if left_at is None or went_to is None or left_at - went_to < INDEX_FALL:
             continue
@@ -951,7 +952,7 @@ async def take_signals(bridge: Bridge, params: dict[str, Any]) -> Reading:
     taken = await asyncio.gather(*(_take_input(name, bridge, want) for name, want in wanted))
     readings: dict[str, Reading | None] = {}
     reasons: dict[str, str] = {}
-    for (name, _), (reading, reason) in zip(wanted, taken):
+    for (name, _), (reading, reason) in zip(wanted, taken, strict=True):  # gather answers every input or raises; a mismatch here would be a silent input lost
         readings[name] = reading
         if reason:
             reasons[name] = reason
@@ -1071,7 +1072,7 @@ def _float(value: Any) -> float | None:
 
 def _seconds_since(stamp: Any) -> int | None:
     moment = _parse(stamp)
-    return int((datetime.now(timezone.utc) - moment).total_seconds()) if moment else None
+    return int((datetime.now(UTC) - moment).total_seconds()) if moment else None
 
 
 def _days_since(stamp: Any) -> int | None:
@@ -1089,7 +1090,7 @@ def _parse(stamp: Any) -> datetime | None:
         moment = datetime.fromisoformat(text)
     except ValueError:
         return None
-    return moment if moment.tzinfo else moment.replace(tzinfo=timezone.utc)
+    return moment if moment.tzinfo else moment.replace(tzinfo=UTC)
 
 
 # ---------------------------------------------------------------------------

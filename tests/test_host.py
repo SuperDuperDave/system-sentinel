@@ -5,7 +5,7 @@ envelope and that the outcome is one the machine can answer with.
 """
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -190,7 +190,7 @@ def test_the_pool_survives_the_whole_catalog_taken_twice(monkeypatch):
     nothing falls back to a launch. This is the run that would show a leak or a wedged frame."""
     bridge = real_bridge_or_skip()
     monkeypatch.setattr(sentinel.bridge, "POOL_SIZE", 4)
-    moment = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    moment = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     params = {"record": {"before": moment}}
 
     seen: dict[str, list[str]] = {}

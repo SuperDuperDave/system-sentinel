@@ -13,7 +13,7 @@ import json
 import os
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -44,7 +44,7 @@ def load(groups: set[str] | None = None, now: float | None = None) -> list[dict[
 
 def _powershell_stamp(epoch: float) -> str:
     """PowerShell's 'o' format: seven fractional digits, which the reading has to parse."""
-    moment = datetime.fromtimestamp(epoch, timezone.utc)
+    moment = datetime.fromtimestamp(epoch, UTC)
     return moment.strftime("%Y-%m-%dT%H:%M:%S.") + f"{moment.microsecond:06d}0Z"
 
 

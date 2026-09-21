@@ -21,7 +21,7 @@ in Python touches the filesystem and a WSL path never has to become a Windows on
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from ..bridge import Bridge
@@ -473,7 +473,7 @@ def _days_since(text: Any) -> int | None:
         when = datetime.strptime(text.strip()[:10], "%Y-%m-%d").date()
     except ValueError:
         return None
-    return (datetime.now(timezone.utc).date() - when).days
+    return (datetime.now(UTC).date() - when).days
 
 
 def _percent_used(size: Any, remaining: Any) -> float | None:

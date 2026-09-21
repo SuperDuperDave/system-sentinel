@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import UTC
 from pathlib import Path
 from typing import Any
 
@@ -67,7 +68,10 @@ def payload(**overrides: Any) -> dict[str, Any]:
 def from_moment(moment: str) -> dict[str, Any]:
     """The same payload as the script returns for a moment: both logs from it, oldest first."""
     doc = load()
-    keep = lambda rows: sorted([r for r in rows if r["TimeCreated"] >= moment], key=lambda r: r["TimeCreated"])
+
+    def keep(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return sorted([r for r in rows if r["TimeCreated"] >= moment], key=lambda r: r["TimeCreated"])
+
     return {"system": keep(doc["system"]), "reports": keep(doc["reports"]), "dumps": doc["dumps"], "before": doc["before"], "warnings": []}
 
 
@@ -264,14 +268,14 @@ def test_a_start_whose_time_arrives_as_a_json_date_still_dates_the_stop():
     """ConvertTo-Json writes a DateTime property as /Date(milliseconds)/, which is how the host
     hands over Kernel-General 12's StartTime; a start the reading could not date would leave every
     stop without one."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     body = payload()
     expected: dict[int, str] = {}
     for start in (r for r in body["system"] if r["Id"] == 12):
         moment = datetime.fromisoformat(start["Properties"][6].replace("Z", "+00:00"))
         start["Properties"][6] = f"/Date({int(moment.timestamp() * 1000)})/"
-        expected[start["RecordId"]] = moment.astimezone(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+        expected[start["RecordId"]] = moment.astimezone(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
     stops = [s for s in crash(body, count=5).section("stops").data if s["records"]["start"] is not None]
     assert stops
     assert all(stop["started_at"] == expected[stop["records"]["start"]] for stop in stops)

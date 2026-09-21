@@ -12,7 +12,7 @@ into that index's vocabulary, for this reading and for the others that take one.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from ..bridge import Bridge
@@ -110,7 +110,7 @@ def _utc_stamp(before: str) -> str:
     parsed = datetime.fromisoformat(text)
     if parsed.tzinfo is None:
         parsed = parsed.astimezone()
-    utc = parsed.astimezone(timezone.utc)
+    utc = parsed.astimezone(UTC)
     return utc.strftime("%Y-%m-%dT%H:%M:%S.") + f"{utc.microsecond // 1000:03d}Z"
 
 

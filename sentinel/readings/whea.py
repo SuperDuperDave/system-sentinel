@@ -28,11 +28,10 @@ import os
 import re
 import subprocess
 import time
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any
-
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from typing import Any
 
 from ..bridge import WSL_INTEROP, Bridge
 from ..reading import Param, Reading, Section, Spec, from_bridge, register
@@ -516,13 +515,13 @@ def _moment(stamp: Any) -> float | None:
         except ValueError:
             continue
         if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=timezone.utc)
+            parsed = parsed.replace(tzinfo=UTC)
         return parsed.timestamp()
     return None
 
 
 def _stamp(epoch: float) -> str:
-    return datetime.fromtimestamp(epoch, timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    return datetime.fromtimestamp(epoch, UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
 def _mean(values: list[int]) -> float:

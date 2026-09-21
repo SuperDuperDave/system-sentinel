@@ -137,7 +137,7 @@ class RouteTool:
     name: str
     description: str
     schema: dict[str, Any]
-    call: Callable[["State", dict[str, Any], Redactor | None], Awaitable[Any]]
+    call: Callable[[State, dict[str, Any], Redactor | None], Awaitable[Any]]
     effect: Literal["reads", "changes", "destroys"] = "reads"
     """What this tool does to the machine: ``reads``, ``changes`` or ``destroys``. :data:`ANNOTATIONS` says it in the protocol's words."""
     carries_machine_data: bool = True
@@ -146,45 +146,45 @@ class RouteTool:
     """The resource this tool changes, published on the surface's bus once the call has succeeded."""
 
 
-async def _stack_list(state: "State", _arguments: dict[str, Any], redactor: Redactor | None) -> Any:
+async def _stack_list(state: State, _arguments: dict[str, Any], redactor: Redactor | None) -> Any:
     return _redacted(state.stack.state(), redactor)
 
 
-async def _stack_add(state: "State", arguments: dict[str, Any], redactor: Redactor | None) -> Any:
+async def _stack_add(state: State, arguments: dict[str, Any], redactor: Redactor | None) -> Any:
     item = await new_item(state.stack, state.bridge, arguments)
     return _redacted(state.stack.add(item).to_dict(), redactor)
 
 
-async def _stack_remove(state: "State", arguments: dict[str, Any], redactor: Redactor | None) -> Any:
+async def _stack_remove(state: State, arguments: dict[str, Any], redactor: Redactor | None) -> Any:
     state.stack.remove(str(arguments.get("id") or ""))
     return _redacted(state.stack.state(), redactor)
 
 
-async def _stack_clear(state: "State", _arguments: dict[str, Any], redactor: Redactor | None) -> Any:
+async def _stack_clear(state: State, _arguments: dict[str, Any], redactor: Redactor | None) -> Any:
     state.stack.clear()
     return _redacted(state.stack.state(), redactor)
 
 
-async def _compose(state: "State", _arguments: dict[str, Any], redactor: Redactor | None) -> Any:
+async def _compose(state: State, _arguments: dict[str, Any], redactor: Redactor | None) -> Any:
     composed = compose(state.stack, state.prompts, redactor)
     return Answer(text=composed["text"], data=composed)
 
 
-async def _prompts_list(state: "State", _arguments: dict[str, Any], _redactor: Redactor | None) -> Any:
+async def _prompts_list(state: State, _arguments: dict[str, Any], _redactor: Redactor | None) -> Any:
     return {"prompts": state.prompts.all()}
 
 
-async def _stack_update(state: "State", arguments: dict[str, Any], redactor: Redactor | None) -> Any:
+async def _stack_update(state: State, arguments: dict[str, Any], redactor: Redactor | None) -> Any:
     item = state.stack.update(str(arguments.get("id") or ""), rank=arguments.get("rank"), verbosity=arguments.get("verbosity"), title=arguments.get("title"))
     return _redacted(item, redactor)
 
 
-async def _stack_prompt(state: "State", arguments: dict[str, Any], redactor: Redactor | None) -> Any:
+async def _stack_prompt(state: State, arguments: dict[str, Any], redactor: Redactor | None) -> Any:
     chosen = state.stack.choose(prompt_id=arguments.get("prompt_id"), system_prompt=arguments.get("system_prompt"), set_prompt="prompt_id" in arguments)
     return _redacted(chosen, redactor)
 
 
-async def _capture_create(state: "State", _arguments: dict[str, Any], redactor: Redactor | None) -> Any:
+async def _capture_create(state: State, _arguments: dict[str, Any], redactor: Redactor | None) -> Any:
     """Take the whole catalog into one ZIP on this machine and say where it landed.
 
     The route hands back the file itself; a tool cannot, so it answers with the capture's name and
@@ -195,7 +195,7 @@ async def _capture_create(state: "State", _arguments: dict[str, Any], redactor: 
     return {"capture": made.name, "manifest": made.manifest}
 
 
-async def _capture_list(_state: "State", _arguments: dict[str, Any], _redactor: Redactor | None) -> Any:
+async def _capture_list(_state: State, _arguments: dict[str, Any], _redactor: Redactor | None) -> Any:
     return {"captures": capture.listing()}
 
 
@@ -446,7 +446,7 @@ class Surface:
     made here is announced; what is listening on it is the transport's business, not this class's.
     """
 
-    def __init__(self, state: "State"):
+    def __init__(self, state: State):
         self.state = state
         self.bus = InMemorySubscriptionBus()
 
@@ -523,7 +523,7 @@ def _resource(uri: str, mime_type: str, text: str) -> types.ReadResourceResult:
     return types.ReadResourceResult(contents=[types.TextResourceContents(uri=uri, mime_type=mime_type, text=text)])
 
 
-def build_mcp(state: "State") -> Starlette:
+def build_mcp(state: State) -> Starlette:
     surface = Surface(state)
     server = Server(
         "system-sentinel",

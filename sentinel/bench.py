@@ -25,10 +25,11 @@ import math
 import os
 import re
 import statistics
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Any
 
 from . import __version__
 from . import bridge as bridge_module
@@ -103,7 +104,7 @@ class Attempt:
     took_ms: int | None = None
 
     @classmethod
-    def of(cls, reading: Reading) -> "Attempt":
+    def of(cls, reading: Reading) -> Attempt:
         return cls(reading.outcome, reading.took_ms if reading.observed else None)
 
 
@@ -291,7 +292,7 @@ async def measure(bridge: Bridge, *, names: Sequence[str], runs: int = DEFAULT_R
     return Report(
         transport=transport,
         runs=runs,
-        taken_on=datetime.now(timezone.utc).date().isoformat(),
+        taken_on=datetime.now(UTC).date().isoformat(),
         version=__version__,
         rows=tuple(rows),
         floor=floor,
@@ -472,4 +473,4 @@ def as_json(report: Report) -> str:
 
 
 def _stamp() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")

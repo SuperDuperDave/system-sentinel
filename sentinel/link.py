@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 import segno
@@ -140,5 +140,5 @@ def qr_svg(text: str) -> str:
 def sign_in_link(token: str, address: str, ttl: float = LINK_TTL) -> tuple[str, str]:
     """The link another device opens, and when it runs out. The token is signed into the code, never in it."""
     url = f"{address}/api/session/open?code={mint_code(token, ttl=ttl)}"
-    expires = datetime.now(timezone.utc) + timedelta(seconds=ttl)
+    expires = datetime.now(UTC) + timedelta(seconds=ttl)
     return url, expires.isoformat(timespec="seconds").replace("+00:00", "Z")

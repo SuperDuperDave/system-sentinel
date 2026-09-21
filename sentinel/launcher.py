@@ -40,9 +40,9 @@ import time
 import urllib.error
 import urllib.request
 import webbrowser
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
 
 from . import __version__
 from .auth import load_or_create_token, mint_code
@@ -368,7 +368,7 @@ def install(here: Path, home: Path, tries: int = 12) -> str | None:
     """
     home.parent.mkdir(parents=True, exist_ok=True)
     trouble: OSError | None = None
-    for attempt in range(tries):
+    for _attempt in range(tries):
         try:
             shutil.copy2(here, home)
             LOG.info("copied the program into %s", home.parent)

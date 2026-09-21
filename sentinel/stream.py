@@ -21,14 +21,14 @@ import asyncio
 import json
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from .bridge import Bridge, BridgeResult
+
 # One projection for every log reading: a record that arrives on the stream and a record read
 # by `events` are the same shape, field for field.
-from .readings.events import RECORD_SELECT
-from .readings.events import winevent
+from .readings.events import RECORD_SELECT, winevent
 from .redact import Redactor
 
 POLL_SECONDS = 5.0
@@ -161,4 +161,4 @@ def frame(event: str, data: dict[str, Any]) -> str:
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")

@@ -1,6 +1,7 @@
 """The envelope: every bridge outcome maps to a reading; parameters are coerced; the catalog is one table."""
 
 import asyncio
+import dataclasses
 
 import pytest
 
@@ -142,5 +143,5 @@ def test_unknown_reading_is_a_key_error():
 
 def test_param_dataclass_is_frozen():
     p = Param("x", "int", 1, "d")
-    with pytest.raises(Exception):
+    with pytest.raises(dataclasses.FrozenInstanceError):
         p.default = 2  # type: ignore[misc]

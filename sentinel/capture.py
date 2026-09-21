@@ -17,7 +17,7 @@ import json
 import re
 import zipfile
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -48,7 +48,7 @@ class Capture:
 
 async def create(bridge: Bridge, stack: Stack, prompts: Prompts, redactor: Redactor | None = None) -> Capture:
     """Take every reading in the catalog now and write the ZIP. Returns where it landed and its manifest."""
-    started = datetime.now(timezone.utc)
+    started = datetime.now(UTC)
     path = _free_path(started)
     members: list[dict[str, Any]] = []
     removed: set[str] = set()
@@ -112,7 +112,7 @@ def listing() -> list[dict[str, Any]]:
     for path in captures_dir().glob("capture-*.zip"):
         if NAME.match(path.name):
             stat = path.stat()
-            out.append({"name": path.name, "bytes": stat.st_size, "created_at": _stamp(datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc))})
+            out.append({"name": path.name, "bytes": stat.st_size, "created_at": _stamp(datetime.fromtimestamp(stat.st_mtime, tz=UTC))})
     return sorted(out, key=lambda c: c["name"], reverse=True)
 
 

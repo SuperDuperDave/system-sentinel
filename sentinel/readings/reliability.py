@@ -15,7 +15,7 @@ collects and converts the times; the day-by-day rollup is in Python beside the r
 from __future__ import annotations
 
 from collections import Counter, defaultdict
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from ..bridge import Bridge
@@ -182,7 +182,7 @@ def _parse(stamp: Any) -> datetime | None:
         moment = datetime.fromisoformat(text)
     except ValueError:
         return None
-    return (moment if moment.tzinfo else moment.replace(tzinfo=timezone.utc)).astimezone(timezone.utc)
+    return (moment if moment.tzinfo else moment.replace(tzinfo=UTC)).astimezone(UTC)
 
 
 def _float(value: Any) -> float | None:

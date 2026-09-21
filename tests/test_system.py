@@ -11,7 +11,7 @@ are there.
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -51,7 +51,7 @@ def observed(reading):
 
 
 def days_ago(days: int) -> str:
-    return (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
+    return (datetime.now(UTC) - timedelta(days=days)).strftime("%Y-%m-%d")
 
 
 # ---------------------------------------------------------------------------
