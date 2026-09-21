@@ -50,13 +50,18 @@ New-Item -ItemType Directory -Force -Path $inDir  | Out-Null
 if (Test-Path $outDir) { Remove-Item -Recurse -Force $outDir }
 New-Item -ItemType Directory -Force -Path $outDir | Out-Null
 
-Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $inDir 'SystemSentinel.exe')
-if (-not $Release) {
+# The executable is staged whenever there is one, even with -Release: the mark-of-the-web
+# observation prefers it, and a file:// release URL pointing into C:\in tests the download steps
+# without a network. SHA256SUMS.txt beside it is staged too, for the checksum step.
+Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $inDir 'SystemSentinel.exe'), (Join-Path $inDir 'SHA256SUMS.txt')
+if (Test-Path $ExePath) {
     Copy-Item $ExePath (Join-Path $inDir 'SystemSentinel.exe') -Force
     $staged = Get-Item (Join-Path $inDir 'SystemSentinel.exe')
     if ($staged.Length -ne (Get-Item $ExePath).Length) {
         throw 'The executable did not copy completely into the staging folder.'
     }
+    $sums = Join-Path (Split-Path $ExePath) 'SHA256SUMS.txt'
+    if (Test-Path $sums) { Copy-Item $sums (Join-Path $inDir 'SHA256SUMS.txt') -Force }
 }
 Copy-Item (Join-Path $PSScriptRoot 'inside.ps1') (Join-Path $inDir 'inside.ps1') -Force
 

@@ -353,7 +353,10 @@ if ($Release) {
         try {
             $sumsUrl = ($Release -replace '[^/]+$', 'SHA256SUMS.txt')
             $sums = (Invoke-WebRequest -UseBasicParsing -Uri $sumsUrl -TimeoutSec 60).Content
-            $expected = (($sums -split "`n") | Where-Object { $_ -match 'SystemSentinel\.exe' } | Select-Object -First 1) -replace '\s.*$', ''
+            # A file:// answer arrives as bytes, an http one as text; the list is text either way.
+            if ($sums -is [byte[]]) { $sums = [Text.Encoding]::UTF8.GetString($sums) }
+            $line = [string](@(([string]$sums) -split "`n") | Where-Object { $_ -match 'SystemSentinel\.exe' } | Select-Object -First 1)
+            $expected = ($line -replace '\s.*$', '')
             $actual = (Get-FileHash -Algorithm SHA256 $exePath).Hash
             $ok = ($expected -and ($actual -ieq $expected.Trim()))
             $note = "SHA-256 of the download $(if ($ok) { 'matches' } else { 'DOES NOT MATCH' }) $sumsUrl (expected $($expected.Trim()), got $actual)"
