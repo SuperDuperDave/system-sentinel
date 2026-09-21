@@ -1,6 +1,6 @@
 # Changelog
 
-## [1.0.1] - unreleased
+## [1.0.1] - 2026-09-21
 
 The file looks after itself: it installs, updates and removes itself, says which version it is, and says so out loud when it cannot start.
 

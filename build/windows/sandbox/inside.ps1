@@ -486,45 +486,50 @@ if ($Release -and (Test-Path $staged) -and $token -and (Test-Budget 'update-star
     try { $stagedVersion = [string](Get-Item $staged).VersionInfo.ProductVersion } catch {}
     $stagedVersion = $stagedVersion.Trim()
 
-    $launched = $true
-    try { Start-Process -FilePath $staged } catch { $launched = $false }
-    Add-Result -step 'update-start' -ok $launched -seconds (((Get-Date) - $t0).TotalSeconds) `
-        -note ("the copy already serving reports version $(if ($before) { $before } else { '(unreadable)' }); the staged executable in C:\in carries $(if ($stagedVersion) { $stagedVersion } else { 'no version in its file properties' }); it was started from where it sits, as a download would be")
+    if ($stagedVersion -and $before -eq $stagedVersion) {
+        # The same version cannot update itself; say so rather than report a failure to change.
+        Add-Result -step 'update-start' -ok $true -note "not attempted: the staged executable carries the same version as the copy already serving ($before), so there is nothing to update; stage a newer build to observe one"
+    } else {
+        $launched = $true
+        try { Start-Process -FilePath $staged } catch { $launched = $false }
+        Add-Result -step 'update-start' -ok $launched -seconds (((Get-Date) - $t0).TotalSeconds) `
+            -note ("the copy already serving reports version $(if ($before) { $before } else { '(unreadable)' }); the staged executable in C:\in carries $(if ($stagedVersion) { $stagedVersion } else { 'no version in its file properties' }); it was started from where it sits, as a download would be")
 
-    $t0 = Get-Date
-    $after = $before
-    # Not $deadline: that name is the whole run's budget, and PowerShell would have it back.
-    $updateUntil = (Get-Date).AddSeconds(90)
-    while ((Get-Date) -lt $updateUntil) {
-        Start-Sleep -Seconds 2
-        $now = Get-ServedVersion -Token $token -TimeoutSec 5
-        if ($now -and $now -ne $before) { $after = $now; break }
-    }
+        $t0 = Get-Date
+        $after = $before
+        # Not $deadline: that name is the whole run's budget, and PowerShell would have it back.
+        $updateUntil = (Get-Date).AddSeconds(90)
+        while ((Get-Date) -lt $updateUntil) {
+            Start-Sleep -Seconds 2
+            $now = Get-ServedVersion -Token $token -TimeoutSec 5
+            if ($now -and $now -ne $before) { $after = $now; break }
+        }
 
-    # When nothing changed, say why rather than leaving a bare failure: a copy whose version
-    # predates the quit route cannot be asked to stop, and the person has to quit it themselves.
-    $why = ''
-    if ($after -eq $before) {
-        $code = 'no answer'
-        try {
-            $q = Invoke-WebRequest -UseBasicParsing -Method Post -Uri "$API/api/quit" -Headers @{ Authorization = "Bearer $token" } -TimeoutSec 10
-            $code = $q.StatusCode
-        } catch { try { $code = $_.Exception.Response.StatusCode.value__ } catch { $code = 'no answer' } }
-        $why = "; asked afterwards, POST /api/quit against the copy that was serving answers $code (404 or 405 means that version has no quit route at all, so a newer copy cannot ask it to stop and the person has to quit it themselves)"
-    }
+        # When nothing changed, say why rather than leaving a bare failure: a copy whose version
+        # predates the quit route cannot be asked to stop, and the person has to quit it themselves.
+        $why = ''
+        if ($after -eq $before) {
+            $code = 'no answer'
+            try {
+                $q = Invoke-WebRequest -UseBasicParsing -Method Post -Uri "$API/api/quit" -Headers @{ Authorization = "Bearer $token" } -TimeoutSec 10
+                $code = $q.StatusCode
+            } catch { try { $code = $_.Exception.Response.StatusCode.value__ } catch { $code = 'no answer' } }
+            $why = "; asked afterwards, POST /api/quit against the copy that was serving answers $code (404 or 405 means that version has no quit route at all, so a newer copy cannot ask it to stop and the person has to quit it themselves)"
+        }
 
-    $installed = Join-Path $dataDir 'SystemSentinel.exe'
-    $sameFile = $false
-    try { $sameFile = ((Get-FileHash -Algorithm SHA256 $installed).Hash -ieq (Get-FileHash -Algorithm SHA256 $staged).Hash) } catch {}
-    $windows = Get-TopLevelWindows
-    $shot = Save-Screenshot '1b-update.png'
-    Add-Result -step 'update-took-over' -ok (($after -ne $before) -and $stagedVersion -and ($after -eq $stagedVersion)) -seconds (((Get-Date) - $t0).TotalSeconds) `
-        -note ("the server now reports $(if ($after) { $after } else { '(nothing answered)' }), where it reported $(if ($before) { $before } else { '(unreadable)' }); the installed copy is the staged executable byte for byte: $sameFile$why; $shot") `
-        -tail (Get-Tail $windows 24)
+        $installed = Join-Path $dataDir 'SystemSentinel.exe'
+        $sameFile = $false
+        try { $sameFile = ((Get-FileHash -Algorithm SHA256 $installed).Hash -ieq (Get-FileHash -Algorithm SHA256 $staged).Hash) } catch {}
+        $windows = Get-TopLevelWindows
+        $shot = Save-Screenshot '1b-update.png'
+        Add-Result -step 'update-took-over' -ok (($after -ne $before) -and $stagedVersion -and ($after -eq $stagedVersion)) -seconds (((Get-Date) - $t0).TotalSeconds) `
+            -note ("the server now reports $(if ($after) { $after } else { '(nothing answered)' }), where it reported $(if ($before) { $before } else { '(unreadable)' }); the installed copy is the staged executable byte for byte: $sameFile$why; $shot") `
+            -tail (Get-Tail $windows 24)
 
-    $closed = Close-WindowByTitle '*System Sentinel*'
-    if ($closed) {
-        Add-Result -step 'update-dialog' -ok $false -note "a message box was on screen rather than a silent update, and the harness closed it: $closed"
+        $closed = Close-WindowByTitle '*System Sentinel*'
+        if ($closed) {
+            Add-Result -step 'update-dialog' -ok $false -note "a message box was on screen rather than a silent update, and the harness closed it: $closed"
+        }
     }
 } elseif ($Release -and (Test-Path $staged)) {
     Add-Result -step 'update-start' -ok $false -note 'not attempted: the downloaded release never answered, so there was nothing to update'
