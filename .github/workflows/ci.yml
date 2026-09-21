@@ -1,0 +1,99 @@
+name: Checks
+
+# Two machines, because the tool reads one of them. Linux takes the unit suite through the fake
+# bridge and builds the dashboard; the Windows runner is the part this project had no way to get
+# on its own: a Windows machine that is not David's, where the host tests read a real event log
+# through a real powershell.exe and the executable is built the way a person would build it.
+
+"on":
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    name: Unit suite and dashboard
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out the event commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+
+      - name: Install the package and its test extra
+        run: python -m pip install --upgrade pip && python -m pip install -e ".[test]"
+
+      - name: The suite without the host tests
+        run: python -m pytest -m "not host"
+
+      - name: The dashboard type-checks and builds
+        working-directory: dashboard
+        run: npm ci && npm run build
+
+  windows:
+    name: Full suite and the executable
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - name: Check out the event commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+
+      - name: Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+
+      # Before the suite, because sentinel/static is not in the repository and build.ps1 would
+      # otherwise build it in the middle of the executable step.
+      - name: The dashboard type-checks and builds
+        working-directory: dashboard
+        run: npm ci && npm run build
+
+      - name: Install the package, its test extra and the tray
+        run: python -m pip install --upgrade pip && python -m pip install -e ".[test,launcher]"
+
+      - name: The whole suite, host tests included
+        run: python -m pytest
+
+      - name: The health reading on this runner
+        shell: pwsh
+        run: system-sentinel check
+
+      - name: The executable
+        shell: pwsh
+        run: |
+          $python = (Get-Command python).Source
+          build\windows\build.ps1 -Python $python
+
+      - name: Keep the executable
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: SystemSentinel-${{ github.sha }}
+          path: dist/SystemSentinel.exe
+          if-no-files-found: error
+          retention-days: 7

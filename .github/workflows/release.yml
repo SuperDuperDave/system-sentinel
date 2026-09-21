@@ -1,0 +1,140 @@
+name: Release
+
+# A tag builds the executable from that commit on a Windows runner, writes the checksum beside it,
+# attests where it came from, and leaves a draft release for a person to read and publish. Nothing
+# here publishes anything: the draft is the handoff. A manual run builds and attests the same way
+# and keeps the executable as a workflow artifact, which is how a build is checked before tagging.
+
+"on":
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build and attest
+    runs-on: windows-2025
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      digest: ${{ steps.checksum.outputs.sha256 }}
+    steps:
+      - name: Check out the tagged commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Before anything is built, so a mistyped tag costs seconds rather than a release that says
+      # one version and carries another.
+      - name: The tag must name the version the source states
+        id: version
+        shell: pwsh
+        run: |
+          $source = Get-Content sentinel/__init__.py -Raw
+          if ($source -notmatch '__version__\s*=\s*"([^"]+)"') {
+            throw "sentinel/__init__.py does not state __version__"
+          }
+          $version = $Matches[1]
+          if ("${{ github.ref_type }}" -eq "tag") {
+            $tag = "${{ github.ref_name }}"
+            if ($tag -ne "v$version") {
+              throw "the tag $tag does not name the version the source states (v$version); bump sentinel/__init__.py and pyproject.toml, or move the tag"
+            }
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          Write-Host "building version $version"
+
+      - name: Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+
+      - name: Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+
+      # No cache anywhere in this workflow: the dashboard inside the executable must be the one
+      # this commit builds, and a cache that could hand back an older one is not worth the minute.
+      - name: The dashboard
+        working-directory: dashboard
+        run: npm ci && npm run build
+
+      - name: The executable
+        shell: pwsh
+        run: |
+          $python = (Get-Command python).Source
+          build\windows\build.ps1 -Python $python
+
+      - name: The checksum beside it
+        id: checksum
+        shell: pwsh
+        run: |
+          $hash = (Get-FileHash dist\SystemSentinel.exe -Algorithm SHA256).Hash.ToLower()
+          [IO.File]::WriteAllText("dist\SHA256SUMS.txt", "$hash  SystemSentinel.exe`n")
+          "sha256=$hash" >> $env:GITHUB_OUTPUT
+          Write-Host "$hash  SystemSentinel.exe"
+
+      - name: The notes, rendered from the template
+        shell: pwsh
+        run: |
+          $tag = if ("${{ github.ref_type }}" -eq "tag") { "${{ github.ref_name }}" } else { "main" }
+          $notes = Get-Content build\windows\notes.md -Raw
+          $notes = [regex]::Replace($notes, '^\s*<!--.*?-->\s*', '', 'Singleline')
+          $notes = $notes.Replace("{{VERSION}}", "${{ steps.version.outputs.version }}")
+          $notes = $notes.Replace("{{TAG}}", $tag)
+          $notes = $notes.Replace("{{SHA256}}", "${{ steps.checksum.outputs.sha256 }}")
+          [IO.File]::WriteAllText("dist\notes.md", $notes)
+
+      - name: Where the executable came from
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/SystemSentinel.exe
+
+      - name: Keep the build
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: SystemSentinel-${{ steps.version.outputs.version }}
+          path: |
+            dist/SystemSentinel.exe
+            dist/SHA256SUMS.txt
+            dist/notes.md
+          if-no-files-found: error
+
+  release:
+    name: Draft the release
+    needs: build
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Take the build
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: SystemSentinel-${{ needs.build.outputs.version }}
+          path: dist
+
+      - name: A draft for a person to publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            --repo "${{ github.repository }}" \
+            --draft \
+            --title "System Sentinel ${{ needs.build.outputs.version }}" \
+            --notes-file dist/notes.md \
+            dist/SystemSentinel.exe dist/SHA256SUMS.txt
