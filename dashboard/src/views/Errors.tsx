@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { EventRecord, Reading, observed } from '../api';
 import { AddToStack } from '../AddToStack';
 import { Glyph, OutcomeLine, clock, firstLine } from '../Outcome';
-import { Facts, Head, RowList, Section, Segmented, Tree, Value, ago, basisOf, part } from '../Sections';
+import { Facts, Head, MomentLink, RowList, Section, Segmented, Tree, Value, ago, basisOf, part, shortDay } from '../Sections';
+import { useApp } from '../store';
 import { useReading } from '../useReading';
 import styles from './Errors.module.css';
 
@@ -56,9 +57,13 @@ interface Decoded {
   error?: string;
 }
 
-const WINDOWS = [
+/** How far back the window reaches: a fixed span, or this session, which only the machine can say. */
+type Span = number | 'boot';
+
+const WINDOWS: { value: Span; label: string }[] = [
   { value: 24, label: '24 hours' },
   { value: 168, label: '7 days' },
+  { value: 'boot', label: 'since boot' },
 ];
 const COUNTS = [30, 100];
 
@@ -73,11 +78,29 @@ const COUNTS = [30, 100];
  * machine reported nothing, which on a healthy machine is what it should be.
  */
 export function Errors() {
-  const [hours, setHours] = useState(24);
+  const [span, setSpan] = useState<Span>(24);
   const [count, setCount] = useState(30);
-  const window = WINDOWS.find((w) => w.value === hours)?.label ?? `${hours} hours`;
 
-  const storms = useReading('storms', { hours });
+  // Since boot is the machine's number, not the dashboard's: the window is only as long as this
+  // session has been up, so the snapshot is taken when that option is chosen and not before.
+  const boot = span === 'boot';
+  const system = useReading('system', {}, boot);
+  const uptime = part<{ uptime_seconds: number | null }>(system.reading, 'snapshot')?.uptime_seconds ?? null;
+  const bootHours = uptime == null ? null : Math.max(1, Math.ceil(uptime / 3600));
+  const hours = boot ? bootHours : span;
+  const windowLabel = boot ? (hours == null ? 'since boot' : `since boot, ${hours} hours`) : WINDOWS.find((w) => w.value === span)?.label ?? `${span} hours`;
+  const inWindow = boot ? windowLabel : `in the last ${windowLabel}`;
+  // Once the machine has said how long it has been up, the option says how long the window is:
+  // "since boot" is a question until then and an answer afterwards. Only the machine's number
+  // goes on it, never the fixed span that happens to be chosen.
+  const windows = WINDOWS.map((w) => (w.value === 'boot' && bootHours !== null ? { value: w.value, label: `since boot · ${bootHours} h` } : w));
+
+  // The reading counts the window into buckets and refuses one that would take more than its cap,
+  // so a long window asks for wider buckets: sixty seconds up to about two weeks, then five
+  // minutes, a quarter hour, an hour. The trace reduces whatever it is given to the columns it
+  // can draw, and the status names the bucket it was computed over.
+  const bucketSeconds = hours === null ? 60 : bucketFor(hours);
+  const storms = useReading('storms', hours === null ? { hours: 24 } : { hours, bucket_seconds: bucketSeconds }, hours !== null);
   const whea = useReading('whea', { count });
 
   const buckets = part<Buckets>(storms.reading, 'buckets');
@@ -90,16 +113,32 @@ export function Errors() {
   return (
     <section>
       <Head title="Hardware errors">
-        <Segmented value={hours} onChange={setHours} options={WINDOWS} label="How far back" />
+        <Segmented value={span} onChange={setSpan} options={windows} label="How far back" />
       </Head>
-      <OutcomeLine taken={storms} noun="WHEA-Logger records" emptyText={`No WHEA-Logger records in the last ${window}`} />
+      {boot && hours === null ? (
+        <p className={`${styles.windowNote} readout`}>
+          {system.state === 'taking' || system.state === 'idle' ? (
+            'Reading how long this session has been up, to fix the window…'
+          ) : observed(system.reading) ? (
+            <>
+              <Glyph kind="warn" /> Since boot needs this machine's uptime, and the system reading carries no boot time. Choose a fixed window.
+            </>
+          ) : (
+            <>
+              <Glyph kind="warn" /> Since boot needs this machine's uptime, and the system reading was not observed. Choose a fixed window, or take it again from Machine.
+            </>
+          )}
+        </p>
+      ) : (
+        <OutcomeLine taken={storms} noun="WHEA-Logger records" emptyText={`No WHEA-Logger records ${inWindow}`} />
+      )}
 
-      {observed(storms.reading) && status ? (
+      {hours !== null && observed(storms.reading) && status ? (
         <Section
           title="Status"
           cls="inferred"
           basis={basisOf(storms.reading, 'status')}
-          controls={storms.reading ? <AddToStack item={{ kind: 'reading', envelope: storms.reading, title: `Hardware error storms, last ${window}` }} /> : null}
+          controls={storms.reading ? <AddToStack item={{ kind: 'reading', envelope: storms.reading, title: `Hardware error storms, ${windowLabel}` }} /> : null}
         >
           <p className={styles.status}>
             <span className={`${styles.state} readout`}>{status.state}</span>
@@ -115,13 +154,13 @@ export function Errors() {
         </Section>
       ) : null}
 
-      {observed(storms.reading) && buckets ? (
+      {hours !== null && observed(storms.reading) && buckets ? (
         <Section title="The window" cls="derived" basis={basisOf(storms.reading, 'buckets')}>
           <Trace buckets={buckets} />
         </Section>
       ) : null}
 
-      {signatures.length ? (
+      {hours !== null && signatures.length ? (
         <Section title="Signatures" cls="derived" basis={basisOf(storms.reading, 'signatures')} note={`${signatures.length} distinct, most seen first`}>
           <RowList
             items={signatures}
@@ -180,6 +219,7 @@ export function Errors() {
  * as a blank.
  */
 function Trace({ buckets }: { buckets: Buckets }) {
+  const setMoment = useApp((s) => s.setMoment);
   const totals = buckets.totals ?? [];
   const width = 720;
   const height = 72;
@@ -191,23 +231,52 @@ function Trace({ buckets }: { buckets: Buckets }) {
     const to = Math.max(from + 1, Math.floor((i + 1) * per));
     let top = 0;
     for (let j = from; j < to && j < totals.length; j += 1) top = Math.max(top, totals[j]);
-    return top;
+    return { top, ends: Math.min(to, totals.length) };
   });
-  const peak = peaks.reduce((a, b) => Math.max(a, b), 0);
+  const peak = peaks.reduce((a, b) => Math.max(a, b.top), 0);
   const floor = height - 3;
   const scale = peak > 0 ? (height - 6) / peak : 0;
-  const points = peaks.map((v, i) => `${((i / Math.max(1, columns - 1)) * width).toFixed(1)},${(floor - v * scale).toFixed(1)}`).join(' ');
+  const points = peaks.map((p, i) => `${((i / Math.max(1, columns - 1)) * width).toFixed(1)},${(floor - p.top * scale).toFixed(1)}`).join(' ');
   const label = `${buckets.total} WHEA-Logger records over ${buckets.bucket_count} buckets of ${buckets.bucket_seconds} seconds; highest ${peak} in one bucket`;
+
+  // The lit stretches are the only ones worth going to, so they are the only ones that are a
+  // control: a hit target over each run of columns that holds a record, and nothing at all over a
+  // quiet one. The line itself is untouched; the targets are a layer above it.
+  const unit = 100 / Math.max(1, columns - 1);
+  const runs = lit(peaks)
+    .map((run) => ({ from: run.from, to: run.to, at: endOf(buckets, peaks[run.to].ends) }))
+    .filter((run): run is { from: number; to: number; at: string } => run.at !== null);
 
   return (
     <figure className={styles.traceFigure}>
-      <svg className={styles.trace} viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" role="img" aria-label={label}>
-        {Array.from({ length: quarters - 1 }, (_, i) => {
-          const x = ((i + 1) / quarters) * width;
-          return <line key={i} className={styles.traceTick} x1={x} y1="0" x2={x} y2={height} vectorEffect="non-scaling-stroke" />;
-        })}
-        <polyline className={styles.tracePath} points={points} fill="none" vectorEffect="non-scaling-stroke" />
-      </svg>
+      <div className={styles.traceStage}>
+        <svg className={styles.trace} viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" role="img" aria-label={label}>
+          {Array.from({ length: quarters - 1 }, (_, i) => {
+            const x = ((i + 1) / quarters) * width;
+            return <line key={i} className={styles.traceTick} x1={x} y1="0" x2={x} y2={height} vectorEffect="non-scaling-stroke" />;
+          })}
+          <polyline className={styles.tracePath} points={points} fill="none" vectorEffect="non-scaling-stroke" />
+        </svg>
+        {runs.length ? (
+          <div className={styles.traceHits}>
+            {runs.map((run) => {
+              const when = new Date(run.at);
+              const words = `the record before ${shortDay.format(when)} ${clock.format(when)}`;
+              return (
+                <button
+                  key={run.from}
+                  type="button"
+                  className={styles.traceHit}
+                  style={{ left: `${Math.max(0, run.from * unit - unit / 2)}%`, width: `${(run.to - run.from + 1) * unit}%` }}
+                  onClick={() => setMoment(run.at)}
+                  aria-label={words}
+                  title={words}
+                />
+              );
+            })}
+          </div>
+        ) : null}
+      </div>
       <figcaption className={styles.traceScale}>
         <span className={`${styles.traceEnds} readout`}>
           <span>{clock.format(new Date(buckets.from))}</span>
@@ -220,6 +289,37 @@ function Trace({ buckets }: { buckets: Buckets }) {
       </figcaption>
     </figure>
   );
+}
+
+/** The widest window each bucket size can count within the reading's cap of 20,000 buckets. */
+const BUCKET_SIZES = [60, 300, 900, 3600];
+const BUCKET_CAP = 20000;
+
+function bucketFor(hours: number): number {
+  return BUCKET_SIZES.find((seconds) => (hours * 3600) / seconds <= BUCKET_CAP) ?? BUCKET_SIZES[BUCKET_SIZES.length - 1];
+}
+
+/** The runs of columns that hold at least one record. Adjacent ones are one stretch, so a burst is
+ *  a target you can hit rather than forty targets a pixel wide. */
+function lit(peaks: { top: number }[]): { from: number; to: number }[] {
+  const runs: { from: number; to: number }[] = [];
+  for (let i = 0; i < peaks.length; i += 1) {
+    if (peaks[i].top <= 0) continue;
+    const last = runs[runs.length - 1];
+    if (last && last.to === i - 1) last.to = i;
+    else runs.push({ from: i, to: i });
+  }
+  return runs;
+}
+
+/** Where a column ends in wall-clock time, from the window's own start and bucket size. Never past
+ *  the window's end, so the last column of a partly filled bucket does not point into the future. */
+function endOf(buckets: Buckets, bucketIndex: number): string | null {
+  const from = Date.parse(buckets.from);
+  const to = Date.parse(buckets.to);
+  if (Number.isNaN(from)) return null;
+  const at = from + bucketIndex * buckets.bucket_seconds * 1000;
+  return new Date(Number.isNaN(to) ? at : Math.min(at, to)).toISOString();
 }
 
 /** What the signature was made of, and the last record that matched it. */
@@ -276,11 +376,12 @@ function RecordDetail({ record, decoded, envelope }: { record: EventRecord; deco
           </div>
         </details>
       ) : null}
-      {envelope ? (
-        <div className={styles.rowActions}>
+      <div className={styles.rowActions}>
+        <MomentLink at={record.TimeCreated} />
+        {envelope ? (
           <AddToStack item={{ kind: 'selection', envelope, ids: [record.RecordId], title: `WHEA-Logger record ${record.RecordId}` }} label="Add this record to the stack" />
-        </div>
-      ) : null}
+        ) : null}
+      </div>
     </>
   );
 }

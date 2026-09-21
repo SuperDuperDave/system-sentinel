@@ -29,6 +29,8 @@
 }
 
 .evidence > p:first-child { margin: 0 0 6px; }
+/* The ways into the log from a lead, set apart by the gap rather than by a rule. */
+.jumps { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 20px; margin: 10px 0 0; }
 .from { margin: 10px 0 0; color: var(--muted); overflow-wrap: anywhere; }
 .silent { margin: 22px 0 0; color: var(--muted); }
 

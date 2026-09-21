@@ -1,7 +1,7 @@
 import { AddToStack } from '../AddToStack';
 import { observed, section } from '../api';
 import { OutcomeLine } from '../Outcome';
-import { Head, RowList, Section, Tree } from '../Sections';
+import { Head, MomentLink, RowList, Section, Tree } from '../Sections';
 import { useReading } from '../useReading';
 import styles from './Signals.module.css';
 
@@ -83,12 +83,53 @@ function Group({ cls, signals }: { cls: string; signals: Signal[] }) {
           <div className={styles.evidence}>
             <p className="label">Evidence</p>
             <Tree value={s.evidence} />
+            <Jumps evidence={s.evidence} />
             <p className={`${styles.from} readout`}>read from {s.readings.join(', ')} · {s.id}</p>
           </div>
         )}
       />
     </div>
   );
+}
+
+/**
+ * The moments a lead points at: the end of the window it counted, and the stops it named. A lead
+ * is followed by reading the log where it happened, so the evidence carries the way there —
+ * still a jump, still labelled, and still the only thing in the panel that moves anyone.
+ */
+function Jumps({ evidence }: { evidence: Record<string, unknown> }) {
+  const moments = momentsIn(evidence);
+  if (!moments.length) return null;
+  return (
+    <div className={styles.jumps}>
+      {moments.map((at) => (
+        <MomentLink key={at} at={at} />
+      ))}
+    </div>
+  );
+}
+
+/** The keys whose value is a moment in the log: a window's last record, and a stop's start. */
+const MOMENT_KEYS = ['last', 'started_at'];
+
+function momentsIn(evidence: Record<string, unknown>): string[] {
+  const found: string[] = [];
+  const walk = (value: unknown, depth: number) => {
+    if (depth > 4 || value === null || typeof value !== 'object') return;
+    if (Array.isArray(value)) {
+      value.forEach((entry) => walk(entry, depth + 1));
+      return;
+    }
+    for (const [key, held] of Object.entries(value as Record<string, unknown>)) {
+      if (MOMENT_KEYS.includes(key) && typeof held === 'string' && !Number.isNaN(Date.parse(held))) {
+        if (!found.includes(held)) found.push(held);
+      } else {
+        walk(held, depth + 1);
+      }
+    }
+  };
+  walk(evidence, 0);
+  return found;
 }
 
 /** What each reading returned when the rules were run over it: a lead is only as observed as its inputs. */

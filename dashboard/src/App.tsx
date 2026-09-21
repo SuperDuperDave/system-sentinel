@@ -6,7 +6,7 @@ import { Live } from './Live';
 import { useApp, VIEWS, ViewId } from './store';
 import { Record } from './views/Record';
 import { Errors } from './views/Errors';
-import { Dumps } from './views/Dumps';
+import { Crashes } from './views/Crashes';
 import { Machine } from './views/Machine';
 import { Diagnostics } from './views/Diagnostics';
 import { Signals } from './views/Signals';
@@ -17,7 +17,7 @@ import styles from './App.module.css';
 const VIEW_COMPONENTS: { [K in ViewId]: () => ReactElement } = {
   record: Record,
   errors: Errors,
-  dumps: Dumps,
+  crashes: Crashes,
   machine: Machine,
   diagnostics: Diagnostics,
   signals: Signals,

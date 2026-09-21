@@ -7,7 +7,7 @@ import pytest
 from sentinel import readings  # noqa: F401
 from sentinel.bridge import BridgeResult
 from sentinel.reading import REGISTRY, Param, Spec, from_bridge, take
-from sentinel.readings.events import _utc_stamp, events_script, record_script
+from sentinel.readings.events import _utc_stamp, events_script, record_script, since_clause
 from tests.conftest import FakeBridge
 
 
@@ -38,8 +38,8 @@ def test_object_shape_unwraps_the_single_item():
 
 def test_spec_coerces_defaults_types_and_choices():
     spec = REGISTRY["events"]
-    assert spec.coerce({}) == {"log": "System", "levels": [1, 2], "count": 50}
-    assert spec.coerce({"levels": "1,2,3", "count": "5", "log": "Application"}) == {"log": "Application", "levels": [1, 2, 3], "count": 5}
+    assert spec.coerce({}) == {"log": "System", "levels": [1, 2], "count": 50, "since": ""}
+    assert spec.coerce({"levels": "1,2,3", "count": "5", "log": "Application"}) == {"log": "Application", "levels": [1, 2, 3], "count": 5, "since": ""}
     with pytest.raises(ValueError):
         spec.coerce({"log": "Security"})
     with pytest.raises(ValueError):
@@ -69,10 +69,42 @@ def test_register_twice_is_an_error():
         register(Spec(name="events", description="dup", classes=("raw",), take=lambda b, p: None))
 
 
-def test_events_script_uses_the_parameters():
+def test_events_script_asks_the_log_index_for_the_levels():
     s = events_script("Application", [1, 2, 3], 7)
-    assert "LogName='Application'" in s and "Level=1,2,3" in s and "-MaxEvents 7" in s
-    assert "-ErrorAction Stop" in s
+    assert "<Select Path='Application'>*[System[(Level=1 or Level=2 or Level=3)]]</Select>" in s
+    assert "-FilterXml $xml" in s and "-MaxEvents 7" in s and "-ErrorAction Stop" in s
+    assert "FilterHashtable" not in s  # StartTime there does not honour a timestamp's Kind
+
+
+def test_a_window_is_a_clause_against_the_index_and_boot_is_resolved_on_the_machine():
+    assert since_clause("") == ("", "")
+    prelude, clause = since_clause("2026-09-20T18:04:11Z")
+    assert prelude == "" and clause == " and TimeCreated[@SystemTime&gt;='2026-09-20T18:04:11.000Z']"
+    prelude, clause = since_clause("BOOT")
+    assert "LastBootUpTime" in prelude and clause == " and TimeCreated[@SystemTime&gt;='$since']"
+    with pytest.raises(ValueError, match="'boot'"):
+        since_clause("the other day")
+
+
+def test_events_since_a_moment_and_since_boot():
+    s = events_script("System", [1, 2], 5, "2026-09-20T18:04:11Z")
+    assert "*[System[(Level=1 or Level=2) and TimeCreated[@SystemTime&gt;='2026-09-20T18:04:11.000Z']]]" in s
+    boot = events_script("System", [1, 2], 5, "boot")
+    assert boot.startswith("$since = (Get-CimInstance Win32_OperatingSystem")
+    assert "TimeCreated[@SystemTime&gt;='$since']" in boot
+    assert '@"' in boot  # an expanding here-string: $since is the machine's answer, not a literal
+
+
+def test_no_level_asked_for_is_every_level():
+    assert "<Select Path='System'>*</Select>" in events_script("System", [], 5)
+    assert "*[System[TimeCreated[@SystemTime&gt;='2026-09-20T18:04:11.000Z']]]" in events_script("System", [], 5, "2026-09-20T18:04:11Z")
+
+
+def test_a_bad_window_is_refused_before_the_machine_is_asked():
+    bridge = FakeBridge()
+    with pytest.raises(ValueError, match="since"):
+        asyncio.run(take("events", bridge, {"since": "yesterday"}))
+    assert bridge.scripts == []
 
 
 def test_record_stamp_is_utc_milliseconds():
@@ -91,7 +123,7 @@ def test_take_events_through_a_fake_bridge():
     bridge = FakeBridge()
     r = asyncio.run(take("events", bridge, {"count": "3"}))
     assert r.outcome == "ok" and r.count == 1
-    assert r.params == {"log": "System", "levels": [1, 2], "count": 3}
+    assert r.params == {"log": "System", "levels": [1, 2], "count": 3, "since": ""}
     assert "-MaxEvents 3" in bridge.scripts[0]
 
 

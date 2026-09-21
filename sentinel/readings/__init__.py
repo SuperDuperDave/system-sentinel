@@ -1,5 +1,5 @@
 """The catalog: importing this package registers every reading in :data:`sentinel.reading.REGISTRY`."""
 
-from . import diagnostics, events, health, system, whea  # noqa: F401
+from . import crash, diagnostics, events, health, reliability, system, whea  # noqa: F401
 
-__all__ = ["diagnostics", "events", "health", "system", "whea"]
+__all__ = ["crash", "diagnostics", "events", "health", "reliability", "system", "whea"]

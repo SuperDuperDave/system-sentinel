@@ -24,11 +24,13 @@ The screens show the tool rendering a synthetic record built from Windows' own p
 
 | Reading | What it is |
 | --- | --- |
-| `events`, `record` | Records from the System and Application logs by level, and the records *before* a moment: the log does not announce a freeze; the next start does |
+| `events`, `record` | Records from the System and Application logs by level, from a moment or from this session's start, and the records *before* a moment |
+| `crash`, `faults` | The stops the machine did not plan, each composed into one: when it stopped as Windows estimated it, when it came back, the bug check if one was written, the dump that belongs to it and the last record before it — and, while it kept running, the programs that crashed or hung and the kernel's own live reports |
 | `whea`, `storms` | Hardware-error records with their binary payload decoded beside them, and the same records over a window in wall-clock buckets, grouped by signature, with burst and acceleration flags |
 | `dumps` | The crash-dump inventory |
 | `system`, `hardware`, `hardware.cpu`, `.gpu`, `.board`, `.storage`, `.network`, `drivers` | The snapshot, the fingerprint and configuration, one subsystem at a time, and driver changes |
 | `pcie`, `power`, `memory`, `constraints` | The PCIe fabric, power configuration and transitions, physical memory, devices present and not working |
+| `reliability` | Windows' own record of this machine: the failures the Reliability Analysis Component counted and its hourly stability index, rolled up by day |
 | `signals` | Leads across the readings and the recent log: suppressions, gaps, pressure, transitions, mismatches |
 
 Every reading comes back in one envelope. Its **outcome** says whether the machine was observed (`ok`, `empty`) or not (`failed`, `unavailable`, `denied`, `timeout`), so a collection failure is never mistaken for a clean machine. Its **sections** keep what Windows said (`raw`) apart from what the tool computed (`derived`), what does not change (`invariant`) and what is only a lead (`inferred`). Its **method** is the query, so the evidence can be reproduced by hand. By default nothing in a response carries a serial number, the computer name, a user name or a MAC address; a caller asks for those by name.
@@ -73,7 +75,14 @@ Register it once and every reading is a tool:
 claude mcp add --transport http system-sentinel http://127.0.0.1:8000/mcp --header "Authorization: Bearer $(system-sentinel token)"
 ```
 
-Any MCP client reaches the same address over streamable HTTP with the same header; any shell reaches the same evidence with `curl`. The reading to reach for when someone says *it froze* is `record`: give it the moment the machine started again, and it hands back what the machine was doing before that.
+Any MCP client reaches the same address over streamable HTTP with the same header; any shell reaches the same evidence with `curl`. The reading to reach for when someone says *it froze* is `crash`: it composes each unplanned stop out of the records of its session — when the machine stopped as Windows estimated it, when it came back, the bug check if one was written, the dump on disk that belongs to it, and the last record the machine managed before it went. Give it the moment instead and it reports what the first start at or after that moment announced, which is the only thing that can answer for a freeze.
+
+```
+curl -H "Authorization: Bearer $TOKEN" \
+  "http://127.0.0.1:8000/api/readings/crash?moment=2026-09-19T21:30:00Z"
+```
+
+Then `record` is what the machine was doing as it went: give it the stop's `started_at` and it hands back the records before that, oldest first.
 
 ```
 curl -H "Authorization: Bearer $TOKEN" \

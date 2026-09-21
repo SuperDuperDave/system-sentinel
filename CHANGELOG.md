@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.1.0] - unreleased
+
+The moment, answered in one call and one click. "It froze at 02:14" now has a reading that names the stop, the bug check, the dump and the machine's last word before it, and a dashboard where every time that frames an investigation is a place you can go to.
+
+### Added
+- `crash`: the stops the machine did not plan, newest first, each one composed out of the records of its session — when it stopped as Windows estimated it (read from the EventLog 6008 record's binary value, not from its locale text), when it started again, the bug check if one was written and the parameters it carried, the dump file on disk that belongs to it and how it was matched to it, and the last record the machine managed before it went, with how long it had been quiet. Give it a moment instead of a count and it reports what the first start at or after that moment announced, which is the only thing that can answer for a freeze; a start that announced nothing is an answer too, and the reading says which start it was. One launch, however many stops it names.
+- `faults`: what went wrong while the machine kept running — the programs that crashed or hung and the kernel's own live reports, a GPU timeout or a watchdog, each with its application, its module and its exception named, and one entry per report however many records Windows wrote it across.
+- `reliability`: Windows' own record of this machine, the failures the Reliability Analysis Component counted and the stability index it computes every hour, rolled up by day — where the index stood at each day's end, how low it went, and what Windows counted that day, by source. It is somebody else's arithmetic, which is exactly why it is worth having beside the tool's own readings: it can disagree, and a disagreement is a lead.
+- **Crashes**, the view, in place of Crash dumps: the stops, the programs and the kernel's live reports, and the dump files, three readings each with its own outcome line and each row opening in place on the facts behind it.
+- The moment as somewhere to go. A stop, a fault, a dump file, a hardware-error record, a time inside a signal's evidence, a lit stretch of the hardware-error trace: each carries one control that frames the log around that instant — the records before it, oldest first, ending there, widened twenty-five at a time, with the way back beside them. The frame is held while you look at something else and is still there when you come back.
+- `since` on `events` and `faults`: an ISO moment, or the word `boot` for this session only, answered by the log's own index rather than by a scan. Record and Hardware errors both offer it as a window.
+- Two more signals, each a lead with its rule: stops that share a bug check code, and stops that wrote none, as one signal per group; and the day Windows' own stability index fell furthest below where the day before left it.
+
+### Changed
+- `memory` gives up the bug check half of its ledger — the stops are `crash`'s to report now — and gains the result of Windows' own memory test beside the time the System log's oldest record carries, so no result says how far back that reaches instead of implying the test was never run.
+- `power` counts the log's own start and stop (EventLog 6005 and 6006) among its transitions.
+- The MCP instructions lead with the moment: what is up, then the last stops or the stop a moment announced, then the record before it.
+- Launches of `powershell.exe` are bounded: a process caps how many it has in flight, and under WSL a slot shared across every process that uses the bridge serializes them machine-wide, a test suite and a live dashboard included (the numbers live where they are defined in `sentinel/bridge.py`). A reading made of several others queues behind the same bridge rather than racing them, which under WSL's interop layer was how a reading came back `unavailable` for reasons that had nothing to do with the machine; a slot held by another process for longer than the launch's own timeout is reported the same way rather than waited for without end.
+
 ## [1.0.1] - 2026-09-21
 
 The file looks after itself: it installs, updates and removes itself, says which version it is, and says so out loud when it cannot start.

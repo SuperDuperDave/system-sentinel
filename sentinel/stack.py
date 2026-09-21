@@ -409,7 +409,8 @@ def _json_block(data: Any) -> list[str]:
 
 
 def _params_text(params: dict[str, Any]) -> str:
-    return ", ".join(f"{k}={_value_text(v)}" for k, v in params.items() if v is not None)
+    """What was asked for. A parameter left empty was not asked for, so it is not written down."""
+    return ", ".join(f"{k}={_value_text(v)}" for k, v in params.items() if v is not None and v != "")
 
 
 def _value_text(value: Any) -> str:

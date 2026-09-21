@@ -1,0 +1,54 @@
+{
+  "_note": "Synthetic Application log records as the shared projection returns them, newest first: two crashes and a hang of one made-up program, a crash of another, and two live kernel events, one of which WER wrote twice under the same report id.",
+  "records": [
+    {
+      "RecordId": 4000, "Id": 1001, "Level": 4, "LevelDisplayName": "Information",
+      "ProviderName": "Windows Error Reporting", "MachineName": "WORKBENCH", "TaskDisplayName": null,
+      "TimeCreated": "2026-09-12T11:20:30.0000000Z", "Log": "Application",
+      "Message": "Fault bucket LKD_0x141_Tdr:6_IMAGE_nvlddmkm.sys_Ampere, type 0\nEvent Name: LiveKernelEvent",
+      "Properties": ["LKD_0x141_Tdr:6_IMAGE_nvlddmkm.sys_Ampere", 0, "LiveKernelEvent", "Not available", 0, "141", "ffffb60a1c2d3000", "fffff8021a2b3000", "0", "0", "10_0_26200", "768_1", "1", "", "", "\\\\?\\C:\\Windows\\LiveKernelReports\\WATCHDOG\\WATCHDOG-20260912-1120.dmp", "C:\\ProgramData\\Microsoft\\Windows\\WER\\ReportArchive\\Kernel_141_beef", "", 0, "5d7e8f90-1a2b-4c3d-9e0f-112233445566", 268435456, "", "00000000-0000-0000-0000-000000000000"]
+    },
+    {
+      "RecordId": 3999, "Id": 1001, "Level": 4, "LevelDisplayName": "Information",
+      "ProviderName": "Windows Error Reporting", "MachineName": "WORKBENCH", "TaskDisplayName": null,
+      "TimeCreated": "2026-09-12T11:20:10.0000000Z", "Log": "Application",
+      "Message": "Fault bucket , type 0\nEvent Name: LiveKernelEvent",
+      "Properties": ["", 0, "LiveKernelEvent", "Not available", 0, "141", "ffffb60a1c2d3000", "fffff8021a2b3000", "0", "0", "10_0_26200", "768_1", "1", "", "", "", "", "", 0, "5d7e8f90-1a2b-4c3d-9e0f-112233445566", 4, "", "00000000-0000-0000-0000-000000000000"]
+    },
+    {
+      "RecordId": 3010, "Id": 1002, "Level": 2, "LevelDisplayName": "Error",
+      "ProviderName": "Application Hang", "MachineName": "WORKBENCH", "TaskDisplayName": null,
+      "TimeCreated": "2026-09-12T10:05:00.0000000Z", "Log": "Application",
+      "Message": "The program example.exe version 1.2.3.4 stopped interacting with Windows and was closed.",
+      "Properties": ["example.exe", "1.2.3.4", 4321, "01dcf0a1b2c3d4e5", "01dcf0a1b2c3ffff", "example.exe", "bb22cc33-dd44-4e55-8f66-778899aabbcc", "", "", 0]
+    },
+    {
+      "RecordId": 3001, "Id": 1000, "Level": 2, "LevelDisplayName": "Error",
+      "ProviderName": "Application Error", "MachineName": "WORKBENCH", "TaskDisplayName": null,
+      "TimeCreated": "2026-09-12T09:40:00.0000000Z", "Log": "Application",
+      "Message": "Faulting application name: example.exe, version: 1.2.3.4\nFaulting module name: nvwgf2umx.dll, version: 32.0.15.6094\nException code: 0xc0000005",
+      "Properties": ["example.exe", "1.2.3.4", "68b1c2d3", "nvwgf2umx.dll", "32.0.15.6094", "66aa1b2c", "c0000005", "00000000004f1a20", 4321, "01dcf0a1b2c3d4e5", "C:\\Users\\someone\\AppData\\Local\\Example\\example.exe", "C:\\Windows\\System32\\DriverStore\\FileRepository\\nv_dispi.inf_amd64\\nvwgf2umx.dll", "cc33dd44-ee55-4f66-9077-8899aabbccdd", "", ""]
+    },
+    {
+      "RecordId": 3000, "Id": 1000, "Level": 2, "LevelDisplayName": "Error",
+      "ProviderName": "Application Error", "MachineName": "WORKBENCH", "TaskDisplayName": null,
+      "TimeCreated": "2026-09-12T09:15:00.0000000Z", "Log": "Application",
+      "Message": "Faulting application name: example.exe, version: 1.2.3.4\nFaulting module name: ucrtbase.dll, version: 10.0.26200.1742\nException code: 0xc0000409",
+      "Properties": ["example.exe", "1.2.3.4", "68b1c2d3", "ucrtbase.dll", "10.0.26200.1742", "5f1a2b3c", "c0000409", "000000000009f2a0", 4321, "01dcf0a1b2c3d4e5", "C:\\Users\\someone\\AppData\\Local\\Example\\example.exe", "C:\\Windows\\System32\\ucrtbase.dll", "aa11bb22-cc33-4d44-8e55-f6667788990a", "", ""]
+    },
+    {
+      "RecordId": 3002, "Id": 1000, "Level": 2, "LevelDisplayName": "Error",
+      "ProviderName": "Application Error", "MachineName": "WORKBENCH", "TaskDisplayName": null,
+      "TimeCreated": "2026-09-11T22:00:00.0000000Z", "Log": "Application",
+      "Message": "Faulting application name: other.exe, version: 5.6.7.8\nFaulting module name: KERNELBASE.dll, version: 10.0.26200.1742\nException code: 0xe0434352",
+      "Properties": ["other.exe", "5.6.7.8", "6a1b2c3d", "KERNELBASE.dll", "10.0.26200.1742", "5f1a2b3c", "e0434352", "00000000000a1b2c", 8765, "01dcf0b1c2d3e4f5", "C:\\Program Files\\Other\\other.exe", "C:\\Windows\\System32\\KERNELBASE.dll", "dd44ee55-ff66-4077-8899-aabbccddeeff", "", ""]
+    },
+    {
+      "RecordId": 4100, "Id": 1001, "Level": 4, "LevelDisplayName": "Information",
+      "ProviderName": "Windows Error Reporting", "MachineName": "WORKBENCH", "TaskDisplayName": null,
+      "TimeCreated": "2026-09-10T18:00:00.0000000Z", "Log": "Application",
+      "Message": "Fault bucket LKD_0x193_IMAGE_dxgkrnl.sys, type 0\nEvent Name: LiveKernelEvent",
+      "Properties": ["LKD_0x193_IMAGE_dxgkrnl.sys", 0, "LiveKernelEvent", "Not available", 0, "193", "0", "0", "0", "0", "10_0_26200", "768_1", "1", "", "", "\\\\?\\C:\\Windows\\LiveKernelReports\\PoW32kWatchdog\\POW32KWATCHDOG-20260910-1800.dmp", "C:\\ProgramData\\Microsoft\\Windows\\WER\\ReportArchive\\Kernel_193_cafe", "", 0, "6e8f9012-2b3c-4d5e-af10-223344556677", 268435456, "", "00000000-0000-0000-0000-000000000000"]
+    }
+  ]
+}

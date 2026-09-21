@@ -146,7 +146,7 @@ $query = @'
 '@
 $transitions = @()
 try {
-    $transitions = @(Get-WinEvent -FilterXml ([xml]$query) -MaxEvents 60 -ErrorAction Stop |
+    $transitions = @(Get-WinEvent -FilterXml ([xml]$query) -MaxEvents 120 -ErrorAction Stop |
         Select-Object RecordId, Id, ProviderName, LevelDisplayName,
             @{Name='TimeCreated'; Expression={ $_.TimeCreated.ToUniversalTime().ToString('o') }},
             Message)
@@ -183,6 +183,7 @@ catch { $warnings += "Win32_PhysicalMemoryArray did not answer: $($_.Exception.M
 
 # What the machine has said about this memory. The records themselves, decoded, are the
 # whea reading; here they are the count and the moments, addressable by their record id.
+# A stop the machine did not plan is the crash reading's, not a second ledger here.
 $since = (Get-Date).AddDays(-30)
 $ledger = @()
 try {
@@ -193,21 +194,32 @@ try {
 } catch {
     if ($_.FullyQualifiedErrorId -notlike 'NoMatchingEventsFound*') { $warnings += "The WHEA ledger did not read: $($_.Exception.Message)" }
 }
-try {
-    $ledger += @(Get-WinEvent -FilterHashtable @{LogName='System'; ProviderName='Microsoft-Windows-WER-SystemErrorReporting'; Id=1001; StartTime=$since} -ErrorAction Stop |
-        Select-Object RecordId, Id, LevelDisplayName, ProviderName,
-            @{Name='TimeCreated'; Expression={ $_.TimeCreated.ToUniversalTime().ToString('o') }},
-            @{Name='Kind'; Expression={ 'bugcheck' }})
-} catch {
-    if ($_.FullyQualifiedErrorId -notlike 'NoMatchingEventsFound*') { $warnings += "The bug check ledger did not read: $($_.Exception.Message)" }
-}
 $ledger = @($ledger | Sort-Object TimeCreated -Descending | Select-Object -First 100)
+
+# Windows' own test of this memory, whenever it last ran. The result lands in the System log,
+# so how far back "no result" reaches is the log's oldest record, not the life of the machine.
+$diagnostic = $null
+try {
+    $diagnostic = @(Get-WinEvent -FilterHashtable @{LogName='System'; ProviderName='Microsoft-Windows-MemoryDiagnostics-Results'} -MaxEvents 1 -ErrorAction Stop |
+        Select-Object Id, LevelDisplayName, Message,
+            @{Name='TimeCreated'; Expression={ $_.TimeCreated.ToUniversalTime().ToString('o') }})[0]
+} catch {
+    if ($_.FullyQualifiedErrorId -notlike 'NoMatchingEventsFound*') { $warnings += "The memory diagnostic result did not read: $($_.Exception.Message)" }
+}
+
+$log_begins = $null
+try { $log_begins = (Get-WinEvent -LogName System -Oldest -MaxEvents 1 -ErrorAction Stop).TimeCreated.ToUniversalTime().ToString('o') }
+catch {
+    if ($_.FullyQualifiedErrorId -notlike 'NoMatchingEventsFound*') { $warnings += "The System log's oldest record did not read, so how far back it reaches is unknown: $($_.Exception.Message)" }
+}
 
 [pscustomobject]@{
     modules      = $modules
     array        = $array
     ledger       = $ledger
     ledger_days  = 30
+    diagnostic   = $diagnostic
+    log_begins   = $log_begins
     warnings     = $warnings
 }
 """
@@ -358,6 +370,8 @@ TRANSITIONS: dict[tuple[str, int], str] = {
     ("Microsoft-Windows-Kernel-General", 13): "shutdown",
     ("Microsoft-Windows-Power-Troubleshooter", 1): "wake",
     ("Microsoft-Windows-WER-SystemErrorReporting", 1001): "bug check",
+    ("EventLog", 6005): "log started",
+    ("EventLog", 6006): "log stopped",
     ("EventLog", 6008): "unexpected shutdown, logged at the next start",
     ("Display", 4101): "display driver reset",
 }
@@ -473,8 +487,11 @@ MEMORY_BASIS = (
     "A module is counted as populated where the array reports its slot; the kit is the set of "
     "distinct manufacturer and part numbers, so more than one is a mixed kit. Error correction is "
     "read from the module's total width exceeding its data width. A module runs below its rating "
-    "where its configured clock is under its rated speed. The ledger counts the WHEA and bug check "
-    "records over the window; the records themselves, decoded, are the whea reading."
+    "where its configured clock is under its rated speed. The ledger counts the WHEA records over "
+    "the window; the records themselves, decoded, are the whea reading, and the stops the machine "
+    "did not plan are the crash reading. The memory diagnostic is the latest "
+    "Microsoft-Windows-MemoryDiagnostics-Results record in the System log: no result means no "
+    "result since the log's oldest record, stated beside it, and not that the test was never run."
 )
 
 _ECC_NONE = (2, 3)  # Win32_PhysicalMemoryArray: 2 none, 3 parity
@@ -495,6 +512,7 @@ def memory_derived(payload: dict[str, Any]) -> dict[str, Any]:
     ]
     counts = Counter(str(e.get("Kind")) for e in ledger)
     stamps = sorted(str(e.get("TimeCreated")) for e in ledger if e.get("TimeCreated"))
+    diagnostic = payload.get("diagnostic") if isinstance(payload.get("diagnostic"), dict) else None
 
     return {
         "installed_gb": round(sum(_int(m.get("Capacity")) or 0 for m in modules) / 1024**3, 2),
@@ -521,6 +539,10 @@ def memory_derived(payload: dict[str, Any]) -> dict[str, Any]:
             "records": len(ledger),
             "counts": dict(sorted(counts.items())),
             "most_recent": stamps[-1] if stamps else None,
+        },
+        "memory_diagnostic": {
+            "last_result": {key: diagnostic.get(key) for key in ("Id", "TimeCreated", "LevelDisplayName", "Message")} if diagnostic else None,
+            "log_begins": payload.get("log_begins"),
         },
     }
 
@@ -614,6 +636,8 @@ SIGNAL_INPUTS: tuple[tuple[str, dict[str, Any]], ...] = (
     ("power", {}),
     ("constraints", {}),
     ("events", {"levels": [1, 2, 3, 4], "count": 200}),
+    ("crash", {"count": 20}),
+    ("reliability", {}),
 )
 
 # A provider's share of the recent records, not a count: the window is whatever the log
@@ -623,6 +647,13 @@ LOUD = 0.25
 TOP_TALKERS = 3
 STALE_DRIVER_DAYS = 730
 LONG_UPTIME_DAYS = 7
+# Two stops with the same bug check are a pattern; one is a stop. Five of them are as many as an
+# evidence line can carry and still be read.
+REPEATED_STOPS = 2
+NEWEST_STOPS = 5
+NO_BUGCHECK = "no bug check recorded"
+# How far Windows' index has to fall below where the day before left it to be worth pointing at.
+INDEX_FALL = 0.5
 CLASSES = ("suppressions", "gaps", "pressure", "transitions", "mismatches")
 
 
@@ -766,18 +797,28 @@ def _transitions(observed: dict[str, Reading]) -> list[dict[str, Any]]:
     counts = (derived.get("ledger") or {}).get("counts") or {}
     window = (derived.get("ledger") or {}).get("window") or {}
 
+    stops = _rows(observed.get("crash"), "stops")
+
     unexpected = sum(count for name, count in counts.items() if "unexpected shutdown" in name)
     if unexpected:
+        evidence: dict[str, Any] = {"records": unexpected, "window": window}
+        readings = ["power"]
+        if stops:
+            # The ledger counts the records; crash has already composed them into stops, so the
+            # signal can name them here rather than send the reader back to the log for them.
+            evidence["stops"] = [_stop_facts(stop) for stop in stops[:NEWEST_STOPS]]
+            readings.append("crash")
         out.append(
             _signal(
                 "transitions",
                 "transition:unexpected-shutdown",
                 f"{unexpected} unexpected shutdown record(s) in the ledger",
                 "The machine stopped without a clean shutdown at least once in the window. Take the record reading before each of these moments to see what it was doing.",
-                {"records": unexpected, "window": window},
-                ["power"],
+                evidence,
+                readings,
             )
         )
+    out += _repeated_stops(stops)
     if counts.get("display driver reset") and (counts.get("wake") or counts.get("resume")):
         out.append(
             _signal(
@@ -801,7 +842,68 @@ def _transitions(observed: dict[str, Reading]) -> list[dict[str, Any]]:
                 ["power"],
             )
         )
+    out += _index_fall(_days(observed.get("reliability")))
     return out
+
+
+def _stop_facts(stop: dict[str, Any]) -> dict[str, Any]:
+    bugcheck = stop.get("bugcheck") or {}
+    return {"started_at": stop.get("started_at"), "code": bugcheck.get("code"), "name": bugcheck.get("name")}
+
+
+def _repeated_stops(stops: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Stops that carry the same bug check, or that carry none at all. What they share is the lead;
+    a stop that recorded nothing shares that with the others, which is why it is its own group."""
+    groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for stop in stops:
+        code = (stop.get("bugcheck") or {}).get("code")
+        if code:
+            groups[str(code)].append(stop)
+        elif stop.get("no_bugcheck_recorded"):
+            groups[NO_BUGCHECK].append(stop)
+
+    out: list[dict[str, Any]] = []
+    for code, group in sorted(groups.items(), key=lambda kv: (-len(kv[1]), kv[0])):
+        if len(group) < REPEATED_STOPS:
+            continue
+        none_recorded = code == NO_BUGCHECK
+        name = next((f.get("name") for f in (s.get("bugcheck") or {} for s in group) if f.get("name")), None)
+        out.append(
+            _signal(
+                "transitions",
+                f"transition:repeated-stop:{'no-bugcheck' if none_recorded else code}",
+                f"{len(group)} stops wrote no bug check" if none_recorded else f"{len(group)} stops share bug check {f'{code} ({name})' if name else code}",
+                "These stops recorded nothing beyond the fact that they happened: the machine did not get far enough to write a bug check, which is itself the evidence. What it was doing before each one is the record before its start."
+                if none_recorded
+                else "More than one stop was announced with this bug check. What they have in common is a lead; whether they have one cause is for the dumps and the record before each start to say.",
+                {"stops": len(group), "code": None if none_recorded else code, "name": name, "started_at": [s.get("started_at") for s in group]},
+                ["crash"],
+            )
+        )
+    return out
+
+
+def _index_fall(days: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The day Windows' own index fell furthest below where the day before left it."""
+    falls: list[tuple[float, float, dict[str, Any]]] = []
+    for before, day in zip(days, days[1:]):
+        left_at, went_to = _float(before.get("index_last")), _float(day.get("index_min"))
+        if left_at is None or went_to is None or left_at - went_to < INDEX_FALL:
+            continue
+        falls.append((round(left_at - went_to, 3), left_at, day))
+    if not falls:
+        return []
+    fall, left_at, day = max(falls, key=lambda f: f[0])
+    return [
+        _signal(
+            "transitions",
+            "transition:reliability-index-fall",
+            f"Windows' reliability index fell {fall} on {day['day']}",
+            "Windows lowers this index when it counts a failure, so this points at the day it counted, not at a second failure. What it counted that day is named here.",
+            {"day": day["day"], "index_before": left_at, "index_min": _float(day.get("index_min")), "fall": fall, "records": day.get("records") or {}},
+            ["reliability"],
+        )
+    ]
 
 
 def _mismatches(observed: dict[str, Reading]) -> list[dict[str, Any]]:
@@ -924,9 +1026,20 @@ def _fingerprint(reading: Reading | None) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
-def _records(reading: Reading | None) -> list[dict[str, Any]]:
-    data = _section(reading, "records")
+def _rows(reading: Reading | None, name: str) -> list[dict[str, Any]]:
+    data = _section(reading, name)
     return [r for r in data if isinstance(r, dict)] if isinstance(data, list) else []
+
+
+def _records(reading: Reading | None) -> list[dict[str, Any]]:
+    return _rows(reading, "records")
+
+
+def _days(reading: Reading | None) -> list[dict[str, Any]]:
+    """reliability's day-by-day section: a dict whose ``days`` holds the entries, oldest first."""
+    data = _section(reading, "days")
+    rows = data.get("days") if isinstance(data, dict) else None
+    return [r for r in rows if isinstance(r, dict)] if isinstance(rows, list) else []
 
 
 def _stamp(records: list[dict[str, Any]], provider: str, *, first: bool) -> str | None:
@@ -943,6 +1056,15 @@ def _first(*values: Any) -> Any:
 def _int(value: Any) -> int | None:
     try:
         return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _float(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        return float(value)
     except (TypeError, ValueError):
         return None
 
@@ -1010,8 +1132,9 @@ register(
         name="memory",
         description=(
             "Physical memory and stability signals: what is in each slot, how fast it is actually "
-            "running against its rating, whether the kit is homogeneous, and how many hardware error "
-            "and bug check records the machine has written over the window."
+            "running against its rating, whether the kit is homogeneous, how many hardware error "
+            "records the machine has written over the window, and the result of Windows' own memory "
+            "test if it has run since the System log's oldest record."
         ),
         classes=("raw", "derived"),
         take=take_memory,

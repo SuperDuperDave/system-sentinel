@@ -1,5 +1,6 @@
-"""The deep diagnostics: the fabric is assembled correctly, a transition is named by its
-provider as well as its id, and signals says what it could not see.
+"""The deep diagnostics and Windows' own second opinion: the fabric is assembled correctly, a
+transition is named by its provider as well as its id, the reliability rollup is held to its rule,
+and signals says what it could not see.
 
 The unit tests hold the derivations to fixtures, because the shapes that matter on this
 machine (a root port with two endpoints under it, a WHEA record in the ledger, a disabled
@@ -16,6 +17,7 @@ from sentinel.bridge import BridgeResult
 from sentinel.reading import REGISTRY, take
 from sentinel.readings.diagnostics import (
     CONSTRAINTS_SCRIPT,
+    MEMORY_BASIS,
     MEMORY_SCRIPT,
     PCIE_SCRIPT,
     _aspm,
@@ -30,6 +32,7 @@ from sentinel.readings.diagnostics import (
     transition_kind,
     transitions_query,
 )
+from sentinel.readings.reliability import RELIABILITY_SCRIPT_TEMPLATE, reliability_days
 from tests.conftest import FakeBridge, real_bridge_or_skip
 
 ROOT_PORT = "PCI\\VEN_1022&DEV_1483\\3&A&0&19"
@@ -60,6 +63,7 @@ POWER_PAYLOAD = {
     "batteries": [],
     "boot_time": "2020-01-01T00:00:00.0000000Z",
     "transitions": [
+        {"RecordId": 10, "Id": 6005, "ProviderName": "EventLog", "TimeCreated": "2026-09-20T10:00:00.000Z"},
         {"RecordId": 9, "Id": 1, "ProviderName": "Microsoft-Windows-Power-Troubleshooter", "TimeCreated": "2026-09-19T10:00:00.000Z"},
         {"RecordId": 8, "Id": 1, "ProviderName": "Microsoft-Windows-Kernel-General", "TimeCreated": "2026-09-18T10:00:00.000Z"},
         {"RecordId": 7, "Id": 41, "ProviderName": "Microsoft-Windows-Kernel-Power", "TimeCreated": "2026-09-17T10:00:00.000Z"},
@@ -77,10 +81,58 @@ MEMORY_PAYLOAD = {
     "array": {"MaxCapacity": 134217728, "MemoryDevices": 4, "MemoryErrorCorrection": 3},
     "ledger": [
         {"RecordId": 5, "Id": 17, "LevelDisplayName": "Warning", "ProviderName": "Microsoft-Windows-WHEA-Logger", "TimeCreated": "2026-09-01T00:00:00.000Z", "Kind": "whea"},
-        {"RecordId": 4, "Id": 1001, "LevelDisplayName": "Error", "ProviderName": "Microsoft-Windows-WER-SystemErrorReporting", "TimeCreated": "2026-08-30T00:00:00.000Z", "Kind": "bugcheck"},
     ],
     "ledger_days": 30,
+    "diagnostic": {
+        "Id": 1201,
+        "TimeCreated": "2026-07-04T02:11:09.000Z",
+        "LevelDisplayName": "Information",
+        "Message": "The Windows Memory Diagnostic tested the computer's memory and detected no errors.",
+    },
+    "log_begins": "2026-07-01T06:15:00.000Z",
 }
+
+# Three hours of Windows' own index over three days, and what it counted on each. The largest fall
+# is not on the day the index is lowest, which is the whole point of the rule that reads it.
+RELIABILITY_STABILITY = [
+    {"TimeGenerated": "2026-09-17T22:00:00.000Z", "SystemStabilityIndex": 9.4, "RelID": 1},
+    {"TimeGenerated": "2026-09-17T23:00:00.000Z", "SystemStabilityIndex": 9.1, "RelID": 2},
+    {"TimeGenerated": "2026-09-18T20:00:00.000Z", "SystemStabilityIndex": 7.9, "RelID": 3},
+    {"TimeGenerated": "2026-09-18T23:00:00.000Z", "SystemStabilityIndex": 7.4, "RelID": 4},
+    {"TimeGenerated": "2026-09-19T21:00:00.000Z", "SystemStabilityIndex": 6.2, "RelID": 5},
+    {"TimeGenerated": "2026-09-19T23:00:00.000Z", "SystemStabilityIndex": None, "RelID": 6},
+]
+
+RELIABILITY_RECORDS = [
+    {"SourceName": "Microsoft-Windows-WindowsUpdateClient", "EventIdentifier": 19, "TimeGenerated": "2026-09-18T09:30:00.000Z",
+     "ProductName": "Security Update", "Message": "Installation Successful", "Logfile": "System", "RecordNumber": 4011,
+     "InsertionStrings": ["Security Update"], "User": "SOMEBOX\\someone", "ComputerName": "SOMEBOX"},
+    {"SourceName": "Microsoft-Windows-WindowsUpdateClient", "EventIdentifier": 19, "TimeGenerated": "2026-09-18T09:31:00.000Z",
+     "ProductName": "Security Update", "Message": "Installation Successful", "Logfile": "System", "RecordNumber": 4012,
+     "InsertionStrings": ["Security Update"], "User": "SOMEBOX\\someone", "ComputerName": "SOMEBOX"},
+    {"SourceName": "Application Error", "EventIdentifier": 1000, "TimeGenerated": "2026-09-19T21:04:00.000Z",
+     "ProductName": "example.exe", "Message": "Faulting application example.exe", "Logfile": "Application", "RecordNumber": 4013,
+     "InsertionStrings": ["example.exe"], "User": "SOMEBOX\\someone", "ComputerName": "SOMEBOX"},
+]
+
+RELIABILITY_PAYLOAD = {"records": RELIABILITY_RECORDS, "stability": RELIABILITY_STABILITY, "window_days": 30, "warnings": []}
+
+# Stops as crash composes them: two that share a bug check, two that wrote none, one on its own.
+def _stop(started_at: str, code: str | None = None, name: str | None = None) -> dict:
+    return {
+        "started_at": started_at,
+        "bugcheck": {"code": code, "name": name, "parameters": [], "source": "Kernel-Power 41", "bucket": None} if code else None,
+        "no_bugcheck_recorded": code is None,
+    }
+
+
+STOPS = [
+    _stop("2026-09-19T03:12:04.000Z", "0x133", "DPC_WATCHDOG_VIOLATION"),
+    _stop("2026-09-14T22:41:19.000Z", "0x133", "DPC_WATCHDOG_VIOLATION"),
+    _stop("2026-09-07T08:02:55.000Z"),
+    _stop("2026-09-02T19:30:00.000Z"),
+    _stop("2026-08-30T11:00:00.000Z", "0x1a", "MEMORY_MANAGEMENT"),
+]
 
 CONSTRAINT_DEVICES = [
     {"Name": "Realtek Audio", "InstanceId": "HDAUDIO\\A", "Class": "MEDIA", "Status": "Error", "Problem": "CM_PROB_DISABLED", "ProblemDescription": "This device is disabled. (Code 22)."},
@@ -96,6 +148,7 @@ def payload_bridge() -> FakeBridge:
             "powercfg": BridgeResult("ok", items=[dict(POWER_PAYLOAD, warnings=["powercfg /a produced no output: the supported sleep states were not observed."])], took_ms=12),
             "Win32_PhysicalMemory": BridgeResult("ok", items=[dict(MEMORY_PAYLOAD)], took_ms=13),
             "CM_PROB_NONE": BridgeResult("ok", items=[{"devices": CONSTRAINT_DEVICES, "warnings": []}], took_ms=14),
+            "Win32_ReliabilityRecords": BridgeResult("ok", items=[dict(RELIABILITY_PAYLOAD)], took_ms=15),
         }
     )
 
@@ -166,6 +219,12 @@ def test_a_transition_is_named_by_its_provider_as_well_as_its_id():
     assert transition_kind({"ProviderName": "Microsoft-Windows-Kernel-Power", "Id": 41}) == "unexpected shutdown"
 
 
+def test_the_logs_own_start_and_stop_are_in_the_ledger():
+    assert transition_kind({"ProviderName": "EventLog", "Id": 6005}) == "log started"
+    assert transition_kind({"ProviderName": "EventLog", "Id": 6006}) == "log stopped"
+    assert "Provider[@Name='EventLog'] and (EventID=6005 or EventID=6006 or EventID=6008)" in transitions_query()
+
+
 def test_the_ledger_query_gives_each_provider_its_own_event_ids():
     query = transitions_query()
     assert "Provider[@Name='Microsoft-Windows-Kernel-General'] and (EventID=12 or EventID=13)" in query
@@ -194,8 +253,8 @@ def test_power_counts_the_ledger_and_reports_the_window_it_covers():
     assert derived["power_source"] == "mains (no battery is present)"
     assert derived["fast_startup"] is True
     assert derived["wake_armed"] == [] and derived["wake_armed_count"] == 0  # powercfg prints NONE for nothing armed
-    assert derived["ledger"]["counts"] == {"display driver reset": 1, "unexpected shutdown": 1, "unnamed transition": 1, "wake": 1}
-    assert derived["ledger"]["window"] == {"first": "2026-09-16T10:00:00.000Z", "last": "2026-09-19T10:00:00.000Z"}
+    assert derived["ledger"]["counts"] == {"display driver reset": 1, "log started": 1, "unexpected shutdown": 1, "unnamed transition": 1, "wake": 1}
+    assert derived["ledger"]["window"] == {"first": "2026-09-16T10:00:00.000Z", "last": "2026-09-20T10:00:00.000Z"}
     assert derived["uptime_seconds"] > 0
 
 
@@ -218,7 +277,31 @@ def test_memory_reads_the_slots_the_kit_and_the_ledger():
     assert derived["modules"][0]["error_correction"] is False and derived["modules"][1]["error_correction"] is True
     assert derived["mixed_kit"] is True and derived["kits"] == ["Corsair CMK16", "Kingston KF432"]
     assert derived["below_rated_speed"] == ["DIMM 1"]
-    assert derived["ledger"] == {"window_days": 30, "records": 2, "counts": {"bugcheck": 1, "whea": 1}, "most_recent": "2026-09-01T00:00:00.000Z"}
+    assert derived["ledger"] == {"window_days": 30, "records": 1, "counts": {"whea": 1}, "most_recent": "2026-09-01T00:00:00.000Z"}
+
+
+def test_the_bug_check_half_of_the_ledger_belongs_to_the_crash_reading_now():
+    assert "Microsoft-Windows-WHEA-Logger" in MEMORY_SCRIPT
+    assert "WER-SystemErrorReporting" not in MEMORY_SCRIPT
+    assert "crash reading" in MEMORY_BASIS
+
+
+def test_the_memory_diagnostic_carries_how_far_back_no_result_reaches():
+    diagnostic = memory_derived(MEMORY_PAYLOAD)["memory_diagnostic"]
+    assert diagnostic["last_result"] == {
+        "Id": 1201,
+        "TimeCreated": "2026-07-04T02:11:09.000Z",
+        "LevelDisplayName": "Information",
+        "Message": "The Windows Memory Diagnostic tested the computer's memory and detected no errors.",
+    }
+    assert diagnostic["log_begins"] == "2026-07-01T06:15:00.000Z"
+    assert "never run" in MEMORY_BASIS  # a null result is not proof the test was never run
+
+
+def test_no_diagnostic_result_is_a_null_beside_the_logs_reach_not_a_silence():
+    payload = dict(MEMORY_PAYLOAD, diagnostic=None)
+    assert memory_derived(payload)["memory_diagnostic"] == {"last_result": None, "log_begins": "2026-07-01T06:15:00.000Z"}
+    assert memory_derived({})["memory_diagnostic"] == {"last_result": None, "log_begins": None}
 
 
 def test_an_empty_ledger_is_a_finding_not_an_absence():
@@ -256,6 +339,58 @@ def test_constraints_returns_raw_and_derived():
     assert [(s.name, s.cls) for s in reading.sections] == [("raw", "raw"), ("derived", "derived")]
 
 
+# ---------------------------------------------------------------- reliability
+
+
+def test_the_day_rollup_reads_the_index_at_each_days_end_and_its_lowest_hour():
+    rollup = reliability_days(RELIABILITY_RECORDS, RELIABILITY_STABILITY)
+    assert [d["day"] for d in rollup["days"]] == ["2026-09-17", "2026-09-18", "2026-09-19"]
+    assert [d["index_last"] for d in rollup["days"]] == [9.1, 7.4, 6.2]  # the last hour that reported one
+    assert [d["index_min"] for d in rollup["days"]] == [9.1, 7.4, 6.2]
+    assert rollup["days"][1]["records"] == {"Microsoft-Windows-WindowsUpdateClient": 2}
+    assert rollup["days"][0]["records"] == {}  # a day Windows counted nothing on is still a day
+    assert rollup["index_now"] == 6.2
+    assert rollup["index_lowest"] == {"day": "2026-09-19", "index": 6.2}
+    assert rollup["sources"] == {"Microsoft-Windows-WindowsUpdateClient": 2, "Application Error": 1}
+    assert (rollup["from"], rollup["to"]) == ("2026-09-17T22:00:00.000Z", "2026-09-19T23:00:00.000Z")
+
+
+def test_a_day_with_records_and_no_index_is_still_a_day():
+    rollup = reliability_days([RELIABILITY_RECORDS[2]], [])
+    assert rollup["days"] == [{"day": "2026-09-19", "index_last": None, "index_min": None, "records": {"Application Error": 1}}]
+    assert rollup["index_now"] is None and rollup["index_lowest"] is None
+
+
+def test_reliability_returns_both_raw_sections_and_the_rollup():
+    reading = asyncio.run(take("reliability", payload_bridge(), {}))
+    assert reading.outcome == "ok" and reading.count == 3
+    assert [(s.name, s.cls) for s in reading.sections] == [("records", "raw"), ("stability", "raw"), ("days", "derived")]
+    assert reading.section("days").basis
+    assert reading.section("records").data[0]["ComputerName"] == "SOMEBOX"  # redaction happens at the boundary
+    assert "-30" in reading.method["query"]
+
+
+def test_a_machine_windows_kept_no_record_of_is_empty_not_ok():
+    bridge = FakeBridge(BridgeResult("ok", items=[{"records": [], "stability": [], "window_days": 30, "warnings": []}]))
+    reading = asyncio.run(take("reliability", bridge, {}))
+    assert reading.outcome == "empty" and reading.count == 0 and reading.error is None
+    assert [s.name for s in reading.sections] == ["records", "stability", "days"]
+
+
+def test_one_class_answering_and_the_other_not_is_still_an_observed_reading():
+    payload = {"records": RELIABILITY_RECORDS, "stability": [], "window_days": 30, "warnings": ["Win32_ReliabilityStabilityMetrics did not answer: nope"]}
+    reading = asyncio.run(take("reliability", FakeBridge(BridgeResult("ok", items=[payload])), {}))
+    assert reading.outcome == "ok" and reading.count == 3
+    assert any("Win32_ReliabilityStabilityMetrics" in w for w in reading.warnings)
+    assert all(d["index_last"] is None for d in reading.section("days").data["days"])
+
+
+def test_a_window_outside_the_range_is_refused():
+    for days in (0, 400):
+        with pytest.raises(ValueError, match="days"):
+            asyncio.run(take("reliability", payload_bridge(), {"days": days}))
+
+
 # ---------------------------------------------------------------- signals
 
 
@@ -272,6 +407,8 @@ def _inputs(**over):
         "power": _reading("power", [("derived", "derived", {"fast_startup": True, "uptime_seconds": 30 * 86400, "link_power_management": {"ac": {"index": "0x2", "setting": "L1"}}, "ledger": {"counts": {"unexpected shutdown": 2, "wake": 1, "display driver reset": 1}, "window": {"first": "a", "last": "b"}}})]),
         "constraints": _reading("constraints", [("derived", "derived", constraints_derived(CONSTRAINT_DEVICES))]),
         "events": _reading("events", [("records", "raw", [{"ProviderName": "Service Control Manager", "TimeCreated": f"2026-09-0{i % 9 + 1}T00:00:00Z"} for i in range(30)] + [{"ProviderName": "Quiet", "TimeCreated": "2026-09-01T00:00:00Z"}])]),
+        "crash": _reading("crash", [("stops", "derived", STOPS)]),
+        "reliability": _reading("reliability", [("days", "derived", reliability_days(RELIABILITY_RECORDS, RELIABILITY_STABILITY))]),
     }
     base.update(over)
     return base
@@ -283,7 +420,7 @@ def test_every_class_can_fire_and_each_signal_names_the_readings_it_drew_on():
     assert classes == {"suppressions", "gaps", "pressure", "transitions", "mismatches"}
     assert [s["class"] for s in signals] == sorted((s["class"] for s in signals), key=["suppressions", "gaps", "pressure", "transitions", "mismatches"].index)
     assert all(s["readings"] and s["id"] and s["title"] and s["summary"] and isinstance(s["evidence"], dict) for s in signals)
-    assert "Observed: hardware, pcie, power, constraints, events." in basis
+    assert "Observed: hardware, pcie, power, constraints, events, crash, reliability." in basis
     assert "Not observed" not in basis
 
 
@@ -308,6 +445,41 @@ def test_an_endpoint_in_error_beside_healthy_ones_under_a_root_port_is_a_mismatc
     assert mismatch["evidence"]["not_ok"] == ["Audio"] and mismatch["readings"] == ["pcie"]
 
 
+def test_stops_that_share_a_bug_check_and_stops_that_wrote_none_are_each_one_signal():
+    signals, _ = take_signals_sync(_inputs())
+    shared = next(s for s in signals if s["id"] == "transition:repeated-stop:0x133")
+    assert shared["title"] == "2 stops share bug check 0x133 (DPC_WATCHDOG_VIOLATION)"
+    assert shared["evidence"]["started_at"] == ["2026-09-19T03:12:04.000Z", "2026-09-14T22:41:19.000Z"]
+    assert shared["evidence"]["code"] == "0x133" and shared["readings"] == ["crash"]
+    silent = next(s for s in signals if s["id"] == "transition:repeated-stop:no-bugcheck")
+    assert silent["title"] == "2 stops wrote no bug check" and silent["evidence"]["code"] is None
+    assert not any(s["id"] == "transition:repeated-stop:0x1a" for s in signals)  # one stop is a stop
+
+
+def test_the_unexpected_shutdown_signal_names_the_stops_when_crash_was_observed():
+    with_crash = next(s for s in take_signals_sync(_inputs())[0] if s["id"] == "transition:unexpected-shutdown")
+    assert with_crash["readings"] == ["power", "crash"]
+    assert with_crash["evidence"]["stops"] == [
+        {"started_at": s["started_at"], "code": (s["bugcheck"] or {}).get("code"), "name": (s["bugcheck"] or {}).get("name")} for s in STOPS
+    ]
+    without = next(s for s in take_signals_sync(_inputs(crash=None))[0] if s["id"] == "transition:unexpected-shutdown")
+    assert without["readings"] == ["power"] and "stops" not in without["evidence"]
+
+
+def test_the_index_fall_points_at_the_day_windows_counted_not_the_lowest_day():
+    fall = next(s for s in take_signals_sync(_inputs())[0] if s["id"] == "transition:reliability-index-fall")
+    assert fall["evidence"]["day"] == "2026-09-18"  # the furthest fall, not the lowest index
+    assert fall["evidence"]["fall"] == 1.7 and fall["evidence"]["index_before"] == 9.1
+    assert fall["evidence"]["records"] == {"Microsoft-Windows-WindowsUpdateClient": 2}
+    assert fall["readings"] == ["reliability"]
+
+
+def test_an_index_that_only_drifts_fires_nothing():
+    steady = [{"day": "2026-09-17", "index_last": 9.1, "index_min": 9.1, "records": {}}, {"day": "2026-09-18", "index_last": 8.9, "index_min": 8.9, "records": {}}]
+    signals, _ = take_signals_sync(_inputs(reliability=_reading("reliability", [("days", "derived", {"days": steady})])))
+    assert not any(s["id"] == "transition:reliability-index-fall" for s in signals)
+
+
 def test_signals_is_empty_rather_than_ok_when_the_inputs_are_observed_and_quiet():
     quiet = {
         "hardware": _reading("hardware", [("fingerprint", "invariant", {}), ("config", "raw", {"fast_startup": False})]),
@@ -323,7 +495,7 @@ def test_signals_is_empty_rather_than_ok_when_the_inputs_are_observed_and_quiet(
 def test_signals_takes_every_input_and_carries_their_provenance():
     reading = asyncio.run(take("signals", payload_bridge(), {}))
     assert reading.method["kind"] == "readings"
-    assert [r["name"] for r in reading.method["readings"]] == ["hardware", "pcie", "power", "constraints", "events"]
+    assert [r["name"] for r in reading.method["readings"]] == ["hardware", "pcie", "power", "constraints", "events", "crash", "reliability"]
     assert all("outcome" in r and "params" in r for r in reading.method["readings"])
     assert [(s.name, s.cls) for s in reading.sections] == [("signals", "inferred")]
     assert reading.section("signals").basis
@@ -350,18 +522,21 @@ def test_an_input_that_is_not_registered_is_recorded_not_raised(monkeypatch):
 # ---------------------------------------------------------------- the catalog
 
 
-def test_the_five_readings_are_registered_with_what_they_carry():
-    for name in ("pcie", "power", "memory", "constraints", "signals"):
+def test_the_six_readings_are_registered_with_what_they_carry():
+    for name in ("pcie", "power", "memory", "constraints", "signals", "reliability"):
         assert name in REGISTRY and REGISTRY[name].description
     assert REGISTRY["signals"].classes == ("inferred",)
     assert REGISTRY["memory"].private == ("modules[].serial_number",)
-    assert [REGISTRY[n].heavy for n in ("pcie", "power", "memory", "signals")] == [True] * 4
+    assert REGISTRY["reliability"].private[:2] == ("User", "ComputerName")
+    assert [REGISTRY[n].heavy for n in ("pcie", "power", "memory", "signals", "reliability")] == [True] * 5
     assert REGISTRY["constraints"].heavy is False
 
 
 def test_the_scripts_ask_for_what_the_readings_claim():
     assert "Get-PnpDevice -PresentOnly" in PCIE_SCRIPT and "/enum-devices /connected /relations /format xml" in PCIE_SCRIPT
     assert "Win32_PhysicalMemoryArray" in MEMORY_SCRIPT and "Microsoft-Windows-WHEA-Logger" in MEMORY_SCRIPT
+    assert "Microsoft-Windows-MemoryDiagnostics-Results" in MEMORY_SCRIPT and "-LogName System -Oldest -MaxEvents 1" in MEMORY_SCRIPT
+    assert "Win32_ReliabilityStabilityMetrics" in RELIABILITY_SCRIPT_TEMPLATE and "Win32_ReliabilityRecords" in RELIABILITY_SCRIPT_TEMPLATE
     assert "CM_PROB_NONE" in CONSTRAINTS_SCRIPT
     assert "powercfg.exe /devicequery wake_armed" in power_script()
 
@@ -370,7 +545,7 @@ def test_the_scripts_ask_for_what_the_readings_claim():
 
 
 @pytest.mark.host
-@pytest.mark.parametrize("name", ["pcie", "power", "memory", "constraints", "signals"])
+@pytest.mark.parametrize("name", ["pcie", "power", "memory", "constraints", "signals", "reliability"])
 def test_each_reading_observes_this_machine_well_inside_the_limit(name):
     bridge = real_bridge_or_skip()
     reading = asyncio.run(take(name, bridge, {}))

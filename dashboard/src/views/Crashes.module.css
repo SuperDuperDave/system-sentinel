@@ -1,0 +1,93 @@
+/* Three lists of one shape: a moment on the left, what happened beside it, and the file or the
+   code that belongs to it. Nothing here is lit and nothing is boxed; the day headings and the
+   spacing do the grouping. */
+
+.day { padding: 18px 0 6px; }
+
+.time { grid-area: time; color: var(--muted); white-space: nowrap; }
+.quiet { color: var(--muted); }
+.path { overflow-wrap: anywhere; color: var(--body); }
+.actions { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 18px; margin-top: 10px; }
+.lastWord {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  background: var(--deep);
+  border-radius: 6px;
+  color: var(--body);
+  font-size: 13px;
+  max-width: 78ch;
+  overflow-wrap: anywhere;
+}
+
+/* A stop: when it came back, how long it was gone, what it wrote down, what it left on disk. */
+.stopRow {
+  grid-template-columns: 62px minmax(0, 1fr);
+  grid-template-areas:
+    'time check'
+    'down dump';
+}
+.down { grid-area: down; color: var(--muted); white-space: nowrap; }
+.check {
+  grid-area: check;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 8px;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.code { color: var(--muted); }
+.dumpName { grid-area: dump; color: var(--body); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+@media (min-width: 900px) {
+  .stopRow {
+    /* The downtime is as wide as it needs to be: "down 17 h 56 min" in the readout face is wider
+       than any fixed column that also suits "down 40 s", and a column it overflows runs into the
+       bug check beside it. */
+    grid-template-columns: 76px max-content minmax(0, 1fr) 190px;
+    grid-template-areas: 'time down check dump';
+    column-gap: 16px;
+  }
+  .dumpName { text-align: right; }
+}
+
+/* A fault: the program or the kernel report, the module it failed in, and the exception. */
+.faultRow {
+  grid-template-columns: 62px 48px minmax(0, 1fr);
+  grid-template-areas:
+    'time kind app'
+    'module module exception';
+}
+.kind { grid-area: kind; color: var(--muted); }
+.app { grid-area: app; min-width: 0; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.module { grid-area: module; min-width: 0; color: var(--body); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.exception { grid-area: exception; min-width: 0; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+@media (min-width: 900px) {
+  .faultRow {
+    grid-template-columns: 76px 56px minmax(0, 1fr) 170px 150px;
+    grid-template-areas: 'time kind app module exception';
+    column-gap: 16px;
+  }
+  .exception { text-align: right; }
+}
+
+/* A dump file, as the inventory lists it. */
+.fileRow {
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    'name size'
+    'when when';
+}
+.fileName { grid-area: name; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fileSize { grid-area: size; color: var(--body); text-align: right; white-space: nowrap; }
+.fileWhen { grid-area: when; color: var(--muted); }
+
+@media (min-width: 900px) {
+  .fileRow {
+    grid-template-columns: minmax(0, 1fr) 96px 200px;
+    grid-template-areas: 'name size when';
+  }
+  .fileWhen { text-align: right; }
+}

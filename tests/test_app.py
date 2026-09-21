@@ -55,7 +55,7 @@ def test_catalog(client: TestClient):
     names = {r["name"] for r in body["readings"]}
     assert {"health", "events", "record"} <= names
     events = next(r for r in body["readings"] if r["name"] == "events")
-    assert [p["name"] for p in events["params"]] == ["log", "levels", "count"]
+    assert [p["name"] for p in events["params"]] == ["log", "levels", "count", "since"]
     assert events["private"]
 
 
@@ -67,7 +67,7 @@ def test_reading_arrives_redacted_by_default(client: TestClient):
     assert "TESTBOX" not in rec["Message"] and "tester" not in rec["Message"]
     assert r"C:\Users\<user>\x" in rec["Message"]
     assert body["redacted"] == ["host", "user"]
-    assert body["params"] == {"log": "System", "levels": [1, 2], "count": 1}
+    assert body["params"] == {"log": "System", "levels": [1, 2], "count": 1, "since": ""}
     assert body["method"]["kind"] == "powershell" and "Get-WinEvent" in body["method"]["query"]
 
 

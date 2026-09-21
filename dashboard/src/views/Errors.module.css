@@ -19,11 +19,27 @@
 
 /* The trace: one polyline over every wall-clock bucket, on quarter marks. */
 .traceFigure { margin: 12px 0 0; }
+.traceStage { position: relative; }
 .trace {
   display: block;
   width: 100%;
   height: 56px;
 }
+
+/* The lit stretches, as hit targets over the line. Nothing is drawn until one is under the
+   pointer or the focus ring: the trace stays the only lit thing, and the targets say where
+   they go through their label. */
+.traceHits { position: absolute; inset: 0; }
+.traceHit {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  min-width: 32px;
+  border-radius: 3px;
+  background: transparent;
+  transition: background 120ms ease;
+}
+.traceHit:hover { background: rgba(111, 240, 168, 0.14); }
 .traceTick { stroke: var(--rule-soft); stroke-width: 1; }
 .tracePath {
   stroke: var(--phosphor);
@@ -114,4 +130,7 @@
   max-height: 340px;
   overflow: auto;
 }
-.rowActions { display: flex; gap: 16px; margin-top: 4px; }
+.rowActions { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 18px; margin-top: 4px; }
+
+/* Since boot before the machine has said how long that is, or after it could not. */
+.windowNote { margin: 0 0 14px; color: var(--muted); display: flex; align-items: center; gap: 0.45em; max-width: 78ch; }

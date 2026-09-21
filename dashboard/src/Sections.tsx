@@ -15,6 +15,8 @@
  */
 import { Fragment, ReactNode, useState } from 'react';
 import { Cls, Reading, section } from './api';
+import { clock } from './Outcome';
+import { useApp } from './store';
 import styles from './Sections.module.css';
 
 /**
@@ -212,6 +214,31 @@ export function Segmented<V extends string | number>({
         </button>
       ))}
     </div>
+  );
+}
+
+/**
+ * The one control that carries the reader to a moment in the log.
+ *
+ * Every other affordance in these views inspects in place: a row opens, nothing moves, and the
+ * list keeps its position. This one is the exception, so it is the one that says where it goes.
+ * It shows the moment it will land on in the readout face and states the destination in words,
+ * and it is the only thing on a row that leaves the view — which is what makes opening a row
+ * safe everywhere else.
+ */
+export function MomentLink({ at, label = 'The record before this' }: { at: string | null | undefined; label?: string }) {
+  const setMoment = useApp((s) => s.setMoment);
+  const moment = at ? new Date(at) : null;
+  if (!at || !moment || Number.isNaN(moment.getTime())) return null;
+  return (
+    <button
+      className={styles.moment}
+      onClick={() => setMoment(at)}
+      aria-label={`${label} · ${shortDay.format(moment)} ${clock.format(moment)}`}
+    >
+      <span className={`${styles.momentTime} readout`}>{clock.format(moment)}</span>
+      <span className={styles.momentLabel}>{label}</span>
+    </button>
   );
 }
 

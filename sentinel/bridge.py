@@ -21,9 +21,11 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, Iterator, Literal
 
 Outcome = Literal["ok", "empty", "failed", "unavailable", "denied", "timeout"]
 
@@ -40,6 +42,22 @@ _KNOWN_LOCATIONS = (
 # "<3>WSL (pid - ) ERROR: UtilAcceptVsock:271: accept4 failed 110". Not a Windows error.
 WSL_INTEROP = "UtilAcceptVsock"
 WSL_INTEROP_ATTEMPTS = 3
+
+# How many powershell.exe processes this tool will have in flight at once. WSL's interop layer
+# fails to hand the process over when several launches arrive together, and one reading now takes
+# seven others at once: the cap makes one process unable to be the source of that contention.
+MAX_CONCURRENT_LAUNCHES = 4
+_LAUNCHES = threading.BoundedSemaphore(MAX_CONCURRENT_LAUNCHES)
+
+# Under WSL a launch also takes a slot shared by every process that uses the bridge: a test suite,
+# a server, an agent reading through the tool. The layer saturates across processes, not only
+# inside one — on 2026-09-21 a dashboard loading three readings beside one running suite failed all
+# three, and with two slots a single reading beside the suite still failed (friction F2); the only
+# count the evidence supports is one launch at a time, machine-wide, which is how every suite that
+# ran alone passed. The slot is a lock file, so nothing has to remember the rule. Native Windows
+# never takes this path, and the retry above stays for whatever else launches at the same moment.
+WSL_LAUNCH_SLOTS = 1
+_SLOT_POLL = 0.05
 
 _DENIED_MARKERS = (
     "access is denied",
@@ -58,6 +76,56 @@ _PRELUDE = (
     "$__sentinel = @(& { {script} }); "
     "if ($__sentinel.Count -gt 0) { ConvertTo-Json -InputObject $__sentinel -Depth {depth} -Compress }"
 )
+
+
+class SlotTimeout(Exception):
+    """No launch slot came free within the launch's own timeout: another process is holding the
+    bridge, and the launch is reported as ``unavailable`` rather than waited for without end."""
+
+
+@contextmanager
+def _launch_slot(timeout: float) -> Iterator[None]:
+    """Hold a cross-process launch slot for the duration, where launches go through WSL's interop
+    layer. A slot is an exclusive lock on a file in the temporary directory; a launch tries each
+    slot and waits a moment when all are taken, for at most the launch's own timeout. A lock file
+    that cannot be opened (another user's, a read-only directory) is no coordination at all, so
+    the launch goes ahead without one: the retry in :meth:`Bridge.run` still stands."""
+    if sys.platform == "win32":
+        yield
+        return
+    import fcntl
+
+    directory = os.environ.get("TMPDIR", "/tmp")
+    handles = []
+    try:
+        for i in range(WSL_LAUNCH_SLOTS):
+            handles.append(open(os.path.join(directory, f"system-sentinel-launch-{i}.lock"), "w"))
+    except OSError:
+        for handle in handles:
+            handle.close()
+        yield
+        return
+    held = None
+    deadline = time.monotonic() + timeout
+    try:
+        while held is None:
+            for handle in handles:
+                try:
+                    fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    continue
+                held = handle
+                break
+            else:
+                if time.monotonic() >= deadline:
+                    raise SlotTimeout(f"no launch slot came free within {timeout:g}s: another process is holding the bridge")
+                time.sleep(_SLOT_POLL)
+        yield
+    finally:
+        if held is not None:
+            fcntl.flock(held, fcntl.LOCK_UN)
+        for handle in handles:
+            handle.close()
 
 
 @dataclass(frozen=True)
@@ -100,14 +168,22 @@ class Bridge:
         """Run one script. From WSL, the interop layer occasionally fails to hand the process over
         (``UtilAcceptVsock ... accept4 failed``); that is the environment, not the machine, so it is
         retried a bounded number of times with a short pause and otherwise reported as ``unavailable``.
-        Native Windows never sees this path."""
-        result = self._run_once(script, timeout=timeout, depth=depth)
-        for attempt in range(1, WSL_INTEROP_ATTEMPTS):
-            if not (result.outcome == "unavailable" and result.error and WSL_INTEROP in result.error):
-                break
-            time.sleep(0.5 * attempt)
-            result = self._run_once(script, timeout=timeout, depth=depth)
-        return result
+        Native Windows never sees this path.
+
+        The launch and its retries are held inside :data:`MAX_CONCURRENT_LAUNCHES` and, under WSL,
+        inside one of :data:`WSL_LAUNCH_SLOTS` shared across processes, so a reading made of several
+        others queues rather than racing them, and so does a suite beside a live dashboard."""
+        try:
+            with _LAUNCHES, _launch_slot(timeout):
+                result = self._run_once(script, timeout=timeout, depth=depth)
+                for attempt in range(1, WSL_INTEROP_ATTEMPTS):
+                    if not (result.outcome == "unavailable" and result.error and WSL_INTEROP in result.error):
+                        break
+                    time.sleep(0.5 * attempt)
+                    result = self._run_once(script, timeout=timeout, depth=depth)
+                return result
+        except SlotTimeout as exc:
+            return BridgeResult("unavailable", error=str(exc))
 
     def _run_once(self, script: str, *, timeout: float, depth: int) -> BridgeResult:
         if self.exe is None:

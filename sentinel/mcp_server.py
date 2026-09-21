@@ -32,8 +32,10 @@ INSTRUCTIONS = (
     "A stethoscope for this Windows computer. Each reading tool takes one reading and returns an envelope: "
     "'outcome' says whether the machine was observed (ok, empty) or not (failed, unavailable, denied, timeout); "
     "'sections' keep raw, derived, invariant and inferred apart; 'method' is the query so you can reproduce it. "
-    "Take 'health' first. Take 'events' to find a start (Kernel-Power 41, EventLog 6008), then 'record' with that "
-    "timestamp to see what the machine was doing before it froze. A burst, a gap or a correlation is a lead, never a diagnosis. "
+    "Take 'health' first, then 'crash': the last unplanned stops, each with its bug check, its dump and the machine's "
+    "last word, or 'crash' with a 'moment' when the person names a time. Then 'record' before a stop's started_at, "
+    "'faults' for what went wrong while it kept running, 'whea' and 'storms' for hardware errors, 'signals' last. "
+    "A burst, a gap or a correlation is a lead, never a diagnosis. "
     "The stack tools hold the evidence you have chosen; 'compose' returns it as the handoff text, with each item's provenance."
 )
 
