@@ -21,7 +21,13 @@ The **stack** is the evidence you or your agent chose to hand on. It lives on th
 
 ## Installing it
 
-Download `SystemSentinel.exe` from [the latest release](https://github.com/SuperDuperDave/system-sentinel/releases/latest) and double-click it. It is the whole tool in one file: the server starts on `http://127.0.0.1:8000/`, the browser opens on the dashboard already signed in, and the mark sits in the system tray with *Open dashboard*, *Sign in another device*, *Copy address for agents*, *Start with Windows* and *Quit*. Nothing else needs to be installed. [docs/DEPLOY.md](docs/DEPLOY.md) has the details, the two prompts you can paste to your agent instead (one installs the release, one installs from source), and the optional steps for running at logon and reaching the machine from your phone.
+Download `SystemSentinel.exe` from [the latest release](https://github.com/SuperDuperDave/system-sentinel/releases/latest) and double-click it, wherever your browser put it. It installs itself: the file copies itself into `%LOCALAPPDATA%\SystemSentinel\` and starts from there. It is the whole tool in one file: the server starts on `http://127.0.0.1:8000/`, the browser opens on the dashboard already signed in, and the mark sits in the system tray with *Open dashboard*, *Sign in another device*, *Copy address for agents*, *Start with Windows*, a submenu named for the version it is running, and *Quit*. Nothing else needs to be installed. [docs/DEPLOY.md](docs/DEPLOY.md) has the details, the two prompts you can paste to your agent instead (one installs the release and updates it, one installs from source), and the optional steps for running at logon and reaching the machine from your phone.
+
+**Updating it.** Download the newer file and double-click it: it replaces the installed copy, asking the running one to quit first. Your token, stack, prompts and captures live in the data directory and are untouched. *Check for updates…* in the tray's version submenu opens the releases page in your browser — the tool asks nothing of anything off this machine.
+
+**Removing it.** *Remove from this computer…* in the same submenu names what goes (the program, the token, the stack, the prompts, the captures, the Startup entry) and what stays (the file you downloaded; an agent's registration, undone by `claude mcp remove system-sentinel`), then does it.
+
+Which version you have is in the file's *Properties*, in the tray's submenu, in the dashboard's Agents view, and as `version` on `GET /api/readings`.
 
 From source, on the Windows machine, with Python 3.11 or newer and Node 22 or newer:
 

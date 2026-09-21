@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.0.1] - unreleased
+
+The file looks after itself: it installs, updates and removes itself, says which version it is, and says so out loud when it cannot start.
+
+### Added
+- The executable installs and updates itself. Started from anywhere but its installed path it is a download: it copies itself into `%LOCALAPPDATA%\SystemSentinel\` and starts that copy. When a server is already answering with this machine's token it reads the `version` that server reports: equal to its own it just opens the dashboard, older it asks to quit and takes its place, newer it leaves alone and says so in a message box, because a download should not quietly undo an update.
+- `POST /api/quit`: the bearer token only — a request carrying just the session cookie is refused, so a browser on any device cannot stop the machine's tool — and only from this machine. It answers `202 {"quitting": true}` and the process exits gracefully within a few seconds, under the tray and under `serve`.
+- The version in the file's own properties, where Windows keeps it: `(Get-Item SystemSentinel.exe).VersionInfo.ProductVersion`.
+- The tray's version submenu, named for the version it is running: *Check for updates…*, which opens the releases page in the browser and asks the network for nothing itself, and *Remove from this computer…*, which names what goes and what stays, asks once, turns *Start with Windows* off, quits and deletes its home behind itself.
+- Failure is visible. A native message box whenever the windowed executable cannot start — the port held, a previous instance still stopping — or a second instance's browser did not answer, naming what happened, the address and where `launcher.log` is. The log rotates now, two backups behind it.
+- Continuous integration on the repository, and a release workflow that builds the executable and attaches a build provenance attestation: `gh attestation verify SystemSentinel.exe -R SuperDuperDave/system-sentinel` checks a release from this version on.
+
+### Changed
+- The install note's short prompt is one prompt for install and update: it downloads to a temporary path, checks the published SHA-256, compares it with the installed copy and stops there when they are the same file and it is already running, and proves the result by the version the server reports against the version in the file. The long prompt looks for a server on the port before starting a second one. New sections cover updating, removing, which version you have, and a table of what to do about what you see.
+- `version` on `GET /api/readings` is documented, and the dashboard's Agents view shows it beside a link to the releases page.
+- The dashboard's sign-in screen names both ways in: the tray, which signs a browser in, and `system-sentinel token` from source. It said only the second, which is not the path most people are on.
+
 ## [1.0.0] - 2026-09-20
 
 The overhaul. One boundary for three clients; the identity in the tool; nothing that reads the machine outside the API.

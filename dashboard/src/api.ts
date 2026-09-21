@@ -51,6 +51,12 @@ export interface CatalogEntry {
   heavy: boolean;
 }
 
+/** The catalog as the route returns it: every reading, and the version of the tool answering. */
+export interface Catalog {
+  readings: CatalogEntry[];
+  version: string;
+}
+
 /**
  * A way in for another device: what this machine publishes on a private network, and a one-time
  * link to it. `outcome` is the reading's: `ok` when there is an address, `empty` when the machine
@@ -110,9 +116,8 @@ export function take<T = unknown>(name: string, params: Record<string, ParamValu
   return request<Reading<T>>(`/api/readings/${name}${qs ? `?${qs}` : ''}`);
 }
 
-export async function catalog(): Promise<CatalogEntry[]> {
-  const body = await request<{ readings: CatalogEntry[] }>('/api/readings');
-  return body.readings;
+export function catalog(): Promise<Catalog> {
+  return request<Catalog>('/api/readings');
 }
 
 /** Exchange the token for the session cookie. Resolves false when the token is wrong. */

@@ -14,15 +14,21 @@ import styles from './Agents.module.css';
  * server publishes, not a list kept here, so it cannot fall out of step with what the agent
  * will actually find.
  */
+const RELEASES = 'https://github.com/SuperDuperDave/system-sentinel/releases/latest';
+
 export function Agents() {
   const [tools, setTools] = useState<CatalogEntry[]>([]);
+  const [version, setVersion] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const setSession = useApp((s) => s.setSession);
   const origin = window.location.origin;
 
   useEffect(() => {
     catalog()
-      .then(setTools)
+      .then((body) => {
+        setTools(body.readings);
+        setVersion(body.version);
+      })
       .catch((err: unknown) => {
         if (err instanceof Unauthorized) return setSession('closed');
         setProblem(err instanceof Error ? err.message : String(err));
@@ -36,6 +42,14 @@ export function Agents() {
         An agent on this machine reads it through the same boundary this dashboard does: one address, one token, and every reading below as a tool.
         What an agent receives is the envelope a person sees here, redaction included.
       </p>
+      {/* The version of the process answering, not of a file on disk, and shown only once it has
+          answered: an unknown version is worth less than nothing. The link is the person looking;
+          the tool asks the network for nothing. */}
+      {version ? (
+        <p className={`${styles.version} readout`}>
+          version {version} · <a href={RELEASES} target="_blank" rel="noreferrer">releases</a>
+        </p>
+      ) : null}
 
       <div className={styles.block}>
         <h2 className={`${styles.blockTitle} label`}>The token</h2>
@@ -52,6 +66,10 @@ export function Agents() {
         <Command
           text={`claude mcp add --transport http system-sentinel ${origin}/mcp --header "Authorization: Bearer $(system-sentinel token)"`}
           what="Claude Code, in one line:"
+        />
+        <Command
+          text={`codex mcp add system-sentinel --url ${origin}/mcp --bearer-token-env-var SYSTEM_SENTINEL_TOKEN`}
+          what="Codex, which reads the token from the environment rather than from a header: set SYSTEM_SENTINEL_TOKEN to the contents of the token file in the environment Codex starts in."
         />
         <Command text={`${origin}/mcp`} what="Any other MCP client: streamable HTTP at this address, with the same Authorization header." />
         <Command

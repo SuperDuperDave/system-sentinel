@@ -19,19 +19,39 @@ The launcher signs a browser in without showing anyone the token: `GET /api/sess
 
 `POST /api/session/link` is how a person already signed in hands the dashboard to a second device. It asks this machine, through the bridge, which https address Tailscale publishes for the port the request arrived on, and answers with that address, a link carrying a fresh one-time code, when that code expires, and a QR code of the link as SVG. The code lasts five minutes and is spent by the first device that follows it; the token is never in the answer. `outcome` keeps three things apart: `ok` when there is an address, `empty` when the machine answered and publishes nothing for this port (`installed` says whether Tailscale is there at all, `port` is the port it would have to publish, and `detail` names the command that would), and `unavailable` or `failed` when it could not be asked at all. `url`, `expires_at` and `qr` are null unless `ok`. It needs the session cookie or the bearer header like every other route and nothing more, because whoever is signed in may sign in another device. Agents have no use for this one either.
 
+`POST /api/quit` stops the tool. It is the one route the session cookie does not open: it takes the bearer token, and a request carrying only the cookie is refused with `401` and a body saying the token is required, so a browser on a phone cannot shut down the machine's tool. It is also refused unless the connection came from this machine, on the same terms as `/api/session/open`. It answers `202 {"quitting": true}` and the process exits gracefully within a few seconds, under the tray launcher and under `serve`, though not under `serve --reload`, where the reloader owns the process. It is not an MCP tool: stopping the tool is not a reading of the machine, and an agent that means to stop it has the route.
+
 ### Claude Code
 
 ```
 claude mcp add --transport http system-sentinel http://127.0.0.1:8000/mcp --header "Authorization: Bearer $(system-sentinel token)"
 ```
 
-### Codex and other MCP clients
+### Codex
+
+```
+codex mcp add system-sentinel --url http://127.0.0.1:8000/mcp --bearer-token-env-var SYSTEM_SENTINEL_TOKEN
+```
+
+Codex takes a bearer token from the environment rather than from a header, so `SYSTEM_SENTINEL_TOKEN` must hold the token in the environment Codex starts in.
+
+### Other MCP clients
 
 Streamable HTTP at `http://127.0.0.1:8000/mcp` with the same header. Every reading below is one tool, named as the reading is named, except that a dot becomes an underscore because MCP tool names allow only letters, digits, underscore and hyphen: `hardware.cpu` is the tool `hardware_cpu`. The stack and the composer are tools too: `stack_list`, `stack_add`, `stack_update`, `stack_remove`, `stack_clear`, `stack_prompt`, `compose`, `prompts_list`.
 
 ### Without MCP
 
 `curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8000/api/readings/events` works from any shell. Prefer this over writing your own PowerShell: the reading carries provenance, the outcome and the redaction, and it is the same evidence the person sees.
+
+### Day two
+
+| Question | Answer |
+| --- | --- |
+| What is running? | `version` on `GET /api/readings`: the version of the process answering right now. |
+| What is installed? | `(Get-Item "$env:LOCALAPPDATA\SystemSentinel\SystemSentinel.exe").VersionInfo.ProductVersion`. It differs from the version above only while an older copy is still holding the port. |
+| How do I update it? | Run the short prompt in [DEPLOY.md](DEPLOY.md) again; it is one prompt for install and update. The file it downloads installs itself and asks an older running copy to quit. Nothing in the tool looks for a release on its own, here or anywhere. |
+| How do I stop it? | `POST /api/quit` with the bearer header, or *Quit* in the tray. |
+| How do I remove it? | *Remove from this computer…* in the tray, or by hand: *Start with Windows* off, quit, delete the data directory, `claude mcp remove system-sentinel`. [DEPLOY.md](DEPLOY.md) ("Removing it") has the commands and says what stays. |
 
 ## The reading
 
@@ -85,7 +105,7 @@ Only `ok` and `empty` say anything about the machine. Treat the other four as "n
 
 ## The catalog
 
-`GET /api/readings` lists every reading with its description, classes, parameters and their defaults, what it may carry that redaction removes, and whether it is heavy. The live catalog is authoritative; this is the catalog as designed, with each reading's sections.
+`GET /api/readings` lists every reading with its description, classes, parameters and their defaults, what it may carry that redaction removes, and whether it is heavy, and beside the list a `version`: the tool's own, which is how a caller tells what is answering. The live catalog is authoritative; this is the catalog as designed, with each reading's sections.
 
 | Reading | What it reads | Sections (class) | Parameters |
 | --- | --- | --- | --- |

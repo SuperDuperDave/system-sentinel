@@ -101,7 +101,13 @@ function SignIn() {
         <input id="token" className={`${styles.tokenInput} readout`} type="password" autoComplete="current-password" value={token} onChange={(e) => { setToken(e.target.value); setWrong(false); }} autoFocus />
         {wrong ? <p className={`${styles.wrong} readout`}>That token was not accepted.</p> : null}
         <button className={styles.signInButton} type="submit" disabled={busy || !token.trim()}>Open</button>
-        <p className={`${styles.hint} readout`}>On the machine: <code>system-sentinel token</code></p>
+        {/* Two ways in, and the token is the second one. The executable signs a browser in by
+            itself, so anyone reading this screen is either on a browser it did not open or
+            running the tool from source. */}
+        <p className={`${styles.hint} readout`}>
+          The tray's Open dashboard, or double-clicking the file again, signs a browser in.
+          From source: <code>system-sentinel token</code>.
+        </p>
       </form>
     </div>
   );

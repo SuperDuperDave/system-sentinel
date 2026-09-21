@@ -1,5 +1,6 @@
 /* A page read once and acted on: what to run, where to point it, and what it will find. */
 .lede { margin: 0 0 6px; color: var(--body); max-width: 68ch; }
+.version { margin: 10px 0 0; color: var(--muted); font-size: 12px; }
 
 .block { margin: 30px 0 0; }
 .blockTitle { margin: 0 0 10px; }
