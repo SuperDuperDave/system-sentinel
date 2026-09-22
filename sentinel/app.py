@@ -29,6 +29,7 @@ from .performance import KEEP_DAYS, PerformanceCollector, PerformanceStore
 from .reading import REGISTRY, Reading
 from .readings.health import learn_identity
 from .redact import Identity, Redactor
+from .serialization import json_safe_integers
 from .service import ReadingService
 from .stack import Duplicate, Prompts, Stack, compose, new_item
 from .stream import Stream
@@ -231,9 +232,9 @@ def create_app(state: State | None = None, mcp: bool = True) -> FastAPI:
 
     def guarded(payload: Any, unredacted: bool = False, status_code: int = 200) -> JSONResponse:
         """The one way anything leaves: redacted unless the caller asked for the real values by name."""
-        if unredacted:
-            return JSONResponse(payload, status_code=status_code)
-        return JSONResponse(state.redactor.attach(payload), status_code=status_code)
+        if not unredacted:
+            payload = state.redactor.attach(payload)
+        return JSONResponse(json_safe_integers(payload), status_code=status_code)
 
     def envelope(reading: Reading, unredacted: bool) -> JSONResponse:
         return guarded(reading.to_dict(), unredacted)

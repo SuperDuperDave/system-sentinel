@@ -27,6 +27,7 @@ from .bridge import OUTCOMES, Bridge
 from .paths import captures_dir
 from .reading import REGISTRY, Reading, ReadingCall, take
 from .redact import Redactor
+from .serialization import json_safe_integers
 from .stack import Prompts, Stack, compose
 
 NAME = re.compile(r"^capture-\d{8}T\d{6}Z(-\d+)?\.zip$")
@@ -64,13 +65,13 @@ async def create(bridge: Bridge, stack: Stack, prompts: Prompts, redactor: Redac
                 body["redacted"] = taken_out
                 removed.update(taken_out)
             member = READINGS_MEMBER.format(name=name)
-            members.append({"path": member, "reading": name, "outcome": body["outcome"], "took_ms": body["took_ms"], "bytes": _write(archive, member, json.dumps(body, ensure_ascii=False, indent=1))})
+            members.append({"path": member, "reading": name, "outcome": body["outcome"], "took_ms": body["took_ms"], "bytes": _write(archive, member, json.dumps(json_safe_integers(body), ensure_ascii=False, indent=1))})
 
         state: dict[str, Any] = stack.state()
         if redactor is not None:
             state, taken_out = redactor.redact(state)
             removed.update(taken_out)
-        members.append({"path": STACK_MEMBER, "items": len(state.get("items") or []), "bytes": _write(archive, STACK_MEMBER, json.dumps(state, ensure_ascii=False, indent=1))})
+        members.append({"path": STACK_MEMBER, "items": len(state.get("items") or []), "bytes": _write(archive, STACK_MEMBER, json.dumps(json_safe_integers(state), ensure_ascii=False, indent=1))})
 
         composed = compose(stack, prompts, redactor)
         removed.update(composed["redacted"])
@@ -87,7 +88,7 @@ async def create(bridge: Bridge, stack: Stack, prompts: Prompts, redactor: Redac
         }
         if reason and redactor is None:
             manifest["reason"] = reason
-        _write(archive, MANIFEST_MEMBER, json.dumps(manifest, ensure_ascii=False, indent=1))
+        _write(archive, MANIFEST_MEMBER, json.dumps(json_safe_integers(manifest), ensure_ascii=False, indent=1))
 
     return Capture(path=path, manifest=manifest)
 

@@ -55,6 +55,14 @@ Clients that support `subscriptions/listen` can subscribe to `sentinel://handoff
 | How do I stop it? | `POST /api/quit` with the bearer header, or *Quit* in the tray. |
 | How do I remove it? | *Remove from this computer…* in the tray, or by hand: *Start with Windows* off, quit, delete the data directory, `claude mcp remove system-sentinel`. [DEPLOY.md](DEPLOY.md) ("Removing it") has the commands and says what stays. |
 
+### Exact integers across clients
+
+Evidence uses JSON numbers for integers from `-9007199254740991` through `9007199254740991`. Integers outside that range travel as **canonical decimal strings**, for example `"134100000000000001"`, so JavaScript clients preserve every digit. This applies consistently to API responses, MCP text and structured answers, SSE frames, the CLI health reading, JSON evidence in composed handoffs and newly created capture JSON members. Booleans, floating-point measurements and existing strings keep their types; this convention does not make a floating-point measurement exact.
+
+A large `RecordId` and every derived reference to it use the same string form. Keep it as an identifier or parse it with an arbitrary-precision integer type; do not pass it through JavaScript `Number`. Stack selections accept these decimal-string record IDs. Machine collection, derivation, stream cursor comparisons and existing Python persistence retain exact integers. Redaction runs before this output conversion, including for sensitive numeric fields.
+
+Existing stack evidence is converted when served or exported, without rewriting its saved file. Older capture ZIPs remain as originally written. Values already rounded by another client cannot be reconstructed; take a fresh reading when the exact value is needed. The current representation preserves exact values across clients but does not preserve a distinct JSON numeric type outside the safe range.
+
 ## The reading
 
 Every reading is one request for evidence, returned in one envelope. Most ask Windows through the bridge; `performance_history` reads samples stored locally by the app. The envelope is the contract: a collection failure is distinguishable from no findings, and raw evidence is distinguishable from what the tool computed.

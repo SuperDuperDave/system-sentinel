@@ -23,6 +23,7 @@ from .auth import load_or_create_token, token_path
 from .bench import DEFAULT_RUNS, DOC_PATH, TRANSPORTS
 from .bridge import Bridge
 from .paths import data_dir
+from .serialization import json_safe_integers
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -107,7 +108,7 @@ def _check() -> int:
 
     bridge = Bridge.locate()
     reading = REGISTRY["health"].take(bridge, {})
-    print(json.dumps(reading.to_dict(), indent=1))
+    print(json.dumps(json_safe_integers(reading.to_dict()), indent=1))
     return 0 if reading.observed else 1
 
 

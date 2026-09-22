@@ -22,6 +22,7 @@
 - Hardware errors now shows a visible legend for the Windows event levels present in returned records; each record's symbol also has a spoken level name.
 
 ### Changed
+- Exact large integers survive the dashboard, agent responses, event stream, stack handoffs and new captures. Integers outside JavaScript's safe range are sent as decimal strings after redaction, keeping adjacent 64-bit timestamps and record identifiers distinct while internal collection and calculations retain integer values. Existing saved files remain intact.
 - The fallback PowerShell transport sends collector scripts over standard input through a fixed-size bootstrap, so large queries remain available beyond Windows' command-line limit.
 - Structured collectors must return exactly one object. Missing or ambiguous output now fails before derivation, preventing extra or absent collector objects from becoming misleading zero-findings readings. Payload warning extraction also preserves the original bridge answer.
 - Dump inventory reports coverage for each Windows dump location, retains files found before an enumeration error, and distinguishes unreadable locations from observed empty ones. Crash matching and bounded dump inspection share that inventory, so a lookup failure cannot imply a reported dump was deleted. Crashes exposes the location results in place.

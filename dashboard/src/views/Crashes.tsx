@@ -1,6 +1,6 @@
 import { ReactNode, useEffect, useRef, useState } from 'react';
 import { AddToStack } from '../AddToStack';
-import { EventRecord, Reading, observed } from '../api';
+import { EventRecord, Reading, type RecordId, observed } from '../api';
 import { OutcomeLine, clock } from '../Outcome';
 import { Basis, Facts, Head, MomentLink, RowList, Section, Segmented, Value, ago, basisOf, byDay, duration, part, size } from '../Sections';
 import { useReading } from '../useReading';
@@ -29,7 +29,7 @@ interface Dump {
 
 /** The last System record before the next start; it may be after Windows' stop estimate. */
 interface LastRecord {
-  RecordId: number | null;
+  RecordId: RecordId | null;
   TimeCreated: string | null;
   ProviderName: string | null;
   Id: number | null;
@@ -52,17 +52,17 @@ interface Stop {
   dump_inventory_complete?: boolean;
   last_record_before: LastRecord | null;
   quiet_seconds: number | null;
-  records: { start: number | null; power_41: number | null; eventlog_6008: number | null; wer_1001: number | null; report: number[] };
+  records: { start: RecordId | null; power_41: RecordId | null; eventlog_6008: RecordId | null; wer_1001: RecordId | null; report: RecordId[] };
 }
 
 /** One fault decoded: a program that crashed or hung, or one live kernel report folded from its records. */
 interface Fault {
-  RecordId: number;
+  RecordId: RecordId;
   Log?: string;
   kind: string;
   fields: Record<string, unknown>;
   exception?: { code: string | null; name: string | null };
-  report?: { id: string | null; code: string | null; name: string | null; parameters: string[]; bucket: string | null; dump_path: string | null; records: number[] };
+  report?: { id: string | null; code: string | null; name: string | null; parameters: string[]; bucket: string | null; dump_path: string | null; records: RecordId[] };
 }
 
 interface FaultSummary {
@@ -739,9 +739,9 @@ function FaultDetail({ fault, at: moment, envelope, rawRecords }: { fault: Fault
 }
 
 /** Every record the stop was composed from, so stacking it hands over the evidence and not the conclusion. */
-function recordIds(stop: Stop): number[] {
+function recordIds(stop: Stop): RecordId[] {
   const { start, power_41, eventlog_6008, wer_1001, report } = stop.records;
-  return [start, power_41, eventlog_6008, wer_1001, ...(report ?? [])].filter((id): id is number => typeof id === 'number');
+  return [start, power_41, eventlog_6008, wer_1001, ...(report ?? [])].filter((id): id is RecordId => typeof id === 'number' || typeof id === 'string');
 }
 
 function appOf(fault: Fault): string {

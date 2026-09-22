@@ -36,6 +36,7 @@ from starlette.applications import Starlette
 from . import __version__, capture, readings  # noqa: F401  (readings registers the catalog)
 from .reading import REGISTRY, Spec
 from .redact import Redactor
+from .serialization import json_safe_integers
 from .stack import Duplicate, compose, new_item
 
 if TYPE_CHECKING:
@@ -411,9 +412,10 @@ def _answer(payload: Any) -> types.CallToolResult:
     ``class`` as fields; one that does not reads exactly what it read before.
     """
     if isinstance(payload, Answer):
-        text, data = payload.text, payload.data
+        text, data = payload.text, json_safe_integers(payload.data)
     else:
         # Structured output is a JSON object before 2026-07-28, so anything else travels as text alone.
+        payload = json_safe_integers(payload)
         text, data = json.dumps(payload, indent=1), payload if isinstance(payload, dict) else None
     return types.CallToolResult(content=[types.TextContent(type="text", text=text)], structured_content=data)
 

@@ -1,6 +1,6 @@
 import { Fragment, Ref, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { AddToStack } from '../AddToStack';
-import { EventRecord, Reading, observed, section } from '../api';
+import { EventRecord, Reading, type RecordId, observed, section } from '../api';
 import { clock, Glyph, OutcomeLine, firstLine } from '../Outcome';
 import { Segmented, byDay, day } from '../Sections';
 import { useApp } from '../store';
@@ -133,9 +133,9 @@ function Frame({ moment }: { moment: string }) {
 }
 
 function Rows({ records, reading, listRef, overview = false }: { records: EventRecord[]; reading: Reading<EventRecord[]>; listRef?: Ref<HTMLOListElement>; overview?: boolean }) {
-  const [open, setOpen] = useState<number | null>(null);
+  const [open, setOpen] = useState<RecordId | null>(null);
   const grouped = useMemo(() => byDay(records, (r) => r.TimeCreated), [records]);
-  const openRecord = (id: number) => {
+  const openRecord = (id: RecordId) => {
     setOpen(id);
     requestAnimationFrame(() => {
       const target = document.querySelector<HTMLButtonElement>(`li[data-record="${id}"] > button`);
@@ -165,7 +165,7 @@ const LOCAL_STAMP = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'n
 const newestRecord = (rows: EventRecord[]) => rows.reduce((newest, row) => Date.parse(row.TimeCreated) > Date.parse(newest.TimeCreated) ? row : newest);
 
 /** A map of the returned rows only. An empty bin is never a claim about the rest of the log. */
-function RecordOverview({ records, selected, onOpen }: { records: EventRecord[]; selected: number | null; onOpen: (id: number) => void }) {
+function RecordOverview({ records, selected, onOpen }: { records: EventRecord[]; selected: RecordId | null; onOpen: (id: RecordId) => void }) {
   const timed = records.map((record) => ({ record, at: Date.parse(record.TimeCreated) })).filter((item) => Number.isFinite(item.at));
   const oldest = timed.length ? Math.min(...timed.map((item) => item.at)) : 0;
   const newest = timed.length ? Math.max(...timed.map((item) => item.at)) : 0;

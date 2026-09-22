@@ -26,6 +26,7 @@ from .bridge import Bridge
 from .paths import data_dir
 from .reading import REGISTRY, ReadingCall, take
 from .redact import Redactor
+from .serialization import json_safe_integers
 
 KINDS = ("reading", "selection", "note")
 VERBOSITIES = ("summary", "full")
@@ -461,7 +462,7 @@ def _table(records: list[dict[str, Any]]) -> list[str]:
 
 
 def _json_block(data: Any) -> list[str]:
-    return ["```json", json.dumps(data, ensure_ascii=False, indent=1), "```"]
+    return ["```json", json.dumps(json_safe_integers(data), ensure_ascii=False, indent=1), "```"]
 
 
 def _params_text(params: dict[str, Any]) -> str:

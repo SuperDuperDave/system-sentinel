@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { EventRecord, Reading, observed } from '../api';
+import { EventRecord, Reading, type RecordId, observed } from '../api';
 import { AddToStack } from '../AddToStack';
 import { Glyph, OutcomeLine, clock, firstLine } from '../Outcome';
 import { Facts, Head, MomentLink, RowList, Section, Segmented, Tree, Value, ago, basisOf, part, shortDay } from '../Sections';
@@ -47,12 +47,12 @@ interface Signature {
   first_seen: string;
   last_seen: string;
   event_ids: number[];
-  sample: { RecordId?: number; TimeCreated?: string; Id?: number; LevelDisplayName?: string; Message?: string };
+  sample: { RecordId?: RecordId; TimeCreated?: string; Id?: number; LevelDisplayName?: string; Message?: string };
 }
 
 /** One entry of the decoded section: the CPER structure inside a record, or why there is none. */
 interface Decoded {
-  RecordId: number | null;
+  RecordId: RecordId | null;
   decoded?: unknown;
   error?: string;
 }

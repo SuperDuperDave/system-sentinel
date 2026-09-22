@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { AddToStack } from '../AddToStack';
-import { observed, type Section as SectionData } from '../api';
+import { observed, type RecordId, type Section as SectionData } from '../api';
 import { OutcomeLine, firstLine, clock } from '../Outcome';
 import { Head, RowList, Section, Tree, part } from '../Sections';
 import { useReading } from '../useReading';
@@ -107,7 +107,7 @@ interface Device {
 }
 
 interface LogRecord {
-  RecordId: number;
+  RecordId: RecordId;
   Id: number;
   ProviderName: string;
   TimeCreated: string;

@@ -30,6 +30,7 @@ from .bridge import Bridge, BridgeResult
 # by `events` are the same shape, field for field.
 from .readings.events import RECORD_SELECT, winevent
 from .redact import Redactor
+from .serialization import json_safe_integers
 
 POLL_SECONDS = 5.0
 MAX_PER_POLL = 200
@@ -157,7 +158,7 @@ class Stream:
 
 
 def frame(event: str, data: dict[str, Any]) -> str:
-    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False, separators=(',', ':'))}\n\n"
+    return f"event: {event}\ndata: {json.dumps(json_safe_integers(data), ensure_ascii=False, separators=(',', ':'))}\n\n"
 
 
 def _now() -> str:

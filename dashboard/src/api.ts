@@ -5,6 +5,8 @@
 
 export type Outcome = 'ok' | 'empty' | 'failed' | 'unavailable' | 'denied' | 'timeout';
 export type Cls = 'raw' | 'derived' | 'invariant' | 'inferred';
+/** Event-log record identity. Values beyond JavaScript's safe integer range arrive as exact decimal strings. */
+export type RecordId = number | string;
 
 export interface Section<T = unknown> {
   name: string;
@@ -30,7 +32,7 @@ export interface Reading<T = unknown> {
 
 /** One record from a Windows log, as the events and record readings return it. */
 export interface EventRecord {
-  RecordId: number;
+  RecordId: RecordId;
   Id: number;
   Level: number;
   LevelDisplayName: string;
