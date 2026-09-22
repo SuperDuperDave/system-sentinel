@@ -7,6 +7,7 @@ once against a live session — because that is the contract: nothing above this
 which transport answered it.
 """
 
+import base64
 import json
 import os
 import subprocess
@@ -38,6 +39,38 @@ def test_single_object_becomes_a_list_of_one(bridge: Bridge):
     r = bridge.run("# fake: ok-object")
     assert r.outcome == "ok"
     assert r.items == [{"CPU": "x"}]
+
+
+def test_long_query_preserves_unicode_through_either_transport(bridge: Bridge):
+    text = "synthetic café 雪 🧪"
+    script = "# padding " + "x" * 20000 + f"\n# fake: echo\n# echo: {text}\n"
+    assert len(base64.b64encode(script.encode("utf-16le"))) > 40000
+    result = bridge.run(script)
+    assert result.outcome == "ok" and result.items == [{"text": text}], result.error
+
+
+def test_one_shot_argv_is_constant_and_complete_script_travels_on_stdin(monkeypatch):
+    requests = []
+
+    def run(cmd, **kwargs):
+        requests.append((cmd, kwargs))
+        return subprocess.CompletedProcess(cmd, 0, stdout=b'[{"ok":true}]', stderr=b"")
+
+    monkeypatch.setattr(sentinel.bridge.subprocess, "run", run)
+    bridge = Bridge(exe="synthetic-powershell")
+    scripts = ("[pscustomobject]@{ok=$true}", "# " + "x" * 30000 + "\n[pscustomobject]@{text='café 雪 🧪'}")
+    for script in scripts:
+        assert bridge._run_once(script, timeout=3, depth=9).outcome == "ok"
+    assert requests[0][0] == requests[1][0]
+    assert sum(len(arg) + 1 for arg in requests[1][0]) < 4096
+    bootstrap = base64.b64decode(requests[0][0][-1]).decode("utf-16le")
+    assert "[Console]::In.ReadToEnd()" in bootstrap
+    for script, (_, options) in zip(scripts, requests, strict=True):
+        payload = options["input"]
+        assert isinstance(payload, bytes) and payload.isascii()
+        decoded = base64.b64decode(payload).decode("utf-16le")
+        assert script in decoded and "-Depth 9" in decoded
+        assert options["timeout"] == 3 and options["capture_output"] is True
 
 
 def test_empty_is_a_finding_not_a_failure(bridge: Bridge):

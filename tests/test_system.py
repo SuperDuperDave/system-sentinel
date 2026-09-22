@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime, timedelta
+from pathlib import PureWindowsPath
 from typing import Any
 
 import pytest
@@ -394,15 +395,15 @@ DUMP_FILES = [
 
 
 def test_dumps_lists_the_files_windows_wrote():
-    r = taken("dumps", FakeBridge(BridgeResult("ok", items=[dump_inventory(DUMP_FILES)], took_ms=300)))
+    r = taken("dumps", FakeBridge(BridgeResult("ok", items=[dump_inventory(DUMP_FILES, application=True)], took_ms=300)))
     assert classes(r) == {"files": "raw", "collection": "raw"}
     row = r.section("files").data[0]
-    assert set(row) == {"name", "path", "bytes", "modified"}
+    assert set(row) == {"name", "path", "bytes", "modified", "source"}
     assert row["path"].startswith("C:\\Windows")  # kept: a path under Windows is not a person's path
 
 
 def test_an_empty_inventory_is_a_finding_not_a_failure():
-    r = taken("dumps", FakeBridge(BridgeResult("ok", items=[dump_inventory()], took_ms=120)))
+    r = taken("dumps", FakeBridge(BridgeResult("ok", items=[dump_inventory(application=True)], took_ms=120)))
     assert r.outcome == "empty" and r.observed
     assert r.section("files").data == [] and r.count == 0
     assert r.error is None
@@ -500,7 +501,9 @@ def test_drivers_on_the_host():
 @pytest.mark.host
 def test_dumps_on_the_host():
     r = observed(asyncio.run(take("dumps", real_bridge_or_skip(), {})))
+    roots = {source["id"]: PureWindowsPath(source["path"]) for source in r.section("collection").data["locations"] if source["path"]}
     for row in r.section("files").data:
-        assert set(row) == {"name", "path", "bytes", "modified"}
-        assert row["path"].upper().startswith("C:\\WINDOWS")
+        assert set(row) == {"name", "path", "bytes", "modified", "source"}
+        assert row["source"] in {"minidump", "memory", "live_kernel", "application"}
+        assert PureWindowsPath(row["path"]).is_relative_to(roots[row["source"]])
         assert row["modified"].endswith("Z") and row["bytes"] >= 0

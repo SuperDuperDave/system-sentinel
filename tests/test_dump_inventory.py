@@ -18,19 +18,22 @@ ROOTS = {
     "memory": r"C:\Windows\MEMORY.DMP",
     "live_kernel": r"C:\Windows\LiveKernelReports",
 }
+APPLICATION_ROOT = r"C:\Users\example-user\AppData\Local\CrashDumps"
 
 
-def dump_inventory(files: Iterable[dict[str, Any]] = ()) -> dict[str, Any]:
+def dump_inventory(files: Iterable[dict[str, Any]] = (), *, application: bool = False) -> dict[str, Any]:
     """A complete synthetic inventory, shared by crash and bounded-header fixtures.
 
     Only the four public file fields are copied. Empty directories exist; MEMORY.DMP is
     absent unless supplied. Paths outside these synthetic inventory locations are refused.
+    Application coverage is included only when explicitly requested.
     """
+    roots = {**ROOTS, "application": APPLICATION_ROOT} if application else ROOTS
     locations = [{
         "id": identity, "path": path, "recursive": identity == "live_kernel",
         "present": identity != "memory", "outcome": "empty", "returned": 0,
         "error_count": 0, "errors": [], "files": [],
-    } for identity, path in ROOTS.items()]
+    } for identity, path in roots.items()]
     for file in files:
         selected = ntpath.normcase(ntpath.normpath(file["path"]))
         for source in locations:
@@ -67,6 +70,10 @@ def _fail(payload: dict[str, Any], identity: str, outcome: str = "denied", *, pr
 
 
 def _take(payload: dict[str, Any]):
+    # These cases vary kernel-source results. The all-source taker also receives an
+    # explicitly observed empty application directory; its gaps have separate tests.
+    payload = deepcopy(payload)
+    payload["locations"].append(_source(dump_inventory(application=True), "application"))
     return take_dumps(FakeBridge(BridgeResult("ok", items=[payload], took_ms=7)), {})
 
 
@@ -76,7 +83,7 @@ def test_complete_inventory_keeps_public_file_fields_and_orders_locations_togeth
     payload = dump_inventory([older, newer])
     original = deepcopy(payload)
     files, collection, warnings = inventory(payload)
-    assert files == [newer, older]
+    assert files == [{**newer, "source": "minidump"}, {**older, "source": "memory"}]
     assert collection["complete"] is True and warnings == []
     assert [source["id"] for source in collection["locations"]] == list(ROOTS)
     assert all("files" not in source for source in collection["locations"])
@@ -89,7 +96,7 @@ def test_partial_location_keeps_completed_files_and_its_failure_evidence():
     _fail(payload, "live_kernel")
     reading = _take(payload)
     assert reading.outcome == "ok" and reading.observed and reading.count == 1
-    assert reading.section("files").data == [file]
+    assert reading.section("files").data == [{**file, "source": "live_kernel"}]
     collection = reading.section("collection").data
     assert collection["complete"] is False
     source = _source(collection, "live_kernel")
@@ -167,7 +174,7 @@ def test_one_invalid_location_does_not_erase_another_locations_files(invalid):
         source["files"][0]["bytes"] = True
     reading = _take(payload)
     assert reading.outcome == "ok" and reading.count == 1 and reading.warnings
-    assert reading.section("files").data == [file]
+    assert reading.section("files").data == [{**file, "source": "memory"}]
     collection = reading.section("collection").data
     assert collection["complete"] is False
     assert _source(collection, "minidump")["outcome"] == "failed"
@@ -242,12 +249,13 @@ def test_missing_file_respects_nonrecursive_directory_and_single_file_boundaries
     assert missing_file(path, collection)[0] == outcome
 
 
-def test_unknown_location_root_cannot_establish_an_observed_missing_file():
+def test_unknown_location_root_does_not_hide_a_known_locations_observed_miss():
     payload = dump_inventory()
     payload["locations"].remove(_source(payload, "live_kernel"))
     _, collection, _ = inventory(payload)
     outcome, detail = missing_file(ROOTS["minidump"] + r"\absent.dmp", collection)
-    assert outcome == "failed" and "unknown" in detail
+    assert outcome == "empty" and "No exact match" in detail
+    assert missing_file(r"C:\unestablished-root\absent.dmp", collection)[0] == "failed"
 
 
 def test_normalization_classifies_location_without_minting_an_exact_inventory_match():
@@ -259,4 +267,4 @@ def test_normalization_classifies_location_without_minting_an_exact_inventory_ma
     alias = r"c:/windows/minidump/nested/../example.dmp"
     outcome, detail = missing_file(alias, collection)
     assert outcome == "empty" and "No exact match" in detail
-    assert files == [file] and collection == original
+    assert files == [{**file, "source": "minidump"}] and collection == original

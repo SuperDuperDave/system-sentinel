@@ -26,9 +26,10 @@ from .auth import LINK_TTL, TokenMiddleware, bearer, clear_session_cookie, code_
 from .bridge import Bridge, shutdown_sessions
 from .link import qr_svg, reach, sign_in_link
 from .performance import KEEP_DAYS, PerformanceCollector, PerformanceStore
-from .reading import REGISTRY, Reading, take
+from .reading import REGISTRY, Reading
 from .readings.health import learn_identity
 from .redact import Identity, Redactor
+from .service import ReadingService
 from .stack import Duplicate, Prompts, Stack, compose, new_item
 from .stream import Stream
 
@@ -114,6 +115,7 @@ class State:
 
     def __init__(self, bridge: Bridge | None = None, token: str | None = None, collect_performance: bool = False):
         self.bridge = bridge or Bridge.locate()
+        self.readings = ReadingService(self.bridge)
         self.token = token or load_or_create_token()
         #: How this process ends when it is asked to. Whoever runs the server sets it — the tray
         #: launcher and ``serve`` both do — and ``POST /api/quit`` is the only caller. Left unset
@@ -373,7 +375,7 @@ def create_app(state: State | None = None, mcp: bool = True) -> FastAPI:
             raise HTTPException(status_code=404, detail=f"no reading named {name!r}")
         params = {k: v for k, v in request.query_params.items() if k != "unredacted"}
         try:
-            result = await take(name, state.bridge, params)
+            result = await state.readings.take(name, params)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         return envelope(result, unredacted)
@@ -408,7 +410,7 @@ def create_app(state: State | None = None, mcp: bool = True) -> FastAPI:
         """Add evidence: a reading the server takes now, a reading the caller holds, some of its
         records, or a note. The same reading with the same parameters and records is refused."""
         try:
-            added = await new_item(state.stack, state.bridge, item.model_dump(exclude_unset=True))
+            added = await new_item(state.stack, state.bridge, item.model_dump(exclude_unset=True), reader=state.readings.take)
             response = guarded(state.stack.add(added).to_dict(), unredacted, status_code=201)
             await handoff_changed()
             return response
@@ -476,7 +478,7 @@ def create_app(state: State | None = None, mcp: bool = True) -> FastAPI:
     async def captures_create(unredacted: bool = False) -> Response:
         """Take every reading now, write the ZIP into the data directory and return it. Takes as
         long as the slowest query on this machine; nothing is sent anywhere."""
-        made = await capture.create(state.bridge, state.stack, state.prompts, None if unredacted else state.redactor)
+        made = await capture.create(state.bridge, state.stack, state.prompts, None if unredacted else state.redactor, reader=state.readings.take)
         return FileResponse(made.path, media_type="application/zip", filename=made.name, headers={"X-Capture-Name": made.name})
 
     @app.get("/api/captures", tags=["captures"])

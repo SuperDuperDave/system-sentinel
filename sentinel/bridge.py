@@ -104,6 +104,18 @@ _PRELUDE = (
     "exit $__c"
 )
 
+# Keep argv independent of collector size: Windows' process command line is bounded,
+# while dump inspection can exceed it after UTF-16/base64 expansion. The payload stays
+# ASCII on stdin regardless of console input encoding; the existing prelude owns the
+# collector, output encoding and exit status after the bootstrap decodes it.
+_ONE_SHOT_BOOTSTRAP = (
+    "[Console]::OutputEncoding = [Text.Encoding]::UTF8; "
+    "try { & ([scriptblock]::Create([Text.Encoding]::Unicode.GetString("
+    "[Convert]::FromBase64String([Console]::In.ReadToEnd())))) } "
+    "catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }"
+)
+_ONE_SHOT_COMMAND = base64.b64encode(_ONE_SHOT_BOOTSTRAP.encode("utf-16le")).decode("ascii")
+
 
 class SlotTimeout(Exception):
     """Nothing came free within the question's own timeout — a launch slot another process is
@@ -286,13 +298,14 @@ class Bridge:
             return BridgeResult("unavailable", error="powershell.exe was not found")
 
         full = _PRELUDE.replace("{script}", script).replace("{depth}", str(depth))
-        encoded = base64.b64encode(full.encode("utf-16le")).decode("ascii")
-        cmd = [self.exe, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded]
+        encoded = base64.b64encode(full.encode("utf-16le"))
+        cmd = [self.exe, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", _ONE_SHOT_COMMAND]
 
         started = time.perf_counter()
         try:
             proc = subprocess.run(
                 cmd,
+                input=encoded,
                 capture_output=True,
                 timeout=timeout,
                 cwd=self.cwd,

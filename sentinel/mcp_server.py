@@ -34,7 +34,7 @@ from mcp.shared.exceptions import MCPError
 from starlette.applications import Starlette
 
 from . import __version__, capture, readings  # noqa: F401  (readings registers the catalog)
-from .reading import REGISTRY, Spec, take
+from .reading import REGISTRY, Spec
 from .redact import Redactor
 from .stack import Duplicate, compose, new_item
 
@@ -152,7 +152,7 @@ async def _stack_list(state: State, _arguments: dict[str, Any], redactor: Redact
 
 
 async def _stack_add(state: State, arguments: dict[str, Any], redactor: Redactor | None) -> Any:
-    item = await new_item(state.stack, state.bridge, arguments)
+    item = await new_item(state.stack, state.bridge, arguments, reader=state.readings.take)
     return _redacted(state.stack.add(item).to_dict(), redactor)
 
 
@@ -192,7 +192,7 @@ async def _capture_create(state: State, arguments: dict[str, Any], redactor: Red
     its manifest — which already says whether it was written unredacted and what was removed — and
     the file stays on the machine for a person to send.
     """
-    made = await capture.create(state.bridge, state.stack, state.prompts, redactor, reason=arguments.get("reason"))
+    made = await capture.create(state.bridge, state.stack, state.prompts, redactor, reason=arguments.get("reason"), reader=state.readings.take)
     return {"capture": made.name, "manifest": made.manifest}
 
 
@@ -494,7 +494,7 @@ class Surface:
         if reading_name is None:
             return _refused(f"no reading named {params.name!r}")
         try:
-            reading = await take(reading_name, self.state.bridge, arguments)
+            reading = await self.state.readings.take(reading_name, arguments)
         except ValueError as exc:
             return _refused(str(exc))
         body = reading.to_dict() if unredacted else self.state.redactor.attach(reading.to_dict())

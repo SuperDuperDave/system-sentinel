@@ -115,7 +115,10 @@ def _take(monkeypatch, modes):
         "& {\n$inventoryModes = @{ " + assignments + " }\n"
         + _SYNTHETIC_FILESYSTEM + "\n" + dumps.DUMPS_SCRIPT + "\n}\n"
     )
-    monkeypatch.setattr(dumps, "DUMPS_SCRIPT", script)
+    # Deliberately exercise only the kernel collector here. Application coverage and
+    # its filesystem guard run in test_application_dump_inventory_observation.py.
+    monkeypatch.setattr(dumps, "ALL_DUMPS_SCRIPT", script)
+    monkeypatch.setattr(dumps, "ALL_LOCATION_IDS", dumps.LOCATION_IDS)
     return dumps.take_dumps(real_bridge_or_skip(), {})
 
 
@@ -202,9 +205,10 @@ def test_collector_preserves_dump_location_observations(monkeypatch, modes, outc
             expected_files.append({
                 "name": ntpath.basename(path), "path": path, "bytes": 4096,
                 "modified": "2025-01-02T03:04:05.0000000Z",
+                "source": identity,
             })
 
-    # Equality checks the four public file fields as well as preservation of partial data.
+    # Equality checks file fields, source attribution and preservation of partial data.
     assert files == expected_files
     assert reading.count == (len(expected_files) if reading.observed else None)
     complete = all(expected[mode][0] in ("ok", "empty") for mode in modes.values())

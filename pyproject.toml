@@ -57,13 +57,13 @@ select = [
 ]
 
 [tool.mypy]
-# Strict at the boundary, silent behind it. These five files are where a wrong type leaves the
+# Strict at the boundary, silent behind it. These files are where a wrong type leaves the
 # process: the bridge to Windows, the envelope every reading comes back in, the redaction applied
 # before anything is served, the token, and the routes. The readings behind them are checked by the
 # suite against real payloads, which is the stronger check for code whose input is Windows' JSON.
 python_version = "3.11"
 strict = true
-files = ["sentinel/bridge.py", "sentinel/reading.py", "sentinel/redact.py", "sentinel/auth.py", "sentinel/app.py"]
+files = ["sentinel/bridge.py", "sentinel/reading.py", "sentinel/service.py", "sentinel/redact.py", "sentinel/auth.py", "sentinel/app.py"]
 follow_imports = "silent"
 
 [[tool.mypy.overrides]]

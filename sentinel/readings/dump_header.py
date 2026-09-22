@@ -18,7 +18,7 @@ from typing import Any
 from ..bridge import Bridge, Outcome
 from ..reading import Param, Reading, Section, Spec, register
 from .crash import BUGCHECKS, EXCEPTIONS
-from .dumps import DUMPS_SCRIPT, inventory, missing_file
+from .dumps import ALL_DUMPS_SCRIPT, ALL_LOCATION_IDS, APPLICATION_DUMP_GUARD_SCRIPT, inventory, missing_file
 
 PREFIX_BYTES = 96
 MAX_STREAMS = 128
@@ -42,11 +42,16 @@ def dump_header_script(path: str) -> str:
     return rf"""
 $selected = '{quoted}'
 $inventory = & {{
-{DUMPS_SCRIPT.strip()}
+{ALL_DUMPS_SCRIPT.strip()}
 }}
 $file = $inventory.locations | ForEach-Object {{ $_.files }} | Where-Object {{ $_.path -ieq $selected }} | Select-Object -First 1
 if ($file) {{
     try {{
+        $application = $inventory.locations | Where-Object {{ $_.id -eq 'application' }}
+        if ($application.files | Where-Object {{ $_.path -ieq $file.path }}) {{
+            {APPLICATION_DUMP_GUARD_SCRIPT.strip()}
+            Get-SentinelLocalDumpItem $file.path -File | Out-Null
+        }}
         $stream = [IO.File]::Open($file.path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
         try {{
             function Read-At([long]$offset, [int]$length) {{
@@ -351,7 +356,17 @@ def _read_encoded(value: Any, maximum: int, name: str) -> bytes:
     return data
 
 
+def validate_selection(params: dict[str, Any]) -> None:
+    if bool(params.get("path")) == bool(params.get("ref")):
+        raise ValueError("Provide exactly one of path or ref from the dump inventory.")
+    if params.get("path") and any(marker in params["path"] for marker in ("<user>", "<host>")):
+        raise ValueError("This path was redacted. Use its inspection reference from the dump inventory.")
+
+
 def take_dump_header(bridge: Bridge, params: dict[str, Any]) -> Reading:
+    validate_selection(params)
+    if params.get("ref"):
+        raise ValueError("Dump references must be resolved through the running Sentinel reading service.")
     script = dump_header_script(params["path"])
     result = bridge.run(script, depth=8)
     reading = Reading(
@@ -371,7 +386,7 @@ def take_dump_header(bridge: Bridge, params: dict[str, Any]) -> Reading:
         reading.error = {"kind": "failed", "detail": "the dump query returned an unexpected shape"}
         return reading
     item = result.items[0]
-    _, collection, warnings = inventory(item.get("inventory"))
+    _, collection, warnings = inventory(item.get("inventory"), location_ids=ALL_LOCATION_IDS)
     reading.sections.append(Section("collection", "raw", collection))
     reading.warnings.extend(warnings)
     if item.get("status") == "not_inventoried":
@@ -443,6 +458,9 @@ register(Spec(
     description="Inspect one inventoried dump's bounded structural metadata: exact header bytes, a kernel bug check or a user-mode minidump's streams and exception, with offsets and raw bytes. No memory payload, debugger, symbol download or whole-file validation.",
     classes=("raw", "derived"),
     take=take_dump_header,
-    params=(Param("path", "str", None, "Exact path returned by the dumps inventory or a crash stop."),),
+    params=(
+        Param("path", "str", "", "Exact unredacted path from the dump inventory or a crash stop. Provide path or ref, not both."),
+        Param("ref", "str", "", "Reference from dumps.inspection_targets, usable with redacted paths. Selects the current file at that location; refresh after Sentinel restarts. Provide ref or path."),
+    ),
     heavy=True,
 ))

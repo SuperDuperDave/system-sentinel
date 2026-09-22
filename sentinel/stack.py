@@ -24,7 +24,7 @@ from typing import Any
 
 from .bridge import Bridge
 from .paths import data_dir
-from .reading import REGISTRY, take
+from .reading import REGISTRY, ReadingCall, take
 from .redact import Redactor
 
 KINDS = ("reading", "selection", "note")
@@ -233,7 +233,7 @@ class Prompts:
             self.store.write({"prompts": kept, "seeded": True})
 
 
-async def new_item(stack: Stack, bridge: Bridge, body: dict[str, Any]) -> Item:
+async def new_item(stack: Stack, bridge: Bridge, body: dict[str, Any], *, reader: ReadingCall | None = None) -> Item:
     """Turn what a client sent into an item: take the reading now, or keep the envelope it holds.
 
     Refuses what cannot be evidence — a selection without matching ids, a note without text, a
@@ -266,7 +266,8 @@ async def new_item(stack: Stack, bridge: Bridge, body: dict[str, Any]) -> Item:
             name = asked.get("name")
             if name not in REGISTRY:
                 raise ValueError(f"no reading named {name!r}")
-            envelope = (await take(name, bridge, asked.get("params") or {})).to_dict()
+            params = asked.get("params") or {}
+            envelope = (await reader(name, params) if reader else await take(name, bridge, params)).to_dict()
         else:
             envelope = dict(given or {})
             if "reading" not in envelope or "outcome" not in envelope:

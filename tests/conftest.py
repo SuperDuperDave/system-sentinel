@@ -15,8 +15,8 @@ from sentinel.bridge import Bridge, BridgeResult
 FAKE_POWERSHELL = r'''#!/usr/bin/env python3
 """A powershell.exe that answers by the directive it finds in the script: `# fake: <mode>`.
 
-Both of the bridge's transports arrive here: a one-shot launch carrying `-EncodedCommand`, and a
-live session started with `-Command -` and fed framed questions on stdin. One table of modes
+Both of the bridge's transports arrive here: a one-shot launch carrying a small `-EncodedCommand`
+bootstrap and the payload on stdin, and a live session fed framed questions on stdin. One table of modes
 answers both, so a mode written once is exercised through both and neither can drift from the other.
 """
 import base64, json, os, re, sys, time
@@ -37,6 +37,8 @@ def answer(script):
         return json.dumps([{"Id": 41, "ProviderName": "Microsoft-Windows-Kernel-Power"}, {"Id": 6008, "ProviderName": "EventLog"}]), "", 0
     if mode == "ok-object":
         return json.dumps({"CPU": "x"}), "", 0
+    if mode == "echo":
+        return json.dumps({"text": re.search(r"# echo: (.*)", script).group(1)}), "", 0
     if mode == "warn":
         return json.dumps([{"Id": 1}]), "Get-CimInstance : Invalid class", 0
     if mode == "failed":
@@ -77,6 +79,8 @@ def answer(script):
 
 def one_shot(args):
     script = base64.b64decode(args[args.index("-EncodedCommand") + 1]).decode("utf-16le")
+    if "[Console]::In.ReadToEnd()" in script:
+        script = base64.b64decode(sys.stdin.buffer.read()).decode("utf-16le")
     out, err, code = answer(script)
     sys.stdout.write(out)
     if err:

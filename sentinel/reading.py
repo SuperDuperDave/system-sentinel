@@ -86,6 +86,7 @@ class Param:
 
 
 Taker = Callable[..., "Reading | Awaitable[Reading]"]
+ReadingCall = Callable[[str, dict[str, Any] | None], Awaitable[Reading]]
 
 
 @dataclass(frozen=True)

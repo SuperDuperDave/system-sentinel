@@ -71,12 +71,14 @@ interface FaultSummary {
   live_kernel: { code: string | null; name: string | null; bucket: string | null; count: number; last: string | null }[];
 }
 
-/** One file under the Windows minidump, full dump and live kernel report locations. */
+/** One file from an observed dump location, paired with its private-path-safe selector. */
 interface DumpFile {
   name: string;
   path: string;
   bytes: number;
   modified: string;
+  source: string;
+  fileRef?: string;
 }
 
 interface DumpInspection {
@@ -136,7 +138,7 @@ const KIND_WORD: Record<string, string> = {
  * which is itself the finding; the bucket WER named is shown as WER's words, not as a cause.
  */
 export function Crashes() {
-  const { stopCount, faultCount, faultKind, stopId, faultId, dumpPath, focus } = useApp((s) => s.crashesView);
+  const { stopCount, faultCount, faultKind, stopId, faultId, dumpId, focus } = useApp((s) => s.crashesView);
   const setCrashesView = useApp((s) => s.setCrashesView);
   const returnTo = useRef(focus);
   const stopButtons = useRef(new Map<number, HTMLButtonElement>());
@@ -158,7 +160,9 @@ export function Crashes() {
   const faultSummary = observed(faults.reading) ? part<FaultSummary>(faults.reading, 'summary') : null;
   const selectedFaultKind = faultKind && faultSummary?.by_kind[faultKind] ? faultKind : null;
   const shownFaults = selectedFaultKind ? decoded.filter((fault) => fault.kind === selectedFaultKind) : decoded;
-  const files = part<DumpFile[]>(dumps.reading, 'files') ?? [];
+  const targets = part<{ file_index: number; ref: string }[]>(dumps.reading, 'inspection_targets') ?? [];
+  const references = new Map(targets.map((target) => [target.file_index, target.ref]));
+  const files = (part<DumpFile[]>(dumps.reading, 'files') ?? []).map((file, index) => ({ ...file, fileRef: references.get(index) }));
   const times = new Map(faultRecords.map((r) => [r.RecordId, r.TimeCreated]));
 
   // Returning takes fresh readings. Reopen only the same source identity, and return keyboard
@@ -171,7 +175,7 @@ export function Crashes() {
     returnTo.current = null;
     if (!observed(taken.reading)) return;
     const root = destination === 'fault' ? faultRowsRef.current : dumpRowsRef.current;
-    const id = destination === 'fault' ? faultId : dumpPath;
+    const id = destination === 'fault' ? faultId : dumpId;
     const row = destination === 'stop'
       ? selectedStop === null ? null : stopButtons.current.get(selectedStop)
       : [...(root?.querySelectorAll<HTMLButtonElement>('button[data-row-id]') ?? [])].find((button) => button.dataset.rowId === id);
@@ -179,7 +183,7 @@ export function Crashes() {
     const target = row ?? missing;
     target?.scrollIntoView({ block: 'center' });
     target?.focus({ preventScroll: true });
-  }, [crash, faults, dumps, selectedStop, faultId, dumpPath]);
+  }, [crash, faults, dumps, selectedStop, faultId, dumpId]);
 
   function chooseStop(index: number | null) {
     returnTo.current = null;
@@ -266,9 +270,9 @@ export function Crashes() {
         note={files.length ? `newest first · ${size(files.reduce((n, f) => n + f.bytes, 0))} on disk` : undefined}
         controls={dumps.reading ? <AddToStack item={{ kind: 'reading', envelope: dumps.reading, title: 'Crash dump inventory' }} /> : null}
       >
-        <OutcomeLine taken={dumps} noun="dump files" singular="dump file" emptyText="No dump files under the Windows dump locations" />
+        <OutcomeLine taken={dumps} noun="dump files" singular="dump file" emptyText="No dump files found in the checked locations" />
         <DumpCoverage reading={dumps.reading} />
-        {observed(dumps.reading) && dumpPath && !files.some((file) => file.path === dumpPath) ? <p ref={missingDumpRef} className={`${styles.selectionMissing} readout`} role="status" tabIndex={-1}>The previously selected dump file is not in this returned inventory.</p> : null}
+        {observed(dumps.reading) && dumpId && !files.some((file) => (file.fileRef ?? file.path) === dumpId) ? <p ref={missingDumpRef} className={`${styles.selectionMissing} readout`} role="status" tabIndex={-1}>The previous selection is no longer available. Select a file from this inventory.</p> : null}
         <div ref={dumpRowsRef}>
         {observed(dumps.reading) && files.length > 0
           ? byDay(files, (f) => f.modified).map(([label, rows]) => (
@@ -276,9 +280,9 @@ export function Crashes() {
                 <p className={`${styles.day} label`}>{label}</p>
                 <RowList
                   items={rows}
-                  idOf={(file) => file.path}
-                  openId={dumpPath}
-                  onOpenChange={(id) => { returnTo.current = null; setCrashesView({ dumpPath: id === null ? null : String(id), focus: id === null ? null : 'dump' }); }}
+                  idOf={(file) => file.fileRef ?? file.path}
+                  openId={dumpId}
+                  onOpenChange={(id) => { returnTo.current = null; setCrashesView({ dumpId: id === null ? null : String(id), focus: id === null ? null : 'dump' }); }}
                   layout={styles.fileRow}
                   cells={(f) => (
                     <>
@@ -294,11 +298,12 @@ export function Crashes() {
                       <Facts
                         rows={[
                           ['Path', <span className={styles.path}>{f.path}</span>],
+                          ['Location', dumpLocationName(f.source)],
                           ['Size', `${f.bytes.toLocaleString()} bytes`],
                           ['Written', f.modified],
                         ]}
                       />
-                      <DumpHeaderDetail path={f.path} />
+                      <DumpHeaderDetail path={f.path} fileRef={f.fileRef} refreshInventory={dumps.retake} />
                       <div className={styles.actions}>
                         <MomentLink at={f.modified} />
                       </div>
@@ -532,24 +537,29 @@ function StopDetail({ stop, envelope }: { stop: Stop; envelope: Reading | null }
 }
 
 /** Keep each location's observation available beside the files or inspection it supports. */
+function dumpLocationName(source: string): string {
+  return ({ minidump: 'Minidump', memory: 'Memory dump', live_kernel: 'Live kernel', application: 'Application dumps' } as Record<string, string>)[source] ?? source;
+}
+
 function DumpCoverage({ reading }: { reading: Reading | null }) {
   const collection = part<{ complete: boolean; locations: { id: string; path: string | null; outcome: string; present: boolean | null; returned: number }[] }>(reading, 'collection');
   if (!collection?.locations) return null;
   return <details className={styles.rawDisclosure}>
     <summary>{collection.complete ? 'Dump locations checked' : 'Dump locations · incomplete coverage'}</summary>
     <Facts rows={collection.locations.map((source) => [
-      ({ minidump: 'Minidump', memory: 'Memory dump', live_kernel: 'Live kernel' } as Record<string, string>)[source.id] ?? source.id,
+      dumpLocationName(source.id),
       <span>{source.outcome === 'ok' ? `${source.returned} ${source.returned === 1 ? 'file' : 'files'} listed`
         : source.outcome === 'empty' ? source.present === false ? 'Location not present' : 'No dump files found'
         : `${source.outcome === 'denied' ? 'Access denied' : 'Could not fully read'} · ${source.returned} files listed; other files may be unseen`}
         {source.path ? <><br /><span className={`${styles.path} ${styles.quiet}`}>{source.path}</span></> : null}</span>,
     ])} />
+    {collection.locations.some((source) => source.id === 'application') ? <p className={styles.quiet}>Application dumps cover the default CrashDumps folder of the Windows account running Sentinel. Custom destinations, other accounts and service profiles are not searched. Redirected locations may be unavailable; collection does not enable Windows dump recording.</p> : null}
   </details>;
 }
 
 /** Read just the selected file's header when the person opens its detail. */
-function DumpHeaderDetail({ path }: { path: string }) {
-  const taken = useReading('dump_header', { path });
+function DumpHeaderDetail({ path, fileRef, refreshInventory }: { path: string; fileRef?: string; refreshInventory?: () => void }) {
+  const taken = useReading('dump_header', fileRef ? { ref: fileRef } : { path });
   const [rawOpen, setRawOpen] = useState(false);
   const info = part<DumpInspection>(taken.reading, 'inspection');
   const streams = part<DumpStreams>(taken.reading, 'streams');
@@ -582,6 +592,8 @@ function DumpHeaderDetail({ path }: { path: string }) {
     <>
       <p className="label">Inside the dump</p>
       <OutcomeLine taken={taken} noun="dump inspection" emptyText="No exact match in the observed dump inventory" />
+      {fileRef && refreshInventory && (taken.problem || taken.reading?.outcome === 'empty') ? <button className="control" onClick={refreshInventory}>Refresh dump list</button> : null}
+      <p className={styles.quiet}>Reads the current file at this location; the inventory does not preserve its contents.</p>
       <DumpCoverage reading={taken.reading} />
       {observed(taken.reading) && info ? <Facts rows={rows} /> : null}
       {observed(taken.reading) && info?.directory_status ? <DumpStreamDirectory status={info.directory_status} declared={info.streams} streams={streams} /> : null}

@@ -18,7 +18,7 @@ interface CrashesViewState {
   faultKind: string | null;
   stopId: string | null;
   faultId: string | null;
-  dumpPath: string | null;
+  dumpId: string | null;
   /** Which open evidence to return to after following its System record. */
   focus: 'stop' | 'fault' | 'dump' | null;
 }
@@ -101,7 +101,7 @@ export const useApp = create<AppState>((set, get) => ({
   },
   performanceView: { hours: 6, endChoice: 'now', selectedAt: null },
   setPerformanceView: (change) => set((state) => ({ performanceView: { ...state.performanceView, ...change } })),
-  crashesView: { stopCount: 5, faultCount: 30, faultKind: null, stopId: null, faultId: null, dumpPath: null, focus: null },
+  crashesView: { stopCount: 5, faultCount: 30, faultKind: null, stopId: null, faultId: null, dumpId: null, focus: null },
   setCrashesView: (change) => set((state) => ({ crashesView: { ...state.crashesView, ...change } })),
   restoreAddress: () => set(navigationFromAddress()),
 }));

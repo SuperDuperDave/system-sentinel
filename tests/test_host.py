@@ -5,6 +5,7 @@ envelope and that the outcome is one the machine can answer with.
 """
 
 import asyncio
+import base64
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -205,6 +206,45 @@ def test_signals_draws_on_the_stops_and_on_windows_own_record():
 
 
 # --- the two transports, against the real machine -------------------------------------------------
+
+
+@pytest.mark.parametrize("transport", ("one-shot", "session"))
+def test_long_queries_keep_unicode_outcomes_and_timeout_recovery(transport, monkeypatch):
+    """Collector size must not exceed Windows' command line, including fallback launches."""
+    monkeypatch.setattr(sentinel.bridge, "POOL_SIZE", 0 if transport == "one-shot" else 1)
+    bridge = real_bridge_or_skip()
+    padding = "# synthetic long collector " + "x" * 20000 + "\n"
+    assert len(base64.b64encode(padding.encode("utf-16le"))) > 40000
+    text = "synthetic café 雪 🧪"
+    ok_script = f"[pscustomobject]@{{text='{text}'}}"
+
+    success = bridge.run(padding + ok_script)
+    assert success.outcome == "ok" and success.items == [{"text": text}], success
+    assert success.returncode == 0
+    empty = bridge.run(padding + "$unused = 1")
+    assert empty.outcome == "empty" and empty.returncode == 0, empty
+
+    failed = bridge.run(padding + f"throw 'long-query-failure {text}'")
+    assert failed.outcome == "failed" and failed.returncode == 1, failed
+    assert f"long-query-failure {text}" in failed.error
+    denied = bridge.run(padding + f"throw [UnauthorizedAccessException]::new('Access is denied: {text}')")
+    assert denied.outcome == "denied" and denied.returncode == 1, denied
+    assert text in denied.error
+
+    partial = bridge.run(padding + f"Write-Error 'long-query-warning {text}'; " + ok_script)
+    assert partial.outcome == "ok" and partial.items == [{"text": text}], partial
+    assert any(f"long-query-warning {text}" in warning for warning in partial.warnings)
+    malformed = bridge.run(padding + "if (")
+    assert malformed.outcome == "failed" and malformed.returncode == 1 and malformed.error, malformed
+
+    timed_out = bridge.run(padding + "Start-Sleep -Seconds 5", timeout=0.5)
+    assert timed_out.outcome == "timeout", timed_out
+    recovered = bridge.run(padding + ok_script)
+    assert recovered.outcome == "ok" and recovered.items == [{"text": text}], recovered
+    if transport == "session":
+        report = sessions_report(bridge)
+        assert report["answered"] >= 7 and report["discarded"].get("timeout") == 1
+        assert report["fell_back"] == 0
 
 
 def test_a_reading_through_a_live_session_matches_one_through_a_launch(monkeypatch):

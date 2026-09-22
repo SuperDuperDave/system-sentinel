@@ -25,7 +25,7 @@ from typing import Any
 from . import __version__
 from .bridge import OUTCOMES, Bridge
 from .paths import captures_dir
-from .reading import REGISTRY, Reading, take
+from .reading import REGISTRY, Reading, ReadingCall, take
 from .redact import Redactor
 from .stack import Prompts, Stack, compose
 
@@ -48,7 +48,7 @@ class Capture:
         return self.path.name
 
 
-async def create(bridge: Bridge, stack: Stack, prompts: Prompts, redactor: Redactor | None = None, *, reason: str | None = None) -> Capture:
+async def create(bridge: Bridge, stack: Stack, prompts: Prompts, redactor: Redactor | None = None, *, reason: str | None = None, reader: ReadingCall | None = None) -> Capture:
     """Take every reading in the catalog now and write the ZIP. Returns where it landed and its manifest."""
     started = datetime.now(UTC)
     path = _free_path(started)
@@ -57,7 +57,7 @@ async def create(bridge: Bridge, stack: Stack, prompts: Prompts, redactor: Redac
 
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
         for name in list(REGISTRY):
-            reading = await _take(name, bridge, started)
+            reading = await _take(name, bridge, started, reader)
             body = reading.to_dict()
             if redactor is not None:
                 body, taken_out = redactor.redact(body)
@@ -92,14 +92,14 @@ async def create(bridge: Bridge, stack: Stack, prompts: Prompts, redactor: Redac
     return Capture(path=path, manifest=manifest)
 
 
-async def _take(name: str, bridge: Bridge, at: datetime) -> Reading:
+async def _take(name: str, bridge: Bridge, at: datetime, reader: ReadingCall | None = None) -> Reading:
     """One reading for the capture. A reading that needs a moment is given the capture's own.
 
     Anything the catalog refuses becomes an envelope that says so, so one reading cannot end a capture.
     """
     params = {"before": _stamp(at)} if name == "record" else {}
     try:
-        return await take(name, bridge, params)
+        return await reader(name, params) if reader else await take(name, bridge, params)
     except Exception as exc:  # noqa: BLE001 - one reading's failure must not end the capture
         return Reading(
             reading=name,

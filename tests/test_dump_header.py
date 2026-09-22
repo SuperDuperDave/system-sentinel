@@ -69,7 +69,7 @@ def test_denial_and_bridge_failure_carry_no_false_sections():
 
 @pytest.mark.parametrize(("failed_location", "expected"), [("minidump", "denied"), ("live_kernel", "empty")])
 def test_unlisted_header_path_depends_on_its_own_location(failed_location, expected):
-    coverage = dump_inventory()
+    coverage = dump_inventory(application=True)
     source = next(row for row in coverage["locations"] if row["id"] == failed_location)
     source.update(outcome="denied", present=None, error_count=1, errors=[{"kind": "denied", "detail": "synthetic denial"}])
     item = {"status": "not_inventoried", "inventory": coverage}
@@ -101,7 +101,7 @@ def test_read_header_survives_unrelated_inventory_denial():
 
 def test_a_read_header_has_raw_provenance_and_separate_interpretation():
     item = {"status": "ok", "name": "example.dmp", "path": PATH, "bytes": 4096, "modified": "2026-09-21T00:00:00Z", "prefix": base64.b64encode(header()).decode()}
-    item["inventory"] = dump_inventory([item])
+    item["inventory"] = dump_inventory([item], application=True)
     reading = take_dump_header(FakeBridge(BridgeResult("ok", items=[item])), {"path": PATH})
     assert reading.outcome == "ok" and reading.count == 1
     assert [(s.name, s.cls) for s in reading.sections] == [("file", "raw"), ("header", "raw"), ("inspection", "derived"), ("collection", "raw")]
@@ -135,7 +135,7 @@ def mdmp_item() -> dict:
             {"index": 3, "data": base64.b64encode(data[604:608]).decode()},
         ],
     }
-    item["inventory"] = dump_inventory([item])
+    item["inventory"] = dump_inventory([item], application=True)
     return item
 
 
