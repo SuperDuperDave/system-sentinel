@@ -35,6 +35,7 @@ export function Signals() {
   const signals = section(taken.reading, 'signals') ?? [];
   const head = observed(taken.reading) ? taken.reading?.sections.find((s) => s.name === 'signals') : undefined;
   const inputs = ((taken.reading?.method ?? {}) as { readings?: Input[] }).readings ?? [];
+  const missingInputs = inputs.some((input) => input.outcome !== 'ok' && input.outcome !== 'empty');
   const groups = CLASSES.map((cls) => [cls, signals.filter((s) => s.class === cls)] as const);
   const silent = groups.filter(([, found]) => found.length === 0).map(([cls]) => cls);
 
@@ -45,7 +46,7 @@ export function Signals() {
         Patterns the tool noticed across several readings at once. Each one is a lead to follow, never a finding about what is wrong; the rule that
         produced it and the evidence under it are both here.
       </p>
-      <OutcomeLine taken={taken} noun="signals" singular="signal" emptyText="No signal fired: every rule ran and none of them matched" />
+      <OutcomeLine taken={taken} noun="signals" singular="signal" emptyText={missingInputs ? 'No signal found in the inputs that answered; missing inputs limit this reading' : 'No signal found in the inputs that answered'} />
       {taken.reading && !observed(taken.reading) ? (
         <p className={styles.unobserved}>No input could be observed, so no rule could run. Signals are read from other readings, not from the machine directly.</p>
       ) : null}

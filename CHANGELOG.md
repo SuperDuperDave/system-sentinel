@@ -18,6 +18,7 @@
 
 ### Changed
 - Changing a reading's parameters now hides the previous answer immediately until the new question returns. Taking the same question again keeps its timestamped answer visible while refreshing; a transport failure clears it rather than leaving stale rows under an error.
+- An empty Signals reading now says its conclusion is limited to inputs that answered, and calls out missing inputs in the outcome line. The input list and warnings still name each gap.
 - Reading outcome lines now use singular words for one returned item, including one dump file, record, sample, driver or signal.
 - Every reading's Method panel now offers the complete JSON response that the dashboard received, with default redaction and the method, outcome, warnings, and all evidence sections intact. It renders only when opened and can be copied in one action, with manual selection when browser clipboard access is unavailable.
 - Reading section headers now explain what `raw`, `derived`, `invariant` and `inferred` mean in place, with a brief description and an expandable explanation for people learning how to judge the evidence.
