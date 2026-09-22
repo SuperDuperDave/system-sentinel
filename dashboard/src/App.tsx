@@ -141,6 +141,7 @@ function Shell() {
 
   return (
     <div className={styles.shell}>
+      <a className={styles.skipLink} href="#content">Skip to the reading</a>
       <header className={styles.header}>
         <Lockup />
         <Live />
@@ -163,7 +164,7 @@ function Shell() {
           </div>
         </details>
       </nav>
-      <main className={styles.main}><View /></main>
+      <main id="content" className={styles.main} tabIndex={-1}><View /></main>
       <Devices open={devices} onClose={() => setDevices(false)} />
     </div>
   );

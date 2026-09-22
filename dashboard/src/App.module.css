@@ -8,6 +8,20 @@
   grid-template-areas: 'header' 'trace' 'nav' 'main';
 }
 
+.skipLink {
+  position: absolute;
+  z-index: 10;
+  top: 10px;
+  left: var(--gutter);
+  padding: 10px 14px;
+  border: 2px solid var(--phosphor);
+  border-radius: 6px;
+  background: var(--deep);
+  color: var(--ink);
+  transform: translateY(calc(-100% - 12px));
+}
+.skipLink:focus-visible { transform: none; }
+
 .header {
   grid-area: header;
   min-width: 0;

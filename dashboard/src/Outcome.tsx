@@ -82,9 +82,7 @@ function Method({ reading }: { reading: Reading }) {
   return (
     <div className={styles.method}>
       <p className="label">How this was read · {m.kind}{reading.redacted.length ? ` · redacted: ${reading.redacted.join(', ')}` : ''}</p>
-      {queries.map((q, i) => (
-        <pre key={i} className={`${styles.query} readout`}>{q}</pre>
-      ))}
+      {queries.map((q, i) => <CopyableQuery key={i} query={q} label={queries.length === 1 ? 'Copy query' : `Copy query ${i + 1}`} />)}
       {m.source ? <p className={`${styles.query} readout`}>{m.source}</p> : null}
       {m.readings ? <pre className={`${styles.query} readout`}>{JSON.stringify(m.readings, null, 1)}</pre> : null}
       <details className={styles.complete} onToggle={(event) => setShowReading(event.currentTarget.open)}>
@@ -97,6 +95,16 @@ function Method({ reading }: { reading: Reading }) {
           </>
         ) : null}
       </details>
+    </div>
+  );
+}
+
+function CopyableQuery({ query, label }: { query: string; label: string }) {
+  const held = useRef<HTMLPreElement>(null);
+  return (
+    <div className={styles.queryBlock}>
+      <div className={styles.queryAction}><CopyButton text={query} selectRef={held} label={label} /></div>
+      <pre ref={held} className={`${styles.query} readout`}>{query}</pre>
     </div>
   );
 }
