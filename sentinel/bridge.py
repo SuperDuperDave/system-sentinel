@@ -80,13 +80,28 @@ _DENIED_MARKERS = (
     "administrator privileges",
 )
 
-# What the bridge wraps around every script it launches on its own. The script's pipeline output is
-# captured into an array; nothing is written to stdout except one JSON document.
+# Redirect PowerShell's error stream into the child script's pipeline before it leaves the question.
+# A formatted ErrorRecord can otherwise reach stderr after a session's closing mark. Enumerating the
+# records here preserves handled errors (which never leave the child scope), keeps data beside a
+# nonterminating error, and gives an error-only answer a nonzero status instead of a false `empty`.
+# Direct console writes by a script still use stderr; those precede the mark on the same handle.
+_COLLECT = (
+    "$__raw = @(& {invocation} 2>&1); "
+    "$__data = [System.Collections.Generic.List[object]]::new(); $__hadError = $false; "
+    "foreach ($__value in $__raw) { "
+    "if ($__value -is [System.Management.Automation.ErrorRecord]) { $__hadError = $true; [Console]::Error.WriteLine($__value.Exception.Message) } "
+    "else { $__data.Add($__value) } }; "
+    "if ($__data.Count -gt 0) { ConvertTo-Json -InputObject $__data.ToArray() -Depth {depth} -Compress -ErrorAction Stop }; "
+    "if ($__hadError -and $__data.Count -eq 0) { $__c = 1 }"
+)
+
+# A one-shot process and a live session use the same collector and the same classifier.
 _PRELUDE = (
     "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; "
-    "$ProgressPreference = 'SilentlyContinue'; "
-    "$__sentinel = @(& { {script} }); "
-    "if ($__sentinel.Count -gt 0) { ConvertTo-Json -InputObject $__sentinel -Depth {depth} -Compress }"
+    "$ProgressPreference = 'SilentlyContinue'; $__c = 0; "
+    "try { " + _COLLECT.replace("{invocation}", "{ {script} }") + " } "
+    "catch { $__c = 1; [Console]::Error.WriteLine($_.Exception.Message) }; "
+    "exit $__c"
 )
 
 
@@ -328,22 +343,23 @@ _SESSION_PRELUDE = "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; $P
 #: isolation between questions comes from: on 2026-09-21 a variable set by one question was not
 #: visible to the next, and the frame's own variables were not visible to either.
 #:
-#: The ``finally`` is what makes the frame closeable: however the script fails — a terminating
-#: error, a cmdlet error, no output at all — the mark is written and the question is answered. The
+# The shared collector folds PowerShell ErrorRecords into this question before the marker is
+# written, so PowerShell's asynchronous error formatting cannot assign them to the next question.
+# The ``finally`` is what makes the frame closeable: however the script fails — a terminating
+# error, a cmdlet error, no output at all — the mark is written and the question is answered. The
 #: mark is fresh for every question, so output that happens to look like a mark cannot close a
 #: frame early and a late line from a question that timed out is recognisable as stale. The catch
-#: writes the message to stderr rather than carrying it on the mark, so the classifier sees exactly
-#: what a launch would see, and ``$__c`` is the returncode it is given: 1 when the script raised,
-#: 0 otherwise. ``$Error`` is deliberately not consulted — it holds errors the script caught and
-#: handled, and reporting those would turn every no-match into a failure.
+# writes the message to stderr rather than carrying it on the mark, so the classifier sees exactly
+# what a launch would see, and ``$__c`` is the returncode it is given: 1 when the script raised or
+# only produced errors, 0 otherwise. ``$Error`` is deliberately not consulted — it holds errors the
+# script caught and handled, and reporting those would turn every no-match into a failure.
 #:
 #: The ``finally`` closes stderr with the same mark before it closes stdout with it, so a question
 #: knows where its own stderr ends instead of pausing after every answer to find out: everything
 #: the script wrote on that stream was written before the mark, and the mark is already on the wire
 #: when the answer arrives.
 _FRAME = (
-    "$__c = 0; try { $__s = @(& ([scriptblock]::Create([Text.Encoding]::Unicode.GetString([Convert]::FromBase64String('{payload}'))))); "
-    "if ($__s.Count -gt 0) { ConvertTo-Json -InputObject $__s -Depth {depth} -Compress } } "
+    "$__c = 0; try { " + _COLLECT.replace("{invocation}", "([scriptblock]::Create([Text.Encoding]::Unicode.GetString([Convert]::FromBase64String('{payload}'))))") + " } "
     "catch { $__c = 1; [Console]::Error.WriteLine($_.Exception.Message) } "
     'finally { [Console]::Error.WriteLine("{mark}"); "{mark}`t$__c" }'
 )

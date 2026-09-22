@@ -11,12 +11,42 @@ import pytest
 
 import sentinel.bridge
 from sentinel import readings  # noqa: F401
-from sentinel.bridge import OUTCOMES, sessions_report
+from sentinel.bridge import OUTCOMES, Bridge, sessions_report
 from sentinel.reading import REGISTRY, take
 from sentinel.readings.health import learn_identity
 from tests.conftest import real_bridge_or_skip
 
 pytestmark = pytest.mark.host
+
+
+@pytest.mark.parametrize("transport", ("one-shot", "session"))
+def test_bridge_error_stream_keeps_failure_distinct_from_empty(transport: str, monkeypatch: pytest.MonkeyPatch):
+    """PowerShell formats errors asynchronously; a question must classify its own ErrorRecords.
+
+    The next question proves that a session did not inherit the preceding question's error.
+    """
+    monkeypatch.setattr(sentinel.bridge, "POOL_SIZE", 0 if transport == "one-shot" else 1)
+    bridge = Bridge.locate()
+    assert bridge.available
+
+    error_only = bridge.run('Write-Error "bridge-probe-error"')
+    assert error_only.outcome == "failed", error_only
+    assert "bridge-probe-error" in (error_only.error or "")
+
+    denied = bridge.run('Write-Error "Access is denied."')
+    assert denied.outcome == "denied", denied
+
+    with_data = bridge.run('Write-Error "bridge-probe-warning"; [pscustomobject]@{Id=7}')
+    assert with_data.outcome == "ok", with_data
+    assert with_data.items == [{"Id": 7}]
+    assert any("bridge-probe-warning" in warning for warning in with_data.warnings)
+
+    handled = bridge.run('try { throw "handled" } catch {}; [pscustomobject]@{Id=8}')
+    assert handled.outcome == "ok", handled
+    assert handled.items == [{"Id": 8}]
+    assert handled.warnings == []
+
+    assert bridge.run("$unused = 1").outcome == "empty"
 
 
 def test_health_answers():
