@@ -42,6 +42,7 @@ export function Stack() {
   const [handoff, setHandoff] = useState<Composed | null>(null);
   const [captures, setCaptures] = useState<Capture[]>([]);
   const [problem, setProblem] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
   const setSession = useApp((s) => s.setSession);
 
   const guard = useCallback(
@@ -77,6 +78,16 @@ export function Stack() {
     void refreshCaptures();
   }, [refresh, refreshPrompts, refreshCaptures]);
 
+  async function refreshVisible() {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      await Promise.all([refresh(), refreshPrompts(), refreshCaptures()]);
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
   const change = (id: string, c: { rank?: number; verbosity?: Verbosity }) => guard(async () => { await patchItem(id, c); await refresh(); });
   const drop = (id: string) => guard(async () => { await removeItem(id); await refresh(); });
   const choose = (change_: { prompt_id?: string | null; system_prompt?: boolean }) => guard(async () => { await patchStack(change_); await refresh(); });
@@ -86,7 +97,9 @@ export function Stack() {
 
   return (
     <section>
-      <Head title="Stack" />
+      <Head title="Stack">
+        <button className={styles.refresh} aria-disabled={refreshing} onClick={() => void refreshVisible()}>{refreshing ? 'Refreshing…' : 'Refresh this view'}</button>
+      </Head>
       <p className={`${styles.state} readout`}>
         {items.length === 0 ? 'Nothing on the stack' : `${items.length} ${items.length === 1 ? 'item' : 'items'}`}
         {stack?.system_prompt && leading ? ` · led by ${leading.name}` : ' · no prompt'}
