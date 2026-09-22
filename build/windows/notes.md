@@ -11,6 +11,14 @@ run has been made, and leave it out when it has not.
 -->
 A stethoscope for a Windows computer. It gathers the record the machine keeps of itself, shows it to a person in one place, and hands it to a local agent as tools. One boundary, three clients: the dashboard on the desk, a phone on your private network, and the agent beside it.
 
+## New in {{VERSION}}
+
+**A crash has a place to start.** Crashes joins unexpected stops, program failures, recoverable kernel reports and dump files. Open a stop to see what Windows recorded, the dump matched to it and the last record before it; follow any event time into the surrounding record.
+
+**The dump can speak for itself.** Opening a file reads bounded structural metadata on demand: a kernel bug check or a minidump's stream directory and recorded exception, system and module facts where accessible. The interpretation comes first, with the exact sampled bytes and offsets in **Raw file readout**. Windows access denials and incomplete files stay visible. This is evidence to investigate, not a cause verdict or full debugger analysis.
+
+**Updates take one action from this version onward.** Choose *Check for updates…* from the tray's version menu. From a source install, run `system-sentinel update`. The tool checks only when asked, verifies the downloaded file before starting it, and preserves the token, stack and prompts. An installed 1.0.1 needs this one manual update before that action becomes available.
+
 ## Install
 
 **By hand.** Download `SystemSentinel.exe` below, put it on a local disk and double-click it. The file is not code-signed, so Windows asks once before running it: either *Windows protected your PC* (click *More info*, then *Run anyway*) or *The publisher could not be verified* (click *Run*). Within a few seconds your browser opens on the dashboard, already signed in, and the mark sits in the system tray. Details in [the install note](https://github.com/SuperDuperDave/system-sentinel/blob/{{TAG}}/docs/DEPLOY.md).
