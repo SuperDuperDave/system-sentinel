@@ -19,6 +19,20 @@
   overflow-wrap: anywhere;
 }
 
+.rawDisclosure { margin-top: 12px; color: var(--body); }
+.rawDisclosure summary { width: fit-content; cursor: pointer; }
+.rawDisclosure pre {
+  max-height: 360px;
+  margin: 10px 0 0;
+  padding: 12px;
+  overflow: auto;
+  overflow-wrap: normal;
+  white-space: pre;
+  background: var(--deep);
+  border-radius: 6px;
+  font-size: 12px;
+}
+
 /* A stop: when it came back, how long it was gone, what it wrote down, what it left on disk. */
 .stopRow {
   grid-template-columns: 62px minmax(0, 1fr);

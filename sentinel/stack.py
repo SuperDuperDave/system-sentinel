@@ -355,6 +355,10 @@ def _item_lines(position: int, item: dict[str, Any]) -> list[str]:
         return lines
     if item.get("verbosity") == "summary" and records is not None:
         lines += _table(records)
+    elif item.get("verbosity") == "summary" and envelope.get("reading") == "dump_header":
+        # The exact bytes remain on the stored reading and in the API. A handoff starts with
+        # the meaning and the file identity; an agent can expand the item to full when needed.
+        lines += _json_block([s for s in envelope.get("sections") or [] if s.get("name") in ("file", "inspection")])
     elif item.get("ids") is not None and records is not None:
         lines += _json_block(records)
     else:

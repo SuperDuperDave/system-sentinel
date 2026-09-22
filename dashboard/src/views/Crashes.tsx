@@ -73,6 +73,13 @@ interface DumpInspection {
   header_status: string;
   architecture?: string | null;
   bugcheck?: { code: string; name: string | null; parameters: string[] };
+  directory_status?: string;
+  streams?: number;
+  thread_count?: number | null;
+  module_count?: number | null;
+  exception?: { thread_id: number; code: string; name: string | null; address: string; access?: { operation: string | null; address: string }; module_at_address?: { name: string | null; version: string | null; base_address: string; basis: string } } | null;
+  system?: { architecture: string | null; windows_version: string; processors: number } | null;
+  modules_read?: number | null;
   limit: string;
 }
 
@@ -284,6 +291,7 @@ function StopDetail({ stop, envelope }: { stop: Stop; envelope: Reading | null }
 function DumpHeaderDetail({ path }: { path: string }) {
   const taken = useReading('dump_header', { path });
   const info = part<DumpInspection>(taken.reading, 'inspection');
+  const raw = taken.reading?.sections.filter((section) => section.class === 'raw') ?? [];
   const rows: [string, ReactNode][] = info ? [
     ['Format', info.format],
     ['Header', info.header_status],
@@ -293,12 +301,33 @@ function DumpHeaderDetail({ path }: { path: string }) {
     rows.push(['In file: bug check', [info.bugcheck.code, info.bugcheck.name].filter(Boolean).join(' · ')]);
     rows.push(['In file: parameters', <Value value={info.bugcheck.parameters} />]);
   }
+  if (info?.directory_status) rows.push(['Stream directory', `${info.directory_status} · ${info.streams ?? 0} listed`]);
+  if (info?.exception) {
+    rows.push(['In file: exception', [info.exception.code, info.exception.name].filter(Boolean).join(' · ')]);
+    rows.push(['Thread · address', `${info.exception.thread_id} · ${info.exception.address}`]);
+    if (info.exception.access) rows.push(['Access', `${info.exception.access.operation ?? 'unknown'} · ${info.exception.access.address}`]);
+    if (info.exception.module_at_address) {
+      const module = info.exception.module_at_address;
+      rows.push(['Address in module', [module.name ?? module.base_address, module.version].filter(Boolean).join(' · ')]);
+      rows.push(['Range match', module.basis]);
+    }
+  }
+  if (info?.system) rows.push(['In file: system', `${info.system.architecture ?? 'unknown architecture'} · Windows ${info.system.windows_version} · ${info.system.processors} processors`]);
+  if (info?.thread_count != null || info?.module_count != null) rows.push(['In file: counts', `${info.thread_count ?? '?'} threads · ${info.module_count ?? '?'} modules`]);
+  if (info?.modules_read != null && info.module_count !== info.modules_read) rows.push(['Module records read', info.modules_read]);
   if (info) rows.push(['Limit', info.limit]);
   return (
     <>
       <p className="label">Inside the dump</p>
-      <OutcomeLine taken={taken} noun="dump header" emptyText="This file is no longer in the dump inventory" />
+      <OutcomeLine taken={taken} noun="dump inspection" emptyText="This file is no longer in the dump inventory" />
       {observed(taken.reading) && info ? <Facts rows={rows} /> : null}
+      {observed(taken.reading) && raw.length > 0 ? (
+        <details className={styles.rawDisclosure}>
+          <summary>Raw file readout</summary>
+          <pre tabIndex={0}>{JSON.stringify(raw, null, 2)}</pre>
+        </details>
+      ) : null}
+      {taken.reading ? <div className={styles.actions}><AddToStack item={{ kind: 'reading', envelope: taken.reading, title: 'Dump inspection', verbosity: 'summary' }} label="Stack this dump inspection" /></div> : null}
     </>
   );
 }

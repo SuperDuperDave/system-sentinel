@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 from sentinel.app import State, create_app
 from sentinel.bridge import BridgeResult
-from sentinel.stack import PRESET_PROMPTS
+from sentinel.stack import PRESET_PROMPTS, _item_lines
 from tests.conftest import FakeBridge, identity_result
 
 TOKEN = "test-token-0123456789"
@@ -61,6 +61,21 @@ def add(client: TestClient, **body) -> dict:
     response = client.post("/api/stack/items", headers=AUTH, json=body)
     assert response.status_code == 201, response.text
     return response.json()
+
+
+def test_dump_handoff_starts_with_interpretation_and_keeps_raw_bytes_available():
+    envelope = {
+        "reading": "dump_header", "params": {}, "asked_at": "2026-09-21T00:00:00Z", "outcome": "ok", "method": {"kind": "powershell"},
+        "sections": [
+            {"name": "file", "class": "raw", "data": {"name": "example.dmp"}},
+            {"name": "header", "class": "raw", "data": {"bytes_hex": "DE AD BE EF"}},
+            {"name": "inspection", "class": "derived", "data": {"format": "stream minidump", "exception": {"code": "0xC0000005"}}},
+        ],
+    }
+    summary = "\n".join(_item_lines(1, {"kind": "reading", "title": "Dump inspection", "reading": envelope, "verbosity": "summary"}))
+    full = "\n".join(_item_lines(1, {"kind": "reading", "title": "Dump inspection", "reading": envelope, "verbosity": "full"}))
+    assert "example.dmp" in summary and "0xC0000005" in summary
+    assert "DE AD BE EF" not in summary and "DE AD BE EF" in full
 
 
 def test_the_stack_starts_empty_with_a_prompt_chosen(client: TestClient):
