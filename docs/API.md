@@ -126,7 +126,7 @@ Only `ok` and `empty` say anything about the machine. Treat the other four as "n
 | `hardware.gpu` | Display adapters and driver | `raw`, `derived` | |
 | `hardware.board` | Board and firmware | `raw`, `derived` | |
 | `hardware.storage` | Disks, volumes, SMART where exposed | `raw`, `derived` | |
-| `hardware.network` | Adapters and connectivity | `raw`, `derived` | |
+| `hardware.network` | Adapters and connectivity | `raw`, `derived`; if Windows cannot assemble IP configuration, the adapter inventory remains observed, a warning names the gap, and each adapter's `ip` is `null` rather than an empty address list | |
 | `drivers` | Driver changes: the most recently dated signed drivers | `drivers` (raw) | `count` (default 30) |
 | `pcie` | The PCIe fabric | `endpoints` (raw), `roots` (raw), `groups` (derived: endpoints sharing a root) | |
 | `power` | Power configuration and transitions | `raw`, `derived` | |

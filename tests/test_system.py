@@ -353,6 +353,21 @@ def test_hardware_network_tells_up_from_disabled():
     assert r.section("raw").data["adapters"][0]["mac_address"]  # carried; the boundary's redaction removes it
 
 
+@pytest.mark.host
+def test_network_keeps_adapter_inventory_when_windows_cannot_assemble_ip_configuration(monkeypatch):
+    # Get-NetIPConfiguration can throw while joining multiple adapters on a Windows host.
+    # The adapter list remains evidence; the missing IP details must be unknown, not empty.
+    monkeypatch.setattr(
+        system_readings,
+        "NETWORK_SCRIPT",
+        "function Get-NetIPConfiguration { [CmdletBinding()] param([switch]$All) throw 'test lookup failure' }\n"
+        + system_readings.NETWORK_SCRIPT,
+    )
+    r = observed(asyncio.run(take("hardware.network", real_bridge_or_skip(), {})))
+    assert any("IP addresses, gateways and DNS were not observed" in warning for warning in r.warnings)
+    assert all(adapter["ip"] is None for adapter in r.section("raw").data["adapters"])
+
+
 # ---------------------------------------------------------------------------
 # drivers, dumps
 # ---------------------------------------------------------------------------

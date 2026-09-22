@@ -49,6 +49,7 @@ export function Signals() {
       {taken.reading && !observed(taken.reading) ? (
         <p className={styles.unobserved}>No input could be observed, so no rule could run. Signals are read from other readings, not from the machine directly.</p>
       ) : null}
+      {head ? <SignalOverview groups={groups} /> : null}
       {inputs.length ? <Inputs inputs={inputs} /> : null}
 
       {head ? (
@@ -66,7 +67,7 @@ export function Signals() {
 /** One class of signal: what the class looks for, then the leads that fired under it. */
 function Group({ cls, signals }: { cls: string; signals: Signal[] }) {
   return (
-    <div className={styles.group}>
+    <div className={styles.group} id={`signal-${cls}`}>
       <h3 className={`${styles.groupTitle} label`}>{cls}</h3>
       <p className={styles.groupWhat}>{WHAT[cls]}</p>
       <RowList
@@ -89,6 +90,36 @@ function Group({ cls, signals }: { cls: string; signals: Signal[] }) {
         )}
       />
     </div>
+  );
+}
+
+/** The five rule families in one scan, with exact counts and anchors to the evidence below. */
+function SignalOverview({ groups }: { groups: readonly (readonly [string, Signal[]])[] }) {
+  const max = Math.max(1, ...groups.map(([, found]) => found.length));
+  const total = groups.reduce((n, [, found]) => n + found.length, 0);
+  return (
+    <section className={styles.overview} aria-labelledby="signal-map-title">
+      <div className={styles.overviewHead}>
+        <div>
+          <p className="label">Pattern map</p>
+          <h2 id="signal-map-title" className="display">Where rules found leads</h2>
+        </div>
+        <p className={styles.overviewNote}>{total ? `${total} leads to inspect.` : 'No rule matched the observed inputs.'} Counts show patterns, not health or severity.</p>
+      </div>
+      <div className={styles.classGrid}>
+        {groups.map(([cls, found], index) => {
+          const contents = (
+            <>
+              <span className={`${styles.classTop} readout`}>{String(index + 1).padStart(2, '0')} / {cls}</span>
+              <strong className={styles.classCount}>{found.length}</strong>
+              <span className={styles.classBar} aria-hidden="true">{found.length ? <span style={{ width: `${(found.length / max) * 100}%` }} /> : null}</span>
+              <span className={`${styles.classAction} readout`}>{found.length ? `Inspect ${found.length === 1 ? 'lead' : 'leads'} ↗` : 'No lead returned'}</span>
+            </>
+          );
+          return found.length ? <a href={`#signal-${cls}`} className={styles.classCard} key={cls}>{contents}</a> : <div className={styles.classCard} key={cls}>{contents}</div>;
+        })}
+      </div>
+    </section>
   );
 }
 
@@ -134,14 +165,18 @@ function momentsIn(evidence: Record<string, unknown>): string[] {
 
 /** What each reading returned when the rules were run over it: a lead is only as observed as its inputs. */
 function Inputs({ inputs }: { inputs: Input[] }) {
+  const answered = inputs.filter((i) => i.outcome === 'ok' || i.outcome === 'empty').length;
   return (
     <div className={styles.inputs}>
-      <p className="label">Inputs</p>
+      <p className="label">Inputs · {answered} of {inputs.length} readings answered{answered < inputs.length ? ' · missing inputs limit these rules' : ''}</p>
       <ul className={styles.inputList}>
         {inputs.map((i) => (
           <li key={i.name} className={`${styles.input} readout`}>
+            <span className={i.outcome === 'ok' || i.outcome === 'empty' ? styles.inputMarkOk : styles.inputMarkLost} aria-hidden="true" />
             <span className={styles.inputName}>{i.name}</span>
-            <span className={i.outcome === 'ok' || i.outcome === 'empty' ? styles.inputOk : styles.inputLost}>{i.outcome}</span>
+            <span className={i.outcome === 'ok' || i.outcome === 'empty' ? styles.inputOk : styles.inputLost}>
+              {i.outcome === 'ok' ? 'answered' : i.outcome === 'empty' ? 'answered · empty' : `not observed · ${i.outcome}`}
+            </span>
           </li>
         ))}
       </ul>

@@ -341,7 +341,15 @@ if ($disks.Count -eq 0) { $warnings += 'Get-PhysicalDisk returned nothing.' }
 NETWORK_SCRIPT = r"""
 $warnings = @()
 $configs = @{}
-foreach ($c in @(Get-NetIPConfiguration -All -ErrorAction SilentlyContinue)) { $configs["$($c.InterfaceIndex)"] = $c }
+$configAnswered = $true
+try {
+    foreach ($c in @(Get-NetIPConfiguration -All -ErrorAction Stop)) { $configs["$($c.InterfaceIndex)"] = $c }
+} catch {
+    # Windows can fail while assembling one NetIPConfiguration object on a host with several
+    # adapters. Keep the adapter inventory and say that the IP portion was not observed.
+    $configAnswered = $false
+    $warnings += 'Get-NetIPConfiguration did not answer: IP addresses, gateways and DNS were not observed.'
+}
 # Get-PnpDevice is asked once for the whole network class, not once per adapter.
 $pnp = @{}
 foreach ($p in @(Get-PnpDevice -Class Net -ErrorAction SilentlyContinue)) { $pnp["$($p.InstanceId)"] = $p }
@@ -373,13 +381,13 @@ $adapters = @(Get-NetAdapter -ErrorAction SilentlyContinue | ForEach-Object {
             file        = $a.DriverFileName
             description = $a.DriverDescription
         }
-        ip = [pscustomobject]@{
+        ip = $(if ($configAnswered -and $c) { [pscustomobject]@{
             ipv4    = @($c.IPv4Address.IPAddress | Where-Object { $_ })
             ipv6    = @($c.IPv6Address.IPAddress | Where-Object { $_ })
             gateway = @($c.IPv4DefaultGateway.NextHop | Where-Object { $_ })
             dns     = @($c.DNSServer.ServerAddresses | Where-Object { $_ })
             dhcp    = $dhcp
-        }
+        } } else { $null })
     }
 })
 if ($adapters.Count -eq 0) { $warnings += 'Get-NetAdapter returned nothing.' }

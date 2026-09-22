@@ -7,6 +7,8 @@
 - A day-by-day visual history in Crashes: Windows' stability index and returned reliability events share a UTC timeline. Selecting a day shows exact event types, the reported index, and the raw records; the same reading can be stacked for an agent.
 
 ### Changed
+- Network adapter inventory stays available when Windows cannot assemble IP configuration; affected `ip` fields are null with a reading warning instead of empty lists that suggest no addresses.
+- Signals opens with a visual five-class lead map and input coverage, with each count linked to its evidence and no health score implied.
 - Machine opens with a visual inventory of four selected components and gauges for processor load and free physical memory; each part leads to its detailed reading, with exact fields still available below. The hardware fingerprint is classified as derived, with its selection rule on the wire. The disk selected by Windows index 0 is labeled disk 0 and exposed as `disk0_model`, rather than being called the boot disk without evidence.
 - The reliability reading now counts returned records by source **and event ID** in its derived daily rollup. The UI and API name informational records, including successful Windows updates, so event volume cannot masquerade as failure volume.
 - The index-fall signal requires adjacent UTC days and carries the event types Windows returned. A missing day no longer assigns an unseen index change to the next returned day.
