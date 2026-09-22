@@ -159,7 +159,7 @@ def test_the_tray_says_what_it_does_and_never_the_token():
     assert TOKEN not in " ".join(labels)
 
 
-def test_checking_for_updates_opens_the_releases_page_and_asks_nothing_itself(monkeypatch: pytest.MonkeyPatch):
+def test_the_manual_release_page_fallback_opens_in_the_browser(monkeypatch: pytest.MonkeyPatch):
     opened: list[str] = []
     monkeypatch.setattr(launcher.webbrowser, "open", opened.append)
     assert launcher.open_releases() == launcher.RELEASES

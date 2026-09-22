@@ -72,11 +72,11 @@ QUIT_TIMEOUT = 20.0
 STARTUP_LINK = "System Sentinel.lnk"
 INSTALLED_NAME = "SystemSentinel.exe"
 LOG_NAME = "launcher.log"
-#: Where a person looks for a newer one. The tool opens this page and asks nothing of it itself:
-#: looking for an update sends nothing about this machine anywhere.
+#: Manual fallback when a release check or install cannot complete.
 RELEASES = "https://github.com/SuperDuperDave/system-sentinel/releases/latest"
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 DETACHED = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+_UPDATE_LOCK = threading.Lock()
 
 #: The trace, on a 64-unit grid, copied from ``dashboard/src/Mark.tsx`` so the tray and the
 #: dashboard draw the same S. Values owned by the identity note.
@@ -361,22 +361,39 @@ def plan(*, frozen: bool, at_home: bool, serving: str | None, installed_version:
 
 
 def install(here: Path, home: Path, tries: int = 12) -> str | None:
-    """Copy this program into the data directory. None when it is there, a sentence when it is not.
+    """Stage the whole program beside its home, then replace it. None on success, a sentence on failure.
 
     A copy that has just been asked to quit can hold its own file for a moment after it has stopped
-    answering, so this keeps trying for a few seconds before it calls the attempt a failure.
+    answering, so the final replace keeps trying. A failed copy leaves the installed file intact.
     """
     home.parent.mkdir(parents=True, exist_ok=True)
+    handle, name = tempfile.mkstemp(prefix=f".{home.name}.", suffix=".installing", dir=home.parent)
+    os.close(handle)
+    staged = Path(name)
     trouble: OSError | None = None
-    for _attempt in range(tries):
-        try:
-            shutil.copy2(here, home)
-            LOG.info("copied the program into %s", home.parent)
-            return None
-        except OSError as exc:
-            trouble = exc
-            time.sleep(1)
-    return f"the program could not be copied into {home.parent}: {trouble}"
+    try:
+        for attempt in range(tries):
+            try:
+                shutil.copy2(here, staged)
+                break
+            except OSError as exc:
+                trouble = exc
+                if attempt + 1 < tries:
+                    time.sleep(1)
+        else:
+            return f"the program could not be copied into {home.parent}: {trouble}"
+        for attempt in range(tries):
+            try:
+                os.replace(staged, home)
+                LOG.info("installed the program in %s", home.parent)
+                return None
+            except OSError as exc:
+                trouble = exc
+                if attempt + 1 < tries:
+                    time.sleep(1)
+        return f"the program could not replace the installed copy in {home.parent}: {trouble}"
+    finally:
+        staged.unlink(missing_ok=True)
 
 
 def start_installed(home: Path) -> str | None:
@@ -453,11 +470,75 @@ def open_dashboard(base: str, token: str, to: str = "", wait: bool = False, answ
 
 
 def open_releases() -> str:
-    """Open the page where a newer one would be. The tool asks nothing of it: whether there is an
-    update is the browser's business, and nothing about this machine goes anywhere to find out."""
+    """Open the release page as a manual fallback."""
     LOG.info("opening the releases page")
     _in_the_browser(RELEASES, RELEASES)
     return RELEASES
+
+
+def start_verified_update(release) -> Path:
+    """Stage a checked release and start it through the installer's existing handoff.
+
+    The running copy stays in place if any check or process start fails. The new executable is
+    still responsible for asking it to quit and proving that the replacement began serving.
+    """
+    from . import update
+
+    if sys.platform != "win32":
+        raise update.UpdateError("installing a Windows release requires Windows")
+    candidate = update.stage(release, data_dir())
+    if file_version(candidate) != release.version:
+        candidate.unlink(missing_ok=True)
+        raise update.UpdateError("the executable's Windows version does not match its release tag")
+    try:
+        subprocess.Popen([str(candidate)], cwd=str(candidate.parent), creationflags=DETACHED | NO_WINDOW, close_fds=True)
+    except OSError as exc:
+        raise update.UpdateError(f"the verified executable could not start: {exc}") from exc
+    LOG.info("started verified release %s from the one-file update cache", release.version)
+    return candidate
+
+
+def _notify_update(tray, text: str) -> None:
+    try:
+        tray.notify(text, "System Sentinel")
+    except (AttributeError, NotImplementedError, OSError):
+        LOG.info(text)
+
+
+def check_for_updates(tray=None) -> None:
+    """One deliberate tray action, off the tray's UI thread; never a background poll."""
+    from . import update
+
+    if not _UPDATE_LOCK.acquire(blocking=False):
+        if tray is not None:
+            _notify_update(tray, "An update check is already running.")
+        return
+    try:
+        try:
+            release = update.latest_release()
+            current = file_version(installed_exe()) or __version__
+            if update.version_parts(release.version) <= update.version_parts(current):
+                message_box(f"System Sentinel {current} is current. The latest published release is {release.version}.")
+                return
+            if not frozen():
+                message_box(f"Release {release.version} is available. This source checkout cannot replace itself; use the release page or run the installed executable's update action.\n\n{release.page}")
+                return
+            if not ask_yes_no(
+                f"System Sentinel {release.version} is available; this computer has {current}.\n\n"
+                "Download the release from GitHub, check its SHA-256 against the published digest and checksum list, then replace the running copy?\n\n"
+                "The access token and machine readings are not sent to GitHub."
+            ):
+                LOG.info("update declined")
+                return
+            if tray is not None:
+                _notify_update(tray, f"Downloading and checking System Sentinel {release.version}…")
+            start_verified_update(release)
+            if tray is not None:
+                _notify_update(tray, f"Verified System Sentinel {release.version}; starting the replacement…")
+        except (update.UpdateError, OSError) as exc:
+            message_box(f"System Sentinel could not update. The running copy was left in place.\n\n{exc}\n\nYou can use {RELEASES} instead.")
+    finally:
+        _UPDATE_LOCK.release()
 
 
 def _in_the_browser(url: str, safe: str, answered: threading.Event | None = None) -> threading.Thread:
@@ -729,8 +810,8 @@ def tray_menu(server: Server | None, base: str, token: str):
     def startup_item(_icon, _item) -> None:
         LOG.info(set_startup(not startup_enabled()))
 
-    def updates_item(_icon, _item) -> None:
-        open_releases()
+    def updates_item(icon, _item) -> None:
+        threading.Thread(target=check_for_updates, args=(icon,), name="sentinel-update", daemon=True).start()
 
     def remove_item(tray, _item) -> None:
         home = data_dir()

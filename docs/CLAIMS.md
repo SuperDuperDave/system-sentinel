@@ -39,7 +39,7 @@ Every claim the page at mainthread.ai/work/system-sentinel/ could make about the
 | A caller receives the real values only by asking for `unredacted` by name | `sentinel/app.py` (`unredacted` query parameter), `sentinel/mcp_server.py` (`unredacted` argument); `tests/test_app.py::test_unredacted_by_name` |
 | Every route that carries machine data and the MCP endpoint require the access token or the session cookie, whose value is derived from the token and is not the token | `sentinel/auth.py` (`TokenMiddleware`); check: `curl -o /dev/null -w "%{http_code}" http://127.0.0.1:8000/api/readings` → `401` |
 | The server binds to localhost unless told otherwise | `sentinel/cli.py` (`serve --host` default `127.0.0.1`) |
-| Nothing leaves the machine unless a person sends it: the handoff is copied to the clipboard, captures are files on disk | `dashboard/src/Copy.tsx`, `sentinel/capture.py` (writes under the data directory; no network) |
+| Machine readings, the handoff, captures and the token are not sent by the updater; handoff is copied to the clipboard and captures are files on disk. A person-triggered update check contacts GitHub for release metadata and an accepted update downloads release assets | `dashboard/src/Copy.tsx`, `sentinel/capture.py`, `sentinel/update.py` |
 
 ## For agents
 
@@ -85,7 +85,7 @@ Every claim the page at mainthread.ai/work/system-sentinel/ could make about the
 
 | Claim | Source or check |
 | --- | --- |
-| Runs on the machine it reads, Windows 10 and 11, no hosted version, no account | `README.md`, `sentinel/cli.py`; check: `grep -rn "urlopen\|requests\|httpx" sentinel/` finds one client, the launcher asking its own server at `http://127.0.0.1` |
+| Runs on the machine it reads, Windows 10 and 11, no hosted version, no account | `README.md`, `sentinel/cli.py`; the user-triggered updater in `sentinel/update.py` is the one external client |
 | One process serves the API, the dashboard and the MCP endpoint on one origin | `sentinel/app.py` (`create_app`: routes, `/mcp`, static) |
 | A test suite: unit tests through a fake bridge, host tests against the real event log | `tests/`; check: `./.venv/bin/python -m pytest` |
 | `system-sentinel check` proves the bridge before anything is asked of it | `sentinel/cli.py` (`_check`) |
@@ -100,7 +100,7 @@ Every claim the page at mainthread.ai/work/system-sentinel/ could make about the
 | Which version is installed is in the file, the way Windows keeps it | `build/windows/build.ps1` (the generated version resource), `sentinel/__init__.py` (`__version__`); check: `(Get-Item SystemSentinel.exe).VersionInfo.ProductVersion` |
 | Which version is answering is on the catalog, so a caller can tell the running process from the file on disk | `sentinel/app.py` (`GET /api/readings`), `dashboard/src/views/Agents.tsx`; check: `curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8000/api/readings` → `version` |
 | The tool removes itself: a confirmation that names what goes and what stays, then Start with Windows off, quit, and the data directory deleted after the process has exited. Nothing of it is left outside that directory but the Startup shortcut it removes | `sentinel/launcher.py` (the confirmation and the detached removal); `docs/DEPLOY.md` ("Removing it") states the same scope by hand |
-| Check for updates opens the releases page in the browser; the tool asks nothing of anything off this machine, here or anywhere | `sentinel/launcher.py` (the same threaded opener the dashboard uses); check: `grep -rn "urlopen\|requests\|httpx" sentinel/` finds one client, the launcher asking its own server at `http://127.0.0.1` |
+| Check for updates asks GitHub for the latest published release when a person chooses the tray action or CLI command. It asks before download and replacement, checks the asset digest against the SHA-256 list and the bytes received, and has no background poll | `sentinel/update.py`, `sentinel/launcher.py`, `sentinel/cli.py`, `tests/test_update.py`; frozen Windows handoff still needs direct host observation before 1.1.0 is released |
 | Every release from 1.0.1 is built by the repository's own workflow and carries a build provenance attestation, beside the SHA-256 list and the digest GitHub computes for each asset | `.github/workflows/`; check: `gh attestation verify SystemSentinel.exe -R SuperDuperDave/system-sentinel`, and `gh release view v1.0.0 --json assets --jq '.assets[].digest'` for the digest GitHub holds |
 | Reaching it from a phone is a transport in front of the token boundary; Tailscale recommended, a tunnel documented | `docs/DEPLOY.md` ("Optional: reach it from your phone") |
 | Reached from a phone over a private network with HTTPS, the API still refusing anything without the token | Observed 2026-09-20: the dashboard opened on a phone over cellular through Tailscale serve (tailnet only, Funnel off), signed in by a one-time code; `GET /api/readings` over the same path answered 401 without the token |

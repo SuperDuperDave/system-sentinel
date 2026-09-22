@@ -39,6 +39,8 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("token", help="print the access token")
     sub.add_parser("check", help="take the health reading and exit 0 only if the bridge answered")
     sub.add_parser("where", help="print the data directory")
+    updater = sub.add_parser("update", help="check the latest published release; --install downloads, verifies and starts it on Windows")
+    updater.add_argument("--install", action="store_true", help="download, verify and start a newer release")
 
     bench = sub.add_parser("bench", help="take every reading against the real bridge and report what each one costs")
     bench.add_argument("--runs", type=int, default=DEFAULT_RUNS, help=f"how many times to take each reading (default {DEFAULT_RUNS})")
@@ -62,6 +64,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "check":
         return _check()
+    if args.command == "update":
+        return _update(args.install)
     if args.command == "bench":
         return _bench(args.runs, args.readings, args.transport, args.as_json, args.out)
     parser.print_help()
@@ -105,6 +109,25 @@ def _check() -> int:
     reading = REGISTRY["health"].take(bridge, {})
     print(json.dumps(reading.to_dict(), indent=1))
     return 0 if reading.observed else 1
+
+
+def _update(install: bool) -> int:
+    from . import launcher, update
+
+    try:
+        release = update.latest_release()
+        current = launcher.file_version(launcher.installed_exe()) or __version__
+        if update.version_parts(release.version) <= update.version_parts(current):
+            print(f"System Sentinel {current} is current; latest published release: {release.version}.")
+            return 0
+        print(f"System Sentinel {release.version} is available; this computer has {current}. {release.page}")
+        if install:
+            launcher.start_verified_update(release)
+            print("The verified file was started; its installer will replace the running copy and reopen the dashboard.")
+        return 0
+    except (update.UpdateError, OSError) as exc:
+        print(f"Update failed; the installed copy was left in place: {exc}", file=sys.stderr)
+        return 1
 
 
 def _bench(runs: int, readings: str, transport: str, as_json: bool, out: str | None) -> int:

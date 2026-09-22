@@ -32,7 +32,7 @@ Two rules keep it honest. Architecture is the agent's to decide and to explain i
 
 ## What was rejected
 
-- **An update check inside the tool.** *Check for updates…* opens the releases page in your browser. Anything else means the tool asking a server off this machine whether it is current, against the one promise it makes.
+- **An automatic update check.** The original tray action opened the releases page. On 2026-09-21 David chose a person-triggered check instead: the tool now contacts GitHub only when asked, with no machine readings or token in the request and no background poll. The download requires a second decision and is verified before the existing installer runs it.
 - **Code signing, for now.** A certificate is a purchase and an identity, and neither is decided. The consequence is stated rather than hidden: Windows asks once before running an unsigned file, and a release is verifiable three ways — the checksum, the digest GitHub computed, and a provenance attestation tying the file to the workflow run that built it ([SECURITY.md](../SECURITY.md#verifying-a-release)).
 - **A separate updater.** The file installs and updates itself. A second program would be another thing to trust, to sign and to remove.
 - **Anything that makes this a service.** No telemetry, no hosted version, no account, no prediction. The deliberate absences are as load-bearing as the features.
