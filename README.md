@@ -27,6 +27,8 @@ Record shows when the returned System log rows cluster and which sources appear 
 Diagnostics takes deeper readings when asked. Memory shows the returned modules, reported slot population and configured speed beside each module's rating; the original Windows fields and derivation stay open below the overview.
 PCIe groups endpoints by the upstream parent Windows returned, so shared links can be inspected in place. The full endpoint and bridge records remain under that map.
 
+Performance keeps a local numeric history of aggregate processor, memory and disk activity, even when no dashboard is open. It samples every minute by default, retains up to 30 days on this computer, and shows gaps explicitly. The Performance view lets you pause collection, change the interval, clear stored history, inspect exact rows, or ask for a fresh snapshot. No background sample is uploaded.
+
 ## What it reads
 
 | Reading | What it is |
@@ -38,6 +40,7 @@ PCIe groups endpoints by the upstream parent Windows returned, so shared links c
 | `system`, `hardware`, `hardware.cpu`, `.gpu`, `.board`, `.storage`, `.network`, `drivers` | The snapshot, the fingerprint and configuration, one subsystem at a time, and driver changes |
 | `pcie`, `power`, `memory`, `constraints` | The PCIe fabric, power configuration and transitions, physical memory, devices present and not working |
 | `reliability` | Windows' reliability related events, including informational entries, and its hourly stability index, rolled up by day and event type |
+| `load`, `performance_history` | A fresh aggregate processor, memory and disk snapshot, and local numeric samples retained across stops with exact rows and a derived range summary |
 | `signals` | Leads across the readings and the recent log: suppressions, gaps, pressure, transitions, mismatches |
 | `health` | Whether the tool can reach Windows at all, and how: the shell it found, a round trip, the decoder, and the live sessions carrying your questions |
 

@@ -235,11 +235,21 @@ def test_the_pool_survives_the_whole_catalog_taken_twice(monkeypatch):
 
     report = sessions_report(bridge)
     assert report["transport"] == "session"
-    assert report["answered"] >= 2 * len(REGISTRY)
+    # performance_history reads the local store rather than crossing the bridge.
+    assert report["answered"] >= 2 * (len(REGISTRY) - 1)
     assert report["alive"] <= report["size"]
     assert report["discarded"].get("died", 0) == 0, report
     assert report["fell_back"] == 0 and report["start_failures"] == 0, f"pool: {report!r}"
     assert len(seen) == len(REGISTRY)
+
+
+def test_aggregate_performance_snapshot_answers_with_numbers_on_windows():
+    bridge = real_bridge_or_skip()
+    reading = asyncio.run(take("load", bridge, {}))
+    assert reading.outcome == "ok", (reading.outcome, reading.error, reading.warnings)
+    snapshot = reading.section("snapshot").data
+    assert any(snapshot[key] is not None for key in ("cpu_percent", "memory_available_mb", "committed_bytes"))
+    assert isinstance(snapshot["at"], str)
 
 
 def _moment(stamp: str) -> datetime:

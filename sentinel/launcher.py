@@ -197,7 +197,7 @@ class Server:
 
         from .app import State, create_app
 
-        self.state = State()
+        self.state = State(collect_performance=True)
         self.state.on_quit = self.quit
         # A windowed exe has no console: leaving logging alone keeps the launcher's own file the
         # story of the launch, and no access log grows for as long as the machine is switched on.

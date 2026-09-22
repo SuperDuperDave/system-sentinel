@@ -1,0 +1,41 @@
+.lede { max-width: 75ch; color: var(--muted); line-height: 1.6; margin: 8px 0 24px; }
+.collection { border: 1px solid var(--rule); background: var(--deep); padding: 20px; margin: 0 0 24px; }
+.collectionTop { display: flex; justify-content: space-between; align-items: start; gap: 16px 28px; }
+.collectionTop p { margin: 0; }
+.collectionState { color: var(--ink); font-size: clamp(18px, 2.2vw, 24px); margin: 6px 0 8px !important; }
+.collectionDetail, .lastAttempt { color: var(--muted); font-size: 12px; }
+.collectionActions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.collectionActions button, .clearArea button, .now button, .scrub button { border: 1px solid var(--rule); padding: 9px 12px; color: var(--ink); min-height: 42px; }
+.collectionActions button:hover, .clearArea button:hover, .now button:hover, .scrub button:hover { background: var(--lit); }
+.collectionActions button:disabled, .clearArea button:disabled, .now button:disabled, .scrub button:disabled { opacity: .5; }
+.collectionActions select { margin-left: 7px; padding: 8px 10px; color: var(--ink); background: var(--deep); border: 1px solid var(--rule); }
+.lastAttempt { margin: 18px 0 0; }
+.controlProblem { color: var(--ink); border-left: 2px solid var(--ink); padding-left: 10px; }
+.windowControls { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: end; margin: 12px 0; }
+.rangeLine { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 18px; color: var(--muted); margin: 22px 0 12px; font-size: 12px; }
+.charts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.trace { min-width: 0; border: 1px solid var(--rule); background: var(--deep); padding: 15px; }
+.traceHead { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 16px; }
+.traceHead h2 { margin: 0 0 4px; color: var(--ink); font-size: 15px; }
+.traceHead p { color: var(--muted); font-size: 11px; margin: 0; }
+.traceHead strong { color: var(--ink); font-size: 17px; font-weight: 500; }
+.trace svg { display: block; width: 100%; height: 100px; overflow: visible; }
+.gridLine { fill: none; stroke: var(--rule); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.dataLine { fill: none; stroke: var(--ink); stroke-width: 1.6; vector-effect: non-scaling-stroke; }
+.cursor { stroke: var(--body); stroke-width: 1; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; }
+.point { fill: var(--ink); }
+.scrub { display: flex; align-items: center; gap: 12px; margin: 14px 0 24px; }
+.scrub label { flex: none; color: var(--muted); }
+.scrub input { flex: 1; min-width: 80px; accent-color: var(--ink); }
+.scrub button { min-height: 36px; padding: 5px 10px; }
+.raw { border-top: 1px solid var(--rule-soft); padding: 10px 0; }
+.raw summary { cursor: pointer; color: var(--body); }
+.raw pre { overflow: auto; max-height: 400px; padding: 12px; background: var(--deep); color: var(--body); font-size: 11px; }
+.noSamples { color: var(--muted); max-width: 74ch; line-height: 1.6; }
+.clearArea { margin: 26px 0; padding-top: 18px; border-top: 1px solid var(--rule); }
+.clearArea p { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.now { border-top: 1px solid var(--rule); padding-top: 24px; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: start; gap: 12px 20px; }
+.now h2 { color: var(--ink); margin: 0 0 6px; font-size: 20px; }
+.now p { color: var(--muted); margin: 0; }
+@media (max-width: 900px) { .charts { grid-template-columns: minmax(0, 1fr); } .trace svg { height: 80px; } }
+@media (max-width: 620px) { .collectionTop { display: block; } .collectionActions { margin-top: 16px; } .collectionActions button { flex: 1; } .scrub { flex-wrap: wrap; } .scrub label { width: 100%; } }

@@ -25,6 +25,7 @@ from . import __version__, capture, readings  # noqa: F401  (readings registers 
 from .auth import LINK_TTL, TokenMiddleware, bearer, clear_session_cookie, code_expiry, code_valid, load_or_create_token, matches, session_cookie
 from .bridge import Bridge, shutdown_sessions
 from .link import qr_svg, reach, sign_in_link
+from .performance import KEEP_DAYS, PerformanceCollector, PerformanceStore
 from .reading import REGISTRY, Reading, take
 from .readings.health import learn_identity
 from .redact import Identity, Redactor
@@ -103,10 +104,15 @@ class PromptChange(BaseModel):
     content: str | None = None
 
 
+class PerformanceCollectionChange(BaseModel):
+    enabled: bool
+    interval_seconds: int = 60
+
+
 class State:
     """What the app knows once: the bridge, the token, the machine's names, the stack it keeps."""
 
-    def __init__(self, bridge: Bridge | None = None, token: str | None = None):
+    def __init__(self, bridge: Bridge | None = None, token: str | None = None, collect_performance: bool = False):
         self.bridge = bridge or Bridge.locate()
         self.token = token or load_or_create_token()
         #: How this process ends when it is asked to. Whoever runs the server sets it — the tray
@@ -121,6 +127,8 @@ class State:
         self.stack = Stack()
         self.prompts = Prompts()
         self.spent_codes: dict[str, float] = {}
+        self.performance_store = PerformanceStore()
+        self.performance_collector = PerformanceCollector(self.bridge, self.performance_store) if collect_performance else None
 
     def is_local(self, request: Request) -> bool:
         """Whether the request came from this machine. A method so a test can say otherwise.
@@ -167,7 +175,7 @@ class State:
 
 
 def create_app(state: State | None = None, mcp: bool = True) -> FastAPI:
-    state = state or State()
+    state = state or State(collect_performance=True)
     mcp_app = None
 
     if mcp:
@@ -178,6 +186,8 @@ def create_app(state: State | None = None, mcp: bool = True) -> FastAPI:
     @contextlib.asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         state.learn()
+        if state.performance_collector is not None:
+            state.performance_collector.start()
         try:
             async with contextlib.AsyncExitStack() as stack:
                 if mcp_app is not None:
@@ -185,6 +195,8 @@ def create_app(state: State | None = None, mcp: bool = True) -> FastAPI:
                     await stack.enter_async_context(mcp_app.router.lifespan_context(mcp_app))
                 yield
         finally:
+            if state.performance_collector is not None:
+                await asyncio.to_thread(state.performance_collector.stop)
             if mcp_app is not None:
                 mcp_app.state.listen.close()
             # The bridge's live sessions are child processes of this one. They end here, however
@@ -328,6 +340,31 @@ def create_app(state: State | None = None, mcp: bool = True) -> FastAPI:
     def catalog() -> dict[str, Any]:
         """Every reading: name, description, classes, parameters, what redaction removes."""
         return {"readings": [spec.to_dict() for spec in REGISTRY.values()], "version": __version__}
+
+    @app.get("/api/performance/collection", tags=["performance"])
+    def performance_collection() -> Response:
+        """Collection is local, on by default, and its last attempt can be inspected without taking a new host reading."""
+        return guarded({"settings": state.performance_store.settings(), "last_attempt": state.performance_store.status(), "retention_days": KEEP_DAYS})
+
+    @app.put("/api/performance/collection", tags=["performance"])
+    def configure_performance(change: PerformanceCollectionChange) -> Response:
+        """Stop or resume background sampling, and choose its cost/precision cadence."""
+        try:
+            settings = state.performance_store.configure(change.enabled, change.interval_seconds)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except (OSError, TimeoutError) as exc:
+            raise HTTPException(status_code=503, detail="Local performance settings are unavailable") from exc
+        return guarded({"settings": settings, "last_attempt": state.performance_store.status(), "retention_days": KEEP_DAYS})
+
+    @app.delete("/api/performance/history", tags=["performance"])
+    def clear_performance() -> Response:
+        """Clear locally kept numeric samples. Future samples resume if collection remains enabled."""
+        try:
+            cleared = state.performance_store.clear()
+        except (OSError, TimeoutError) as exc:
+            raise HTTPException(status_code=503, detail="Local performance history is unavailable") from exc
+        return guarded({"cleared_files": cleared, "settings": state.performance_store.settings()})
 
     @app.get("/api/readings/{name}", tags=["readings"])
     async def reading(name: str, request: Request, unredacted: bool = False) -> Response:

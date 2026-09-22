@@ -57,7 +57,7 @@ Clients that support `subscriptions/listen` can subscribe to `sentinel://handoff
 
 ## The reading
 
-Every reading is one query against the machine, returned in one envelope. The envelope is the contract: a collection failure is distinguishable from no findings, and what the machine said is distinguishable from what the tool concluded.
+Every reading is one request for evidence, returned in one envelope. Most ask Windows through the bridge; `performance_history` reads samples stored locally by the app. The envelope is the contract: a collection failure is distinguishable from no findings, and raw evidence is distinguishable from what the tool computed.
 
 ```json
 {
@@ -88,7 +88,7 @@ Every reading is one query against the machine, returned in one envelope. The en
 | `denied` | Windows refused (access denied, or a log that needs elevation). |
 | `timeout` | The query did not finish within its limit. |
 
-Only `ok` and `empty` say anything about the machine. Treat the other four as "not observed".
+Only `ok` and `empty` say the requested source was observed. For `performance_history`, `empty` means the local store held no samples in that window; it says nothing about what the machine was doing then. Treat the other four as "not observed".
 
 **`sections[].class`** is one of:
 
@@ -99,7 +99,7 @@ Only `ok` and `empty` say anything about the machine. Treat the other four as "n
 | `invariant` | A fact established as stable across readings; do not use for a current inventory that can change. |
 | `inferred` | A lead: a pattern the tool noticed that a person or an agent should investigate. Never a diagnosis. `basis` names the rule. |
 
-**`method`** is how the reading was taken: the kind of bridge and the query text, so the evidence can be reproduced by hand. A reading built from several queries lists them.
+**`method`** is how the reading was taken: a bridge and query text, or a local source for stored history. A reading built from several queries lists them.
 
 **`warnings`** are error records PowerShell emitted while still producing output: a sub-query that failed inside a reading that otherwise answered.
 
@@ -133,9 +133,13 @@ Only `ok` and `empty` say anything about the machine. Treat the other four as "n
 | `memory` | Physical memory and stability signals | `raw`, `derived` | |
 | `constraints` | Configured limits and their sources | `raw`, `derived` | |
 | `reliability` | Windows' reliability related events, including informational entries such as successful updates, and its hourly stability index | `records` (raw), `stability` (raw), `days` (derived: per UTC day the last and lowest reported index, and returned records by source and event ID) | `days` (default 30, 1 to 366) |
+| `load` | One fresh numeric-only aggregate processor, memory and physical-disk snapshot; an unavailable counter stays null | `snapshot` (raw) | |
+| `performance_history` | Stored local samples, including gaps across sleep, shutdown or collection failure; it does not infer what happened inside a gap | `samples` (raw), `shape` (derived: per-metric min/median/peak and first/last sample), `collection` (raw settings and last attempt) | `hours` (default 24, 1 to 48), `end` (ISO timestamp with offset; blank for now) |
 | `signals` | Forensic signals across the readings and the recent log | `signals` (inferred: suppressions, gaps, pressure, transitions, mismatches; `basis` names the inputs) | |
 
 `GET /api/readings/{name}` takes the reading. Parameters are query parameters; a name the reading does not take is refused with `422` rather than ignored, so a misspelled parameter cannot read the wrong evidence with a clean outcome. Heavy readings (`dump_header`, `hardware.*`, `pcie`, `power`, `memory`, `reliability`, `signals`) are loaded on demand by the dashboard.
+
+The app samples `load` in the background by default at 60-second intervals whether a dashboard is open or not. `GET /api/performance/collection` reports `settings` (`enabled`, `interval_seconds`, `config_error`), `last_attempt` (`at`, `outcome`, `took_ms`) and `retention_days`. `PUT /api/performance/collection` accepts `{"enabled": false, "interval_seconds": 60}` to pause; set `enabled` true to resume and choose an interval from 60 to 600 seconds. `DELETE /api/performance/history` removes all retained sample day files and resets the last-attempt status without changing the enabled setting. All three routes require the same authentication as readings. Stored rows under the local data directory's `performance/` folder are JSONL with UTC timestamps and numeric fields only, bounded to 30 calendar days and 512 KB per day. A malformed line is skipped with a reading warning; failure to read the store gives `unavailable`, not an empty history. No sampling data is uploaded.
 
 `dump_header` opens only a file already found in the Windows dump inventory. It reads the first 96 bytes and returns them in hex with the offsets of interpreted fields. `PAGE`/`DU64` yields the recorded 64-bit kernel bug check and parameters. `MDMP` yields its 32-byte header and up to 128 directory entries (1,536 bytes), plus bounded fixed exception and system metadata, a thread count and up to 128 module records with at most 512 UTF-16 bytes per module name. Every sampled fixed record and its file offset is in the raw sections; module names are returned as text so the normal path redaction applies. The derived `inspection` names the exception, system and any loaded module range containing the exception address. A range match locates code; it does not establish a cause. The Crashes detail shows the interpretation first, with the raw readout in place; a stacked dump starts with the interpretation and keeps the raw sections available when expanded to full. Directory entries that point outside the file, a changing file, a zero-byte file, a missing sample and a directory over the limit are reported explicitly. `empty` means the path is no longer inventoried; `denied` means Windows listed it but refused to open it. A normal process may encounter denial under `C:\Windows\Minidump`. This structural read does **not** validate the whole file, unwind a stack, read module contents or memory streams, or identify a cause. No debugger runs and no symbols are fetched. Microsoft documents the [DUMP_HEADER64 fields](https://microsoft.github.io/windows-docs-rs/doc/windows/Win32/System/Diagnostics/Debug/struct.DUMP_HEADER64.html), [MINIDUMP_HEADER](https://learn.microsoft.com/en-us/windows/win32/api/minidumpapiset/ns-minidumpapiset-minidump_header), [stream directory](https://learn.microsoft.com/en-us/windows/win32/api/minidumpapiset/ns-minidumpapiset-minidump_directory), [module list](https://learn.microsoft.com/en-us/windows/win32/api/minidumpapiset/ns-minidumpapiset-minidump_module_list), and [DumpChk's fuller validation](https://learn.microsoft.com/en-us/windows-hardware/drivers/debugger/dumpchk).
 

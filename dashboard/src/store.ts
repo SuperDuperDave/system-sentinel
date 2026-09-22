@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-export type ViewId = 'record' | 'errors' | 'crashes' | 'machine' | 'diagnostics' | 'signals' | 'stack' | 'agents';
+export type ViewId = 'record' | 'errors' | 'crashes' | 'machine' | 'performance' | 'diagnostics' | 'signals' | 'stack' | 'agents';
 
 /** The views, in the order the nav shows them. The studio page copies these names; change them there too. */
 export type ViewGroup = 'Evidence' | 'Interpret' | 'Carry';
@@ -10,6 +10,7 @@ export const VIEWS: { id: ViewId; label: string; group: ViewGroup }[] = [
   { id: 'errors', label: 'Hardware errors', group: 'Evidence' },
   { id: 'crashes', label: 'Crashes', group: 'Evidence' },
   { id: 'machine', label: 'Machine', group: 'Evidence' },
+  { id: 'performance', label: 'Performance', group: 'Evidence' },
   { id: 'diagnostics', label: 'Diagnostics', group: 'Interpret' },
   { id: 'signals', label: 'Signals', group: 'Interpret' },
   { id: 'stack', label: 'Stack', group: 'Carry' },

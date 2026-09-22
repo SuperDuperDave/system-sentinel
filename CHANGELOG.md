@@ -3,6 +3,7 @@
 ## [Unreleased] - 2026-09-22
 
 ### Added
+- Continuous local performance history: one elected collector per data home keeps numeric-only aggregate processor, memory and disk samples across stops. The default interval is one minute, configurable to ten minutes; daily JSONL is capped and kept up to 30 days. A pause switch, clear action and last-attempt status are authenticated controls. `load` takes a fresh snapshot; `performance_history` gives agents exact rows and a derived window summary. The Performance view charts the returned samples with unconnected gaps, a keyboard-operable sample inspector, raw JSON and a window held before an investigation moment.
 - A grouped, left-aligned navigation rail with distinct line icons and a phone-sized strip that keeps each view's name visible.
 - A day-by-day visual history in Crashes: Windows' stability index and returned reliability events share a UTC timeline. Selecting a day shows exact event types, the reported index, and the raw records; the same reading can be stacked for an agent.
 - Dashboard addresses now remember the selected view and an investigation moment. Refresh, copied links and browser back/forward return to the right screen; links to sections that load after a reading answer land at the section, and view changes focus the new title.

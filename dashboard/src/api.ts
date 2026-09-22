@@ -20,7 +20,7 @@ export interface Reading<T = unknown> {
   took_ms: number;
   outcome: Outcome;
   /** One query, several, or (for an inferred reading) the readings it drew on and what each answered. */
-  method: { kind: string; query?: string; queries?: string[]; readings?: unknown };
+  method: { kind: string; query?: string; queries?: string[]; readings?: unknown; source?: string };
   count: number | null;
   sections: Section<T>[];
   error: { kind: string; detail: string } | null;
@@ -55,6 +55,12 @@ export interface CatalogEntry {
 export interface Catalog {
   readings: CatalogEntry[];
   version: string;
+}
+
+export interface PerformanceCollection {
+  settings: { enabled: boolean; interval_seconds: number; config_error: boolean };
+  last_attempt: { at: string | null; outcome: string; took_ms: number | null };
+  retention_days: number;
 }
 
 /**
@@ -118,6 +124,20 @@ export function take<T = unknown>(name: string, params: Record<string, ParamValu
 
 export function catalog(): Promise<Catalog> {
   return request<Catalog>('/api/readings');
+}
+
+export function performanceCollection(): Promise<PerformanceCollection> {
+  return request<PerformanceCollection>('/api/performance/collection');
+}
+
+export function setPerformanceCollection(enabled: boolean, interval_seconds: number): Promise<PerformanceCollection> {
+  return request<PerformanceCollection>('/api/performance/collection', {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled, interval_seconds }),
+  });
+}
+
+export function clearPerformanceHistory(): Promise<{ cleared_files: number }> {
+  return request<{ cleared_files: number }>('/api/performance/history', { method: 'DELETE' });
 }
 
 /** Exchange the token for the session cookie. Resolves false when the token is wrong. */

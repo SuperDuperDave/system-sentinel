@@ -9,6 +9,7 @@ import { Record } from './views/Record';
 import { Errors } from './views/Errors';
 import { Crashes } from './views/Crashes';
 import { Machine } from './views/Machine';
+import { Performance } from './views/Performance';
 import { Diagnostics } from './views/Diagnostics';
 import { Signals } from './views/Signals';
 import { Stack } from './views/Stack';
@@ -20,6 +21,7 @@ const VIEW_COMPONENTS: { [K in ViewId]: () => ReactElement } = {
   errors: Errors,
   crashes: Crashes,
   machine: Machine,
+  performance: Performance,
   diagnostics: Diagnostics,
   signals: Signals,
   stack: Stack,

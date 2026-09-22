@@ -80,6 +80,7 @@ function Method({ reading }: { reading: Reading }) {
       {queries.map((q, i) => (
         <pre key={i} className={`${styles.query} readout`}>{q}</pre>
       ))}
+      {m.source ? <p className={`${styles.query} readout`}>{m.source}</p> : null}
       {m.readings ? <pre className={`${styles.query} readout`}>{JSON.stringify(m.readings, null, 1)}</pre> : null}
     </div>
   );
