@@ -35,6 +35,7 @@ function Log() {
   const [levels, setLevels] = useState<Levels>('errors');
   const [count, setCount] = useState(50);
   const [span, setSpan] = useState<Span>('recent');
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const boot = span === 'boot';
   const taken = useReading<EventRecord[]>(
     'events',
@@ -46,7 +47,12 @@ function Log() {
     <section>
       <div className={styles.head}>
         <h1 className={`${styles.title} display`}>Record</h1>
-        <div className={styles.controls} role="group" aria-label="Which records">
+        <button className={styles.filterToggle} onClick={() => setFiltersOpen((open) => !open)} aria-expanded={filtersOpen} aria-controls="record-controls">
+          <span className="readout">Window</span>
+          <span className={styles.filterValue}>{levels === 'errors' ? 'Critical and error' : 'Every level'} · {boot ? 'Since boot' : `Last ${count}`}</span>
+          <span className={styles.filterChevron} aria-hidden="true">⌄</span>
+        </button>
+        <div className={`${styles.controls} ${filtersOpen ? '' : styles.controlsClosed}`} id="record-controls" role="group" aria-label="Which records">
           <Segmented
             value={levels}
             onChange={setLevels}
