@@ -211,7 +211,7 @@ An item:
 | `GET /api/prompts` | The prompt library: `{ "prompts": [ { "id", "name", "description", "content", "builtin" }, ... ] }`; six presets to start |
 | `POST /api/prompts`, `PATCH /api/prompts/{id}`, `DELETE /api/prompts/{id}` | Yours to add, edit and delete, presets included; a deleted preset stays deleted |
 
-The composed text is what the dashboard copies to the clipboard. An agent reads the same text and needs no clipboard.
+The composed text is what the dashboard copies to the clipboard or downloads as a Markdown file. An agent reads the same text and needs no clipboard.
 
 ## Captures
 

@@ -22,6 +22,7 @@
 - The dashboard now distinguishes a failed connection from a rejected access token. A fresh page waits for the cheap catalog check, offers a focused retry when the service cannot answer, and reserves the wrong-token message for an actual 401 response.
 - Reading outcome lines now use singular words for one returned item, including one dump file, record, sample, driver or signal.
 - Every reading's Method panel now offers the complete JSON response that the dashboard received, with default redaction and the method, outcome, warnings, and all evidence sections intact. It renders only when opened and can be copied in one action, with manual selection when browser clipboard access is unavailable.
+- Stack can download its composed handoff as a Markdown file beside Copy; both actions use the same already returned, redacted text.
 - Reading section headers now explain what `raw`, `derived`, `invariant` and `inferred` mean in place, with a brief description and an expandable explanation for people learning how to judge the evidence.
 - Record now leads with a plain-language question and a clearer sampled time-and-source panel, then opens a more legible exact row with its complete returned JSON. The tool's Field Instrument refinement increases the base reading sizes and keyboard focus visibility while keeping the same source and raw evidence paths.
 - The source basis shown with decoded stops and faults now describes the event-manifest mapping without a fixed observation date in product copy.

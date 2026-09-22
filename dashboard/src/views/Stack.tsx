@@ -304,7 +304,7 @@ function PromptForm({ initial, onSave, onCancel }: { initial: Fields; onSave: (f
   );
 }
 
-/** The composed text, as the agent reads it. One action: take it with you. */
+/** The composed text, as the agent reads it: copy or save the same returned handoff. */
 function Handoff({ handoff }: { handoff: Composed | null }) {
   const preview = useRef<HTMLPreElement>(null);
   if (!handoff) return <p className={`${styles.empty} readout`}>Composing…</p>;
@@ -315,6 +315,7 @@ function Handoff({ handoff }: { handoff: Composed | null }) {
         {handoff.redacted.length ? ` · redacted: ${handoff.redacted.join(', ')}` : ''}
         <span className={styles.spacer} />
         <CopyButton text={handoff.text} selectRef={preview} />
+        <button className={`${styles.action} ${styles.saveHandoff}`} onClick={() => saveBlob('system-sentinel-handoff.md', new Blob([handoff.text], { type: 'text/markdown;charset=utf-8' }))}>Download handoff</button>
       </p>
       <pre className={`${styles.preview} readout`} ref={preview} tabIndex={0} role="region" aria-label="The composed handoff">{handoff.text}</pre>
     </>
