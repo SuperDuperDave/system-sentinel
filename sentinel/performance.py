@@ -348,6 +348,8 @@ class PerformanceCollector:
                 continue
             try:
                 result, row, warnings = sample(self.bridge)
+                if self._stop.is_set():
+                    break  # a cancelled observation is not the machine's last sample status
                 if result.observed and row is not None:
                     row["cadence_seconds"] = settings["interval_seconds"]
                     self.store.append(row)
@@ -356,6 +358,8 @@ class PerformanceCollector:
                     outcome = "empty" if result.observed else result.outcome
                 self.store.record_status(outcome, result.took_ms)
             except (OSError, TimeoutError, ValueError):
+                if self._stop.is_set():
+                    break
                 LOG.warning("performance collection could not record a sample")
                 try:
                     self.store.record_status("failed")

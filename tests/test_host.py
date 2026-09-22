@@ -6,8 +6,12 @@ envelope and that the outcome is one the machine can answer with.
 
 import asyncio
 import base64
+import sys
 import threading
+import time
+import uuid
 from datetime import UTC, datetime, timedelta
+from pathlib import Path, PureWindowsPath
 
 import pytest
 
@@ -136,6 +140,57 @@ def test_a_session_finishing_start_after_shutdown_does_not_serve_a_reading(monke
             depth=2,
         )
     assert gone.outcome == "ok" and gone.items == [{"Alive": False}], gone
+
+
+def test_final_shutdown_ends_a_running_one_shot_on_the_windows_host(monkeypatch):
+    bridge = real_bridge_or_skip()
+    monkeypatch.setattr(sentinel.bridge, "POOL_SIZE", 0)
+    location = bridge.run("[pscustomobject]@{ Temp = $env:TEMP }", timeout=15)
+    assert location.outcome == "ok" and location.items and location.items[0]["Temp"], location
+    marker = PureWindowsPath(location.items[0]["Temp"]) / f"system-sentinel-child-{uuid.uuid4().hex}.pid"
+    if sys.platform == "win32":
+        local_marker = Path(marker)
+    else:
+        parts = marker.parts
+        if not parts[0][1:3] == ":\\":
+            pytest.skip("the Windows temp directory is not on a mounted drive")
+        local_marker = Path("/mnt") / parts[0][0].lower()
+        for part in parts[1:]:
+            local_marker /= part
+    literal = str(marker).replace("'", "''")
+    script = f"Set-Content -LiteralPath '{literal}' -Value $PID -NoNewline -Encoding Ascii; Start-Sleep -Seconds 60; [pscustomobject]@{{ Done = $true }}"
+    results, errors = [], []
+    windows_pid = None
+
+    def ask():
+        try:
+            results.append(bridge.run(script, timeout=65))
+        except BaseException as exc:
+            errors.append(exc)
+
+    worker = threading.Thread(target=ask, daemon=True)
+    worker.start()
+    try:
+        deadline = time.monotonic() + 15
+        while not local_marker.exists() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert local_marker.exists(), "the synthetic one-shot child did not record its PID"
+        windows_pid = int(local_marker.read_text(encoding="ascii").strip())
+        sentinel.bridge.shutdown_sessions()
+        worker.join(5)
+        assert not worker.is_alive() and errors == [], errors
+        assert len(results) == 1 and results[0].outcome == "unavailable", results
+        assert results[0].error == "the bridge is shutting down"
+        sentinel.bridge.reset_sessions(0)
+        gone = bridge.run(f"[pscustomobject]@{{ Alive = [bool](Get-Process -Id {windows_pid} -ErrorAction SilentlyContinue) }}", timeout=15)
+        assert gone.outcome == "ok" and gone.items == [{"Alive": False}], gone
+    finally:
+        sentinel.bridge.shutdown_sessions()
+        worker.join(5)
+        if windows_pid is not None:
+            sentinel.bridge.reset_sessions(0)
+            bridge.run(f"Stop-Process -Id {windows_pid} -Force -ErrorAction SilentlyContinue; [pscustomobject]@{{ Checked = $true }}", timeout=15)
+        local_marker.unlink(missing_ok=True)
 
 
 @pytest.mark.parametrize("transport", ("one-shot", "session"))

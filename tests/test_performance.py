@@ -7,6 +7,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 import time
 from datetime import UTC, datetime, timedelta
 
@@ -173,6 +174,36 @@ def test_one_writer_respects_the_switch_across_processes_and_releases_its_lock(t
         second.stop()
     assert second.start() is True
     second.stop()
+
+
+def test_stopping_during_a_sample_does_not_save_a_false_bridge_failure(tmp_path, monkeypatch):
+    import sentinel.performance as performance
+
+    monkeypatch.setattr(performance, "MIN_INTERVAL", 1)
+    store = PerformanceStore(tmp_path / "performance")
+    store.configure(True, 1)
+    entered, release = threading.Event(), threading.Event()
+
+    class HeldBridge:
+        def run(self, script, *, timeout):
+            entered.set()
+            assert release.wait(10)
+            return BridgeResult("unavailable", error="the bridge is shutting down")
+
+    collector = PerformanceCollector(HeldBridge(), store)
+    assert collector.start()
+    stopper = threading.Thread(target=collector.stop, daemon=True)
+    try:
+        assert entered.wait(10)
+        stopper.start()
+        assert collector._stop.wait(10)
+    finally:
+        release.set()
+        if stopper.ident is not None:
+            stopper.join(10)
+        collector.stop()
+    assert not stopper.is_alive()
+    assert store.status()["outcome"] == "not_started"
 
 
 def test_authenticated_routes_expose_stop_resume_and_clear_without_a_new_host_query(private_home):

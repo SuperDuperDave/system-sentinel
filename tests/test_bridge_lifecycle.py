@@ -4,6 +4,8 @@ from contextlib import contextmanager, nullcontext
 from io import BytesIO
 from threading import Event, Thread
 
+import pytest
+
 import sentinel.bridge as bridge_module
 from sentinel.bridge import Bridge, BridgeResult, Session
 
@@ -224,22 +226,120 @@ def test_final_shutdown_queued_behind_reset_stays_final(monkeypatch):
     monkeypatch.setattr(bridge_module, "POOL_SIZE", 1)
     pool = bridge_module._pool_for(bridge)
     assert pool is not None
-    closing, release = Event(), Event()
+    closing, release, final_started = Event(), Event(), Event()
 
     def held_close():
         closing.set()
         assert release.wait(10)
 
     monkeypatch.setattr(pool, "shutdown", held_close)
+
+    def final_shutdown():
+        final_started.set()
+        bridge_module.shutdown_sessions()
+
     reset = Thread(target=bridge_module.reset_sessions, daemon=True)
     reset.start()
     try:
         assert closing.wait(10)
-        final = Thread(target=bridge_module.shutdown_sessions, daemon=True)
+        final = Thread(target=final_shutdown, daemon=True)
         final.start()
+        assert final_started.wait(10)
+        final.join(0.2)
+        assert final.is_alive(), "final shutdown must wait until the reset closes old children"
     finally:
         release.set()
         reset.join(10)
     final.join(10)
     assert not reset.is_alive() and not final.is_alive()
     assert bridge_module._pool_for(bridge) is None
+
+
+def test_final_shutdown_kills_a_running_one_shot(monkeypatch):
+    running, killed = Event(), Event()
+    launches, results, errors = [], [], []
+
+    class Process:
+        def __init__(self, cmd, **kwargs):
+            self.returncode = None
+            launches.append(cmd)
+
+        def poll(self):
+            return self.returncode
+
+        def communicate(self, input=None, timeout=None):
+            running.set()
+            assert killed.wait(10), "the running one-shot child was not stopped"
+            return b"", b""
+
+        def kill(self):
+            self.returncode = 1
+            killed.set()
+
+    monkeypatch.setattr(bridge_module, "POOL_SIZE", 0)
+    monkeypatch.setattr(bridge_module, "_launch_slot", lambda timeout: nullcontext())
+    monkeypatch.setattr(bridge_module, "_POPEN", Process)
+    bridge = Bridge(exe="controlled-powershell", cwd=None)
+
+    def ask():
+        try:
+            results.append(bridge.run("the running question"))
+        except BaseException as exc:
+            errors.append(exc)
+
+    worker = Thread(target=ask, daemon=True)
+    worker.start()
+    try:
+        assert running.wait(10)
+        bridge_module.shutdown_sessions()
+    finally:
+        worker.join(10)
+    assert not worker.is_alive() and errors == []
+    assert len(launches) == 1 and killed.is_set()
+    assert len(results) == 1 and results[0].outcome == "unavailable"
+    assert results[0].error == "the bridge is shutting down"
+    assert bridge.run("a later question").outcome == "unavailable" and len(launches) == 1
+
+
+def test_final_shutdown_breaks_a_session_launch_slot_wait(monkeypatch, tmp_path):
+    if bridge_module.sys.platform == "win32":
+        pytest.skip("the cross-process launch slot is specific to WSL")
+    import fcntl
+
+    monkeypatch.setenv("TMPDIR", str(tmp_path))
+    monkeypatch.setattr(bridge_module, "WSL_LAUNCH_SLOTS", 1)
+    monkeypatch.setattr(bridge_module, "POOL_SIZE", 1)
+    monkeypatch.setattr(bridge_module, "_POPEN", lambda *args, **kwargs: pytest.fail("shutdown launched a child"))
+    held = (tmp_path / "system-sentinel-launch-0.lock").open("w")
+    fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    attempted = Event()
+    original_flock = fcntl.flock
+
+    def observed_flock(handle, operation):
+        if operation & fcntl.LOCK_NB:
+            attempted.set()
+        return original_flock(handle, operation)
+
+    monkeypatch.setattr(fcntl, "flock", observed_flock)
+    bridge = Bridge(exe="controlled-powershell", cwd=None)
+    results, errors = [], []
+
+    def ask():
+        try:
+            results.append(bridge.run("a queued question", timeout=5))
+        except BaseException as exc:
+            errors.append(exc)
+
+    worker = Thread(target=ask, daemon=True)
+    worker.start()
+    try:
+        assert attempted.wait(5), "the question did not reach the occupied launch slot"
+        bridge_module.shutdown_sessions()
+        worker.join(1)
+        assert not worker.is_alive(), "shutdown left the launch-slot wait running"
+    finally:
+        original_flock(held, fcntl.LOCK_UN)
+        held.close()
+        worker.join(5)
+    assert errors == [] and len(results) == 1 and results[0].outcome == "unavailable"
+    assert results[0].error == "the bridge is shutting down"

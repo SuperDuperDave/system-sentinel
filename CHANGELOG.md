@@ -24,6 +24,7 @@
 
 ### Changed
 - Final app shutdown closes the PowerShell session pool and refuses later bridge questions without launching another process. Intentional benchmark and test resets explicitly reopen the pool. Tray quit gives in-flight readings the server's grace period before lifespan closes sessions; a reading still running then returns unavailable instead of starting another process.
+- Final shutdown also interrupts PowerShell children that are still starting or answering through the one-shot transport, including a launch waiting for WSL's shared slot. A cancelled performance sample does not replace the last completed sample status with a shutdown artifact.
 - Live PowerShell startup failures keep a bounded WSL interop reason when its signature reaches stderr before the first probe can close. The health report does not expose the raw startup text.
 - A PowerShell session that finishes starting after its pool shuts down is retired before it can serve a reading. A session closed between checkout and the next write can fall back to one-shot during an intentional pool reset; final app shutdown refuses the fallback. Shutdown accounting remains consistent in both races.
 - Exact large integers survive the dashboard, agent responses, event stream, stack handoffs and new captures. Integers outside JavaScript's safe range are sent as decimal strings after redaction, keeping adjacent 64-bit timestamps and record identifiers distinct while internal collection and calculations retain integer values. Existing saved files remain intact.

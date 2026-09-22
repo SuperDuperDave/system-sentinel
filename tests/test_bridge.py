@@ -52,11 +52,21 @@ def test_long_query_preserves_unicode_through_either_transport(bridge: Bridge):
 def test_one_shot_argv_is_constant_and_complete_script_travels_on_stdin(monkeypatch):
     requests = []
 
-    def run(cmd, **kwargs):
-        requests.append((cmd, kwargs))
-        return subprocess.CompletedProcess(cmd, 0, stdout=b'[{"ok":true}]', stderr=b"")
+    class Process:
+        returncode = 0
 
-    monkeypatch.setattr(sentinel.bridge.subprocess, "run", run)
+        def __init__(self, cmd, **kwargs):
+            self.command = cmd
+            self.options = kwargs
+
+        def communicate(self, input, timeout):
+            requests.append((self.command, self.options, input, timeout))
+            return b'[{"ok":true}]', b""
+
+        def poll(self):
+            return self.returncode
+
+    monkeypatch.setattr(sentinel.bridge, "_POPEN", Process)
     bridge = Bridge(exe="synthetic-powershell")
     scripts = ("[pscustomobject]@{ok=$true}", "# " + "x" * 30000 + "\n[pscustomobject]@{text='café 雪 🧪'}")
     for script in scripts:
@@ -65,12 +75,11 @@ def test_one_shot_argv_is_constant_and_complete_script_travels_on_stdin(monkeypa
     assert sum(len(arg) + 1 for arg in requests[1][0]) < 4096
     bootstrap = base64.b64decode(requests[0][0][-1]).decode("utf-16le")
     assert "[Console]::In.ReadToEnd()" in bootstrap
-    for script, (_, options) in zip(scripts, requests, strict=True):
-        payload = options["input"]
+    for script, (_, options, payload, timeout) in zip(scripts, requests, strict=True):
         assert isinstance(payload, bytes) and payload.isascii()
         decoded = base64.b64decode(payload).decode("utf-16le")
         assert script in decoded and "-Depth 9" in decoded
-        assert options["timeout"] == 3 and options["capture_output"] is True
+        assert timeout == 3 and options["stdin"] == options["stdout"] == options["stderr"] == subprocess.PIPE
 
 
 def test_empty_is_a_finding_not_a_failure(bridge: Bridge):

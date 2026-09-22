@@ -36,6 +36,7 @@ import sys
 import threading
 import time
 import uuid
+import weakref
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -123,6 +124,10 @@ class SlotTimeout(Exception):
     ``unavailable`` rather than waited for without end."""
 
 
+class BridgeStopping(Exception):
+    """Final process shutdown has begun; no new PowerShell child may start."""
+
+
 class SessionStartFailed(Exception):
     """A live session could not be started, or would not answer its first question. The question
     goes to the one-shot transport; never lose a reading because a session would not start."""
@@ -163,6 +168,9 @@ def _launch_slot(timeout: float) -> Iterator[None]:
     deadline = time.monotonic() + timeout
     try:
         while held is None:
+            with _POOLS_LOCK:
+                if _SESSIONS_ENDED:
+                    raise BridgeStopping("the bridge is shutting down")
             for handle in handles:
                 try:
                     fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -296,6 +304,8 @@ class Bridge:
                     if _SESSIONS_ENDED:
                         return BridgeResult("unavailable", error="the bridge is shutting down")
                 return self._run_once(script, timeout=timeout, depth=depth)
+        except BridgeStopping:
+            return BridgeResult("unavailable", error="the bridge is shutting down")
         except SlotTimeout as exc:
             return BridgeResult("unavailable", error=str(exc))
 
@@ -310,22 +320,35 @@ class Bridge:
 
         started = time.perf_counter()
         try:
-            proc = subprocess.run(
-                cmd,
-                input=encoded,
-                capture_output=True,
-                timeout=timeout,
-                cwd=self.cwd,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-            )
-        except subprocess.TimeoutExpired:
-            return BridgeResult("timeout", took_ms=_ms(started), error=f"no answer within {timeout:g}s")
+            proc = _spawn_child(cmd, self.cwd)
+        except BridgeStopping:
+            return BridgeResult("unavailable", took_ms=_ms(started), error="the bridge is shutting down")
         except OSError as exc:
             return BridgeResult("unavailable", took_ms=_ms(started), error=f"powershell.exe did not start: {exc}")
 
+        timed_out = False
+        try:
+            try:
+                stdout, stderr = proc.communicate(input=encoded, timeout=timeout)
+            except subprocess.TimeoutExpired:
+                timed_out = True
+                _end_child(proc)
+                stdout = stderr = b""
+            except BaseException:
+                _end_child(proc)
+                raise
+        finally:
+            with _POOLS_LOCK:
+                interrupted = _CHILDREN.get(proc, False)
+                if proc.poll() is not None:
+                    _CHILDREN.pop(proc, None)
+        if interrupted:
+            return BridgeResult("unavailable", took_ms=_ms(started), error="the bridge is shutting down")
+        if timed_out:
+            return BridgeResult("timeout", took_ms=_ms(started), error=f"no answer within {timeout:g}s")
         return classify(
-            proc.stdout.decode("utf-8", errors="replace"),
-            proc.stderr.decode("utf-8", errors="replace"),
+            stdout.decode("utf-8", errors="replace"),
+            stderr.decode("utf-8", errors="replace"),
             proc.returncode,
             _ms(started),
         )
@@ -458,32 +481,41 @@ class Session:
         cmd = [bridge.exe, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", "-"]
         try:
             with _launch_slot(timeout):
-                proc = subprocess.Popen(
-                    cmd,
-                    stdin=subprocess.PIPE,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    cwd=bridge.cwd,
-                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-                )
-                session = cls(proc)
+                proc = _spawn_child(cmd, bridge.cwd)
+                session: Session | None = None
                 try:
+                    session = cls(proc)
                     session._write(_SESSION_PRELUDE)
                     probe = session.ask("", timeout=min(timeout, SESSION_START_TIMEOUT), depth=1)
                 except SessionLost as exc:
+                    assert session is not None
                     session.discard("start")
-                    reason = "wsl_interop" if session._startup_interop.is_set() else "probe_lost"
+                    if _child_was_interrupted(proc):
+                        reason = "shutdown"
+                    else:
+                        reason = "wsl_interop" if session._startup_interop.is_set() else "probe_lost"
                     raise SessionStartFailed(reason, f"the session ended before it answered: {exc}") from exc
+                except BaseException:
+                    if session is None:
+                        _end_child(proc)
+                    else:
+                        session.discard("start")
+                    raise
                 if not probe.observed:
                     session.discard("start")
                     interop = session._startup_interop.is_set() or bool(probe.error and _wsl_interop_error(probe.error))
-                    reason = "wsl_interop" if interop else f"probe_{probe.outcome}"
+                    if _child_was_interrupted(proc):
+                        reason = "shutdown"
+                    else:
+                        reason = "wsl_interop" if interop else f"probe_{probe.outcome}"
                     raise SessionStartFailed(reason, f"the session did not answer its first question: {probe.outcome}")
                 session.answered = 0  # the probe is nobody's question
                 session._watching_startup = False
                 return session
         except SlotTimeout as exc:
             raise SessionStartFailed("launch_slot_timeout", str(exc)) from exc
+        except BridgeStopping as exc:
+            raise SessionStartFailed("shutdown", str(exc)) from exc
         except OSError as exc:
             raise SessionStartFailed("process_start_error", f"powershell.exe did not start: {exc}") from exc
 
@@ -770,9 +802,10 @@ class Pool:
         except SessionStartFailed as exc:
             with self._lock:
                 self._starting -= 1
-                self.start_failures += 1
-                self.last_start_failure = exc.reason
-                self._cooldown_until = time.monotonic() + START_RETRY_SECONDS
+                if exc.reason != "shutdown" and not self._closed:
+                    self.start_failures += 1
+                    self.last_start_failure = exc.reason
+                    self._cooldown_until = time.monotonic() + START_RETRY_SECONDS
                 self._lock.notify()
             return None
         with self._lock:
@@ -839,6 +872,49 @@ POOL_SIZE = _pool_size()
 _POOLS: dict[Bridge, Pool] = {}
 _POOLS_LOCK = threading.Lock()
 _SESSIONS_ENDED = False
+_POPEN = subprocess.Popen
+# Weak keys retain an interruption marker until the owning thread is done with its process.
+_CHILDREN: weakref.WeakKeyDictionary[subprocess.Popen[bytes], bool] = weakref.WeakKeyDictionary()
+
+
+def _spawn_child(cmd: list[str], cwd: str | None) -> subprocess.Popen[bytes]:
+    """Start and record one bridge child atomically with final shutdown."""
+    with _POOLS_LOCK:
+        if _SESSIONS_ENDED:
+            raise BridgeStopping("the bridge is shutting down")
+        proc: subprocess.Popen[bytes] = _POPEN(
+            cmd,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            cwd=cwd,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        _CHILDREN[proc] = False
+        return proc
+
+
+def _child_was_interrupted(proc: subprocess.Popen[bytes]) -> bool:
+    with _POOLS_LOCK:
+        return _CHILDREN.get(proc, False)
+
+
+def _end_child(proc: subprocess.Popen[bytes]) -> None:
+    """Stop a child whose owning question failed, with a bounded pipe drain."""
+    if proc.poll() is None:
+        try:
+            proc.kill()
+        except OSError:
+            pass
+    try:
+        proc.communicate(timeout=2)
+    except (OSError, subprocess.TimeoutExpired):
+        for pipe in (proc.stdin, proc.stdout, proc.stderr):
+            try:
+                if pipe is not None:
+                    pipe.close()
+            except OSError:
+                pass
 
 
 def _pool_for(bridge: Bridge) -> Pool | None:
@@ -868,8 +944,20 @@ def shutdown_sessions() -> None:
         _SESSIONS_ENDED = True
         pools = list(_POOLS.values())
         _POOLS.clear()
+        running = [proc for proc in _CHILDREN if proc.poll() is None]
+        for proc in running:
+            _CHILDREN[proc] = True
+    # Close pools first so their session shutdowns are counted before killed readers return.
     for pool in pools:
         pool.shutdown()
+    # A session still proving startup and a one-shot already answering are not in a pool's list.
+    # Their owning threads drain the pipes; shutdown only needs to stop the child promptly.
+    for proc in running:
+        if proc.poll() is None:
+            try:
+                proc.kill()
+            except OSError:
+                pass
 
 
 def reset_sessions(size: int | None = None) -> None:
