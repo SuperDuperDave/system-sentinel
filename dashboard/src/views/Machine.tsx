@@ -162,7 +162,7 @@ export function Machine() {
       ))}
 
       <h2 className={`${styles.part} display`} id="drivers">
-        Driver changes
+        Current signed drivers
       </h2>
       <OutcomeLine taken={drivers} noun="drivers" singular="driver" emptyText="Windows listed no signed drivers" />
       {observed(drivers.reading) && driverRows.length ? (
@@ -170,8 +170,8 @@ export function Machine() {
           <Section
             title="Most recently dated first"
             cls="raw"
-            note="a driver that changed next to a run of errors is the reason to look here"
-            controls={drivers.reading ? <AddToStack item={{ kind: 'reading', envelope: drivers.reading, title: 'Driver changes' }} /> : null}
+            note="This is each driver's authored date, not when Windows installed it on this machine."
+            controls={drivers.reading ? <AddToStack item={{ kind: 'reading', envelope: drivers.reading, title: 'Current signed drivers' }} /> : null}
           />
           {byDay(driverRows, (d) => local(d.driver_date)).map(([label, rows]) => (
             <div key={label}>

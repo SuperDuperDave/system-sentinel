@@ -710,7 +710,8 @@ function DumpStreamDirectory({ status, declared, streams }: { status: string; de
 function FaultDetail({ fault, at: moment, envelope, rawRecords }: { fault: Fault; at?: string; envelope: Reading | null; rawRecords: EventRecord[] }) {
   const f = fault.fields;
   const rawIds = fault.report?.records?.length ? fault.report.records : [fault.RecordId];
-  const matchingRaw = rawRecords.filter((record) => rawIds.includes(record.RecordId));
+  const log = fault.Log ?? 'Application';
+  const matchingRaw = rawRecords.filter((record) => record.Log === log && rawIds.includes(record.RecordId));
   const missingRaw = rawIds.filter((id) => !matchingRaw.some((record) => record.RecordId === id));
   const rows: [string, ReactNode][] = [];
   if (fault.report) {
@@ -753,7 +754,7 @@ function FaultDetail({ fault, at: moment, envelope, rawRecords }: { fault: Fault
         <MomentLink at={moment} />
         {envelope ? (
           <AddToStack
-            item={{ kind: 'selection', envelope, ids: fault.report?.records ?? [fault.RecordId], title: `${KIND_WORD[fault.kind] ?? fault.kind} at ${moment ?? 'an unknown time'}` }}
+            item={{ kind: 'selection', envelope, ids: rawIds.map((id) => `${log}:${id}`), title: `${KIND_WORD[fault.kind] ?? fault.kind} at ${moment ?? 'an unknown time'}` }}
             label="Stack this record"
           />
         ) : null}
@@ -828,7 +829,11 @@ function fieldSource(field: string | undefined, index: number | undefined): stri
 /** Every record the stop was composed from, so stacking it hands over the evidence and not the conclusion. */
 function recordIds(stop: Stop): RecordId[] {
   const { start, power_41, eventlog_6008, wer_1001, report } = stop.records;
-  return [start, power_41, eventlog_6008, wer_1001, ...(report ?? [])].filter((id): id is RecordId => typeof id === 'number' || typeof id === 'string');
+  const system = [start, power_41, eventlog_6008, wer_1001]
+    .filter((id): id is RecordId => typeof id === 'number' || typeof id === 'string')
+    .map((id) => `System:${id}`);
+  const application = (report ?? []).map((id) => `Application:${id}`);
+  return [...new Set([...system, ...application])];
 }
 
 function appOf(fault: Fault): string {

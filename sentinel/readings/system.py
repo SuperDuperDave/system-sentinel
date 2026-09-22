@@ -832,7 +832,7 @@ register(
 register(
     Spec(
         name="drivers",
-        description="Driver changes: the signed drivers the machine is running, most recently dated first, so a new or replaced driver next to a run of errors is visible.",
+        description="Current signed driver inventory, sorted by the driver's authored date. That date is not when the driver was installed on this machine.",
         classes=("raw",),
         take=take_drivers,
         params=(Param("count", "int", 30, "How many of the most recently dated drivers."),),

@@ -59,7 +59,7 @@ Clients that support `subscriptions/listen` can subscribe to `sentinel://handoff
 
 Evidence uses JSON numbers for integers from `-9007199254740991` through `9007199254740991`. Integers outside that range travel as **canonical decimal strings**, for example `"134100000000000001"`, so JavaScript clients preserve every digit. This applies consistently to API responses, MCP text and structured answers, SSE frames, the CLI health reading, JSON evidence in composed handoffs and newly created capture JSON members. Booleans, floating-point measurements and existing strings keep their types; this convention does not make a floating-point measurement exact.
 
-A large `RecordId` and every derived reference to it use the same string form. Keep it as an identifier or parse it with an arbitrary-precision integer type; do not pass it through JavaScript `Number`. Stack selections accept these decimal-string record IDs. Machine collection, derivation, stream cursor comparisons and existing Python persistence retain exact integers. Redaction runs before this output conversion, including for sensitive numeric fields.
+A large `RecordId` and every derived reference to it use the same string form. Keep it as an identifier or parse it with an arbitrary-precision integer type; do not pass it through JavaScript `Number`. Stack selections accept these decimal-string record IDs when unique within the reading; a reading spanning logs also accepts `Log:RecordId` (for example `System:42`) to identify one exact record. Machine collection, derivation, stream cursor comparisons and existing Python persistence retain exact integers. Redaction runs before this output conversion, including for sensitive numeric fields.
 
 Existing stack evidence is converted when served or exported, without rewriting its saved file. Older capture ZIPs remain as originally written. Values already rounded by another client cannot be reconstructed; take a fresh reading when the exact value is needed. The current representation preserves exact values across clients but does not preserve a distinct JSON numeric type outside the safe range.
 
@@ -137,7 +137,7 @@ A collector that returns one structured object must actually return exactly one 
 | `hardware.board` | Board and firmware | `raw`, `derived` | |
 | `hardware.storage` | Disks, volumes, SMART where exposed | `raw`, `derived` | |
 | `hardware.network` | Adapters and connectivity | `raw`, `derived`; if Windows cannot assemble IP configuration, the adapter inventory remains observed, a warning names the gap, and each adapter's `ip` is `null` rather than an empty address list | |
-| `drivers` | Driver changes: the most recently dated signed drivers | `drivers` (raw) | `count` (default 30) |
+| `drivers` | Current signed driver inventory, sorted by the driver's authored date rather than installation time | `drivers` (raw) | `count` (default 30) |
 | `pcie` | The PCIe fabric | `endpoints` (raw), `roots` (raw), `groups` (derived: endpoints sharing a root) | |
 | `power` | Power configuration and transitions | `raw`, `derived` | |
 | `memory` | Physical memory and stability signals | `raw`, `derived` | |
@@ -239,7 +239,7 @@ An item:
 
 | Field | Meaning |
 | --- | --- |
-| `kind` | `reading` (a whole reading), `selection` (some records chosen by numeric `RecordId`, or signals chosen by string signal ID, in `ids`), `note` (text the person or agent wrote) |
+| `kind` | `reading` (a whole reading), `selection` (some records chosen by `RecordId` or `Log:RecordId`, or signals chosen by string signal ID, in `ids`), `note` (text the person or agent wrote) |
 | `rank` | 1 first to 5 last in the composed handoff; default 3 |
 | `verbosity` | `summary` (a compact record table, or signal identity, title, summary and source readings) or `full` (selected records or signals with evidence as JSON); default `full` |
 | `reading` | The envelope, kept as it was at the moment of adding: its `asked_at`, `outcome` and `method` are the item's provenance |
@@ -248,7 +248,7 @@ An item:
 | --- | --- |
 | `GET /api/stack` | `{ "items": [...], "prompt_id": "...", "system_prompt": true }` |
 | `PATCH /api/stack` | Change `prompt_id` or `system_prompt` |
-| `POST /api/stack/items` | Add an item. Body: `kind`, optional `title`, `rank`, `verbosity`, `ids`, `note`, and either `take: { "name": "...", "params": {...} }` (the server takes the reading now) or `envelope: { ... }` (a reading the caller already holds, stored as given). A selection needs distinct IDs present in that reading: numeric `RecordId` values for records, string `id` values for signals. The composed signal selection keeps the signal section's basis and, at full verbosity, its rule evidence. Adding the same reading with the same parameters and the same `ids` twice is refused with `409`; a later `signals` observation, whole or selected, is a new snapshot. |
+| `POST /api/stack/items` | Add an item. Body: `kind`, optional `title`, `rank`, `verbosity`, `ids`, `note`, and either `take: { "name": "...", "params": {...} }` (the server takes the reading now) or `envelope: { ... }` (a reading the caller already holds, stored as given). A selection needs distinct IDs present in that reading: `RecordId` for a record unique within the reading, `Log:RecordId` when records from different logs share a number, or string `id` for a signal. Ambiguous numeric selections are refused; an older saved selection with that ambiguity renders a warning instead of including both logs' records. The composed signal selection keeps the signal section's basis and, at full verbosity, its rule evidence. Adding the same reading with the same parameters and the same `ids` twice is refused with `409`; a later `signals` observation, whole or selected, is a new snapshot. |
 | `PATCH /api/stack/items/{id}` | Change `rank`, `verbosity` or `title` |
 | `DELETE /api/stack/items/{id}` | Remove one |
 | `DELETE /api/stack` | Clear |

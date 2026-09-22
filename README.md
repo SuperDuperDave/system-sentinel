@@ -38,7 +38,7 @@ Opening Performance also asks Windows which processes are using CPU time, privat
 | `crash`, `faults` | The stops the machine did not plan, each composed into one: when it stopped as Windows estimated it, when it came back, the bug check if one was written, the dump that belongs to it and the last System record before the next start — and, while it kept running, the programs that crashed or hung and the kernel's own live reports |
 | `whea`, `storms` | Hardware-error records with their binary payload decoded beside them, and the same records over a window in wall-clock buckets, grouped by signature, with burst and acceleration flags |
 | `dumps`, `dump_header` | The crash-dump inventory and an on-demand structural readout of one file: its exact header bytes, kernel bug check or minidump streams and exception, with the raw readout available in Crashes |
-| `system`, `hardware`, `hardware.cpu`, `.gpu`, `.board`, `.storage`, `.network`, `drivers` | The snapshot, the fingerprint and configuration, one subsystem at a time, and driver changes |
+| `system`, `hardware`, `hardware.cpu`, `.gpu`, `.board`, `.storage`, `.network`, `drivers` | The snapshot, the fingerprint and configuration, one subsystem at a time, and the current signed driver inventory |
 | `pcie`, `power`, `memory`, `constraints` | The PCIe fabric, power configuration and transitions, physical memory, devices present and not working |
 | `reliability` | Windows' reliability related events, including informational entries, and its hourly stability index, rolled up by day and event type |
 | `load`, `performance_history` | A fresh aggregate processor, memory and disk snapshot, and local numeric samples retained across stops with exact rows and a derived range summary |

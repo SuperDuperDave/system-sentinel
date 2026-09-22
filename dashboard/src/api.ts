@@ -33,6 +33,8 @@ export interface Reading<T = unknown> {
 /** One record from a Windows log, as the events and record readings return it. */
 export interface EventRecord {
   RecordId: RecordId;
+  /** Present when a reading combines records from several Windows logs. */
+  Log?: string;
   Id: number;
   /** Added to newer readings so a positional property layout can be identified explicitly. */
   ProviderId?: string | null;

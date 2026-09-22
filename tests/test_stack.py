@@ -143,6 +143,31 @@ def test_a_selection_cannot_name_evidence_absent_from_its_reading(client: TestCl
         assert response.status_code == 422, response.text
 
 
+def test_cross_log_record_selection_needs_the_log_when_ids_collide(client: TestClient):
+    envelope = {
+        "reading": "crash", "params": {}, "asked_at": "2026-09-21T00:00:00Z", "outcome": "ok", "method": {"kind": "powershell"},
+        "sections": [{"name": "records", "class": "raw", "data": [
+            {"Log": "System", "RecordId": 42, "TimeCreated": "2026-09-20T18:00:00Z", "Message": "System evidence"},
+            {"Log": "Application", "RecordId": 42, "TimeCreated": "2026-09-20T18:00:01Z", "Message": "Application evidence"},
+        ]}],
+    }
+    ambiguous = client.post("/api/stack/items", headers=AUTH, json={"kind": "selection", "ids": [42], "envelope": envelope})
+    assert ambiguous.status_code == 422 and "ambiguous" in ambiguous.json()["detail"]
+
+    item = add(client, kind="selection", ids=["System:42"], envelope=envelope)
+    assert item["ids"] == ["System:42"]
+    rendered = client.get("/api/stack/composed", headers=AUTH).json()["text"]
+    assert "System evidence" in rendered and "Application evidence" not in rendered
+
+    # A selection saved before qualified IDs existed must not silently gain the other log's row.
+    legacy = "\n".join(_item_lines(1, {"kind": "selection", "title": "Older selection", "ids": [42], "reading": envelope}))
+    assert "ambiguous" in legacy and "System evidence" not in legacy and "Application evidence" not in legacy
+
+    unambiguous = {**envelope, "sections": [{"name": "records", "class": "raw", "data": [envelope["sections"][0]["data"][0]]}]}
+    duplicate = client.post("/api/stack/items", headers=AUTH, json={"kind": "selection", "ids": [42, "System:42"], "envelope": unambiguous})
+    assert duplicate.status_code == 422 and "distinct" in duplicate.json()["detail"]
+
+
 def test_notes_are_never_duplicates(client: TestClient):
     add(client, kind="note", note="it froze twice this evening")
     add(client, kind="note", note="it froze twice this evening")

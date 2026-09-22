@@ -72,7 +72,7 @@ class Item:
         # Signals are snapshots: a later scan can report different leads or evidence even
         # with the same parameters. Keep it distinct without duplicating one held scan.
         moment = self.reading.get("asked_at") if self.reading.get("reading") == "signals" else None
-        return (self.reading.get("reading"), json.dumps(self.reading.get("params"), sort_keys=True), tuple(sorted(self.ids or ())), moment)
+        return (self.reading.get("reading"), json.dumps(self.reading.get("params"), sort_keys=True), tuple(sorted(str(i) for i in self.ids or ())), moment)
 
 
 def item_from_dict(raw: dict[str, Any]) -> Item:
@@ -357,9 +357,12 @@ def _item_lines(position: int, item: dict[str, Any]) -> list[str]:
             selected_signals = {**selected_signals, "data": [s for s in selected_signals["data"] if s.get("id") in wanted]}
             lines.append(f"- selected: {len(selected_signals['data'])} of the reading's signals, by signal id")
         elif records is not None:
-            wanted = set(item["ids"])
-            records = [r for r in records if _record_id(r) in wanted]
-            lines.append(f"- selected: {len(records)} of the reading's records, by RecordId")
+            records, ambiguous = _selected_records(records, item["ids"])
+            if ambiguous:
+                lines += ["", "The saved record selection is ambiguous across logs. Select these records again using Log:RecordId.", ""]
+                return lines
+            selector = "log and RecordId" if any(isinstance(i, str) and ":" in i for i in item["ids"]) else "RecordId"
+            lines.append(f"- selected: {len(records)} of the reading's records, by {selector}")
         else:
             lines += ["", "The selected evidence is unavailable in the stored reading.", ""]
             return lines
@@ -434,11 +437,35 @@ def _selection_ids(envelope: dict[str, Any], raw: Any) -> list[int | str]:
         records = _records(envelope)
         if records is None or not raw or any(type(i) not in (int, str) for i in raw):
             raise ValueError("a record selection needs the RecordIds from its reading")
-        try:
-            ids = [int(i) for i in raw]
-        except (TypeError, ValueError, OverflowError) as exc:
-            raise ValueError("a record selection needs the RecordIds from its reading") from exc
-        available = {_record_id(r) for r in records}
+        by_number: dict[int, int] = {}
+        canonical_by_number: dict[int, int | str] = {}
+        qualified = set()
+        for record in records:
+            number = _record_id(record)
+            if number is not None:
+                by_number[number] = by_number.get(number, 0) + 1
+                key = _qualified_record_id(record)
+                canonical_by_number[number] = key if key is not None else number
+                if key is not None:
+                    qualified.add(key)
+        ids = []
+        for value in raw:
+            if isinstance(value, str) and ":" in value:
+                if value not in qualified:
+                    raise ValueError("selection ids must be present in the reading")
+                ids.append(value)
+                continue
+            try:
+                number = int(value)
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise ValueError("a record selection needs the RecordIds from its reading") from exc
+            if by_number.get(number, 0) > 1:
+                raise ValueError(f"RecordId {number} is ambiguous across logs; use Log:RecordId")
+            ids.append(number)
+        available = set(qualified) | {number for number, count in by_number.items() if count == 1}
+        canonical = [value if isinstance(value, str) else canonical_by_number.get(value, value) for value in ids]
+        if len(canonical) != len(set(canonical)):
+            raise ValueError("selection ids must name distinct records in the reading")
     if len(ids) != len(set(ids)) or not set(ids) <= available:
         raise ValueError("selection ids must be distinct and present in the reading")
     return ids
@@ -449,6 +476,32 @@ def _record_id(record: dict[str, Any]) -> int | None:
         return int(record.get("RecordId"))
     except (TypeError, ValueError):
         return None
+
+
+def _qualified_record_id(record: dict[str, Any]) -> str | None:
+    log, number = record.get("Log"), _record_id(record)
+    return f"{log}:{number}" if isinstance(log, str) and log and number is not None else None
+
+
+def _selected_records(records: list[dict[str, Any]], ids: list[int | str]) -> tuple[list[dict[str, Any]], bool]:
+    """Resolve saved selections without silently widening an old numeric ID across logs."""
+    numbers: dict[int, int] = {}
+    for record in records:
+        number = _record_id(record)
+        if number is not None:
+            numbers[number] = numbers.get(number, 0) + 1
+    numeric, qualified = set(), set()
+    for value in ids:
+        if isinstance(value, str) and ":" in value:
+            qualified.add(value)
+        else:
+            try:
+                numeric.add(int(value))
+            except (TypeError, ValueError, OverflowError):
+                continue
+    if any(numbers.get(number, 0) > 1 for number in numeric):
+        return [], True
+    return [record for record in records if _record_id(record) in numeric or _qualified_record_id(record) in qualified], False
 
 
 def _table(records: list[dict[str, Any]]) -> list[str]:

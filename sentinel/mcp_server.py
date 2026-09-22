@@ -217,7 +217,7 @@ STACK_TOOLS: dict[str, RouteTool] = {
                     "title": {"type": "string", "description": "Optional; one is derived from the reading otherwise."},
                     "rank": {"type": "integer", "description": "1 first to 5 last in the composed handoff.", "default": 3},
                     "verbosity": {"type": "string", "enum": ["summary", "full"], "default": "full"},
-                    "ids": {"type": "array", "items": {"type": ["integer", "string"]}, "description": "For a selection: RecordIds for log records, or signal ids for a signals reading. Each id must be present in the reading."},
+                    "ids": {"type": "array", "items": {"type": ["integer", "string"]}, "description": "For a selection: RecordIds unique within the reading, Log:RecordId for an exact record across logs, or signal ids for a signals reading. Each id must be present in the reading."},
                     "note": {"type": "string", "description": "For a note: the text, carried into the handoff verbatim."},
                     "take": {
                         "type": "object",
