@@ -202,8 +202,8 @@ def create_app(state: State | None = None, mcp: bool = True) -> FastAPI:
                 await asyncio.to_thread(state.performance_collector.stop)
             if mcp_app is not None:
                 mcp_app.state.listen.close()
-            # The bridge's live sessions are child processes of this one. They end here, however
-            # this server ends: a powershell.exe left behind by a stopped server would be exactly
+            # Normal lifespan shutdown ends the bridge's child sessions; atexit covers exits that
+            # skip this lifespan. A powershell.exe left behind by a stopped server would be exactly
             # the kind of thing this tool exists to make visible.
             await asyncio.to_thread(shutdown_sessions)
 

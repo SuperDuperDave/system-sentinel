@@ -89,7 +89,7 @@ def test_a_session_finishing_start_after_shutdown_does_not_serve_a_reading(monke
 
     def one_shot(self, question, *, timeout, depth):
         one_shot_calls.append(question)
-        return real_one_shot(self, question, timeout=timeout, depth=depth)
+        raise AssertionError("final shutdown must not start another PowerShell process")
 
     monkeypatch.setattr(Session, "start", classmethod(held_start))
     monkeypatch.setattr(Bridge, "_run_once", one_shot)
@@ -116,8 +116,8 @@ def test_a_session_finishing_start_after_shutdown_does_not_serve_a_reading(monke
                 session.discard("test cleanup")
     assert not worker.is_alive() and not errors, errors
     assert len(late) == 1 and len(results) == 1
-    assert results[0].outcome == "ok" and results[0].items == [{"Answer": "after-shutdown"}], results[0]
-    assert one_shot_calls == [script]
+    assert results[0].outcome == "unavailable" and results[0].error == "the bridge is shutting down", results[0]
+    assert one_shot_calls == []
     session = late[0]
     assert session.discarded == "shutdown" and session.answered == 1  # only the PID probe ran there
     assert session._proc.poll() is not None and all(not reader.is_alive() for reader in session._readers)
@@ -128,7 +128,8 @@ def test_a_session_finishing_start_after_shutdown_does_not_serve_a_reading(monke
     # On WSL the Popen PID is a relay PID; ask Windows about the actual session PID as well.
     windows_pid = windows_pids[0]
     with monkeypatch.context() as once:
-        once.setattr(sentinel.bridge, "POOL_SIZE", 0)
+        once.setattr(Bridge, "_run_once", real_one_shot)
+        sentinel.bridge.reset_sessions(0)  # explicit test reset for the independent PID check
         gone = bridge.run(
             f"[pscustomobject]@{{ Alive = [bool](Get-Process -Id {windows_pid} -ErrorAction SilentlyContinue) }}",
             timeout=20,

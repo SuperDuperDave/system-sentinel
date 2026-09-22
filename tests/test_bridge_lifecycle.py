@@ -1,6 +1,6 @@
 """Portable bridge lifecycle races, without starting an executable or querying Windows."""
 
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from io import BytesIO
 from threading import Event, Thread
 
@@ -152,3 +152,94 @@ def test_shutdown_between_checkout_and_write_falls_back(monkeypatch):
     stats = pool.stats()
     assert stats["alive"] == stats["idle"] == 0
     assert stats["discarded"] == {"shutdown": 1} and stats["fell_back"] == 1
+
+
+def test_final_shutdown_does_not_start_a_new_session(monkeypatch):
+    bridge = Bridge(exe="controlled-powershell", cwd=None)
+    launches = []
+
+    def launch(self, script, *, timeout, depth):
+        launches.append(script)
+        raise AssertionError("a final shutdown must not launch one-shot PowerShell")
+
+    def forbidden_start(cls, located, *, timeout):
+        raise AssertionError("a final shutdown must not start a new session")
+
+    monkeypatch.setattr(bridge_module, "POOL_SIZE", 1)
+    monkeypatch.setattr(bridge_module, "_launch_slot", lambda timeout: nullcontext())
+    monkeypatch.setattr(Bridge, "_run_once", launch)
+    monkeypatch.setattr(Session, "start", classmethod(forbidden_start))
+    bridge_module.shutdown_sessions()
+    result = bridge.run("pending question")
+    assert result.outcome == "unavailable" and result.error == "the bridge is shutting down"
+    assert launches == []
+    assert bridge_module._pool_for(bridge) is None
+    assert bridge_module.sessions_report(bridge)["transport"] == "stopped"
+
+
+def test_explicit_reset_reopens_a_terminal_session_pool(monkeypatch):
+    bridge = Bridge(exe="controlled-powershell", cwd=None)
+    monkeypatch.setattr(bridge_module, "POOL_SIZE", 1)
+    bridge_module.shutdown_sessions()
+    assert bridge_module._pool_for(bridge) is None
+    bridge_module.reset_sessions(2)
+    pool = bridge_module._pool_for(bridge)
+    assert pool is not None and pool.size == bridge_module.POOL_SIZE == 2
+    assert bridge_module.sessions_report(bridge)["transport"] == "session"
+
+
+def test_shutdown_during_a_launch_slot_wait_refuses_the_launch(monkeypatch):
+    bridge = Bridge(exe="controlled-powershell", cwd=None)
+    waiting, release = Event(), Event()
+    launches, results = [], []
+
+    @contextmanager
+    def held_slot(timeout):
+        waiting.set()
+        assert release.wait(10)
+        yield
+
+    def launch(self, script, *, timeout, depth):
+        launches.append(script)
+        raise AssertionError("shutdown must stop a queued one-shot launch")
+
+    monkeypatch.setattr(bridge_module, "POOL_SIZE", 0)
+    monkeypatch.setattr(bridge_module, "_launch_slot", held_slot)
+    monkeypatch.setattr(Bridge, "_run_once", launch)
+    worker = Thread(target=lambda: results.append(bridge.run("waiting question")), daemon=True)
+    worker.start()
+    try:
+        assert waiting.wait(10)
+        bridge_module.shutdown_sessions()
+    finally:
+        release.set()
+        worker.join(10)
+    assert not worker.is_alive()
+    assert len(results) == 1 and results[0].outcome == "unavailable"
+    assert launches == []
+
+
+def test_final_shutdown_queued_behind_reset_stays_final(monkeypatch):
+    bridge = Bridge(exe="controlled-powershell", cwd=None)
+    monkeypatch.setattr(bridge_module, "POOL_SIZE", 1)
+    pool = bridge_module._pool_for(bridge)
+    assert pool is not None
+    closing, release = Event(), Event()
+
+    def held_close():
+        closing.set()
+        assert release.wait(10)
+
+    monkeypatch.setattr(pool, "shutdown", held_close)
+    reset = Thread(target=bridge_module.reset_sessions, daemon=True)
+    reset.start()
+    try:
+        assert closing.wait(10)
+        final = Thread(target=bridge_module.shutdown_sessions, daemon=True)
+        final.start()
+    finally:
+        release.set()
+        reset.join(10)
+    final.join(10)
+    assert not reset.is_alive() and not final.is_alive()
+    assert bridge_module._pool_for(bridge) is None

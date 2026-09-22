@@ -245,8 +245,7 @@ def apply_transport(transport: str) -> None:
         raise ValueError(f"transport must be one of {list(TRANSPORTS)}")
     size = 0 if transport == "one-shot" else _session_size()
     os.environ[SESSIONS_ENV] = str(size)
-    bridge_module.shutdown_sessions()
-    bridge_module.POOL_SIZE = size
+    bridge_module.reset_sessions(size)
 
 
 def _session_size() -> int:

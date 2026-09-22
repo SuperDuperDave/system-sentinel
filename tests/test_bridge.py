@@ -345,7 +345,8 @@ def test_shutdown_ends_every_session_and_the_pool_forgets_them(session_bridge: B
     sentinel.bridge.shutdown_sessions()
     assert [pid for pid in pids if _running(pid)] == []
     assert sessions_report(session_bridge)["alive"] == 0
-    assert session_bridge.run("# fake: ok-list").outcome == "ok"  # and the next question starts again
+    assert session_bridge.run("# fake: ok-list").outcome == "unavailable"
+    assert sentinel.bridge._pool_for(session_bridge) is None
 
 
 def test_a_session_does_not_outlive_the_process_that_started_it(fake_powershell: Path):

@@ -147,7 +147,7 @@ def private_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 @pytest.fixture(autouse=True)
 def no_session_outlives_a_test():
     """A live session is a process: no test may leave one running, and none may inherit one."""
-    sentinel.bridge.shutdown_sessions()
+    sentinel.bridge.reset_sessions()
     yield
     sentinel.bridge.shutdown_sessions()
 

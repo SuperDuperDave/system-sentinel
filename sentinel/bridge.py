@@ -280,14 +280,21 @@ class Bridge:
 
     def _answer(self, script: str, *, timeout: float, depth: int) -> BridgeResult:
         """One attempt, through whichever transport can take it: a live session for preference, a
-        launch of its own when the pool is switched off or no session would start."""
+        launch of its own when the pool is switched off or no session would start. Terminal
+        shutdown refuses a new launch."""
         pool = _pool_for(self)
         if pool is not None:
             answered = pool.ask(script, timeout=timeout, depth=depth)
             if answered is not None:
                 return answered
+        with _POOLS_LOCK:
+            if _SESSIONS_ENDED:
+                return BridgeResult("unavailable", error="the bridge is shutting down")
         try:
             with _launch_slot(timeout):
+                with _POOLS_LOCK:
+                    if _SESSIONS_ENDED:
+                        return BridgeResult("unavailable", error="the bridge is shutting down")
                 return self._run_once(script, timeout=timeout, depth=depth)
         except SlotTimeout as exc:
             return BridgeResult("unavailable", error=str(exc))
@@ -683,7 +690,8 @@ class Pool:
     def shutdown(self) -> None:
         """Stop every session this pool holds, including one that is out with a question: at the
         end of a process that is exactly the session that would be left behind. Each is given a
-        moment to end by itself first, and the question that loses its session is launched instead.
+        moment to end by itself first. A question that loses its session can fall back to a launch
+        during a pool reset, but terminal shutdown refuses that launch.
         Startup runs outside the lock; if it finishes after closure, checkout disposes of that
         session before lending it. Shutdown does not wait for an in-progress startup probe.
         """
@@ -830,14 +838,17 @@ POOL_SIZE = _pool_size()
 
 _POOLS: dict[Bridge, Pool] = {}
 _POOLS_LOCK = threading.Lock()
+_SESSIONS_ENDED = False
 
 
 def _pool_for(bridge: Bridge) -> Pool | None:
     """The pool for this ``powershell.exe``, made the first time a question needs it. Equal bridges
     share one pool, so a process that locates the bridge twice does not keep twice the sessions."""
-    if POOL_SIZE <= 0 or bridge.exe is None:
+    if bridge.exe is None:
         return None
     with _POOLS_LOCK:
+        if _SESSIONS_ENDED or POOL_SIZE <= 0:
+            return None
         pool = _POOLS.get(bridge)
         if pool is None:
             pool = Pool(bridge, POOL_SIZE)
@@ -846,17 +857,36 @@ def _pool_for(bridge: Bridge) -> Pool | None:
 
 
 def shutdown_sessions() -> None:
-    """End every live session this process started.
+    """End every live session this process started and refuse new questions afterward.
 
     Registered on ``atexit``, called from the server's lifespan shutdown and from the launcher's
-    quit path. A session is a child process that outlives nothing: a ``powershell.exe`` left behind
-    by a tool whose whole purpose is to make such things visible would be a defect in plain sight.
+    serverless quit path. Benchmark reconfiguration and test setup use :func:`reset_sessions`
+    to start a fresh pool explicitly.
     """
+    global _SESSIONS_ENDED
     with _POOLS_LOCK:
+        _SESSIONS_ENDED = True
         pools = list(_POOLS.values())
         _POOLS.clear()
     for pool in pools:
         pool.shutdown()
+
+
+def reset_sessions(size: int | None = None) -> None:
+    """End current pools, then allow new ones for an explicit transport reset."""
+    global _SESSIONS_ENDED, POOL_SIZE
+    if size is not None and size < 0:
+        raise ValueError("session pool size cannot be negative")
+    with _POOLS_LOCK:
+        pools = list(_POOLS.values())
+        _POOLS.clear()
+        # An explicit reset is rare and synchronous. Keep the registry closed until old children
+        # are gone, so a concurrent final shutdown cannot be undone halfway through this reset.
+        for pool in pools:
+            pool.shutdown()
+        if size is not None:
+            POOL_SIZE = size
+        _SESSIONS_ENDED = False
 
 
 atexit.register(shutdown_sessions)
@@ -873,9 +903,11 @@ def sessions_report(bridge: Bridge | None = None) -> dict[str, Any]:
     """
     with _POOLS_LOCK:
         pools = [pool for key, pool in _POOLS.items() if bridge is None or key == bridge]
+        ended = _SESSIONS_ENDED
+        active_size = 0 if ended else POOL_SIZE
     report: dict[str, Any] = {
-        "transport": "session" if POOL_SIZE > 0 else "one-shot",
-        "size": POOL_SIZE,
+        "transport": "stopped" if ended else "session" if active_size > 0 else "one-shot",
+        "size": active_size,
         "alive": 0,
         "idle": 0,
         "answered": 0,

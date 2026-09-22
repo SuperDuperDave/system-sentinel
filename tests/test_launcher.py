@@ -24,6 +24,20 @@ def _state() -> State:
     return State(bridge=bridge, token=TOKEN)
 
 
+def test_quit_leaves_active_readings_to_the_servers_lifespan(monkeypatch: pytest.MonkeyPatch):
+    actions = []
+
+    class ServerStub:
+        def quit(self):
+            actions.append("server quit")
+
+    monkeypatch.setattr(launcher, "shutdown_sessions", lambda: actions.append("sessions ended"))
+    launcher._quit(ServerStub())
+    assert actions == ["server quit"]
+    launcher._quit(None)
+    assert actions == ["server quit", "sessions ended"]
+
+
 @pytest.fixture
 def client(monkeypatch: pytest.MonkeyPatch):
     """A client the app treats as local. TestClient's client host is ``testclient``, so the

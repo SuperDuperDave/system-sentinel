@@ -23,8 +23,9 @@
 - Hardware errors now shows a visible legend for the Windows event levels present in returned records; each record's symbol also has a spoken level name.
 
 ### Changed
+- Final app shutdown closes the PowerShell session pool and refuses later bridge questions without launching another process. Intentional benchmark and test resets explicitly reopen the pool. Tray quit gives in-flight readings the server's grace period before lifespan closes sessions; a reading still running then returns unavailable instead of starting another process.
 - Live PowerShell startup failures keep a bounded WSL interop reason when its signature reaches stderr before the first probe can close. The health report does not expose the raw startup text.
-- A PowerShell session that finishes starting after its pool shuts down is retired before it can serve a reading. A session closed between checkout and the next write also falls back to one-shot. Shutdown accounting remains consistent in both races.
+- A PowerShell session that finishes starting after its pool shuts down is retired before it can serve a reading. A session closed between checkout and the next write can fall back to one-shot during an intentional pool reset; final app shutdown refuses the fallback. Shutdown accounting remains consistent in both races.
 - Exact large integers survive the dashboard, agent responses, event stream, stack handoffs and new captures. Integers outside JavaScript's safe range are sent as decimal strings after redaction, keeping adjacent 64-bit timestamps and record identifiers distinct while internal collection and calculations retain integer values. Existing saved files remain intact.
 - The fallback PowerShell transport sends collector scripts over standard input through a fixed-size bootstrap, so large queries remain available beyond Windows' command-line limit.
 - Structured collectors must return exactly one object. Missing or ambiguous output now fails before derivation, preventing extra or absent collector objects from becoming misleading zero-findings readings. Payload warning extraction also preserves the original bridge answer.

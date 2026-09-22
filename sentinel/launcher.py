@@ -858,10 +858,10 @@ def _quit(server: Server | None, tray=None) -> None:
     LOG.info("quitting")
     if server is not None:
         server.quit()
-    # The server's own shutdown ends the bridge's live sessions, but this door is also the one a
-    # launcher without a server behind it goes through, and a session is a process: end them here
-    # too. Both paths are idempotent.
-    shutdown_sessions()
+    else:
+        # A server owns its in-flight readings until lifespan shutdown closes the bridge. A
+        # launcher without one still needs to end any sessions it started before returning.
+        shutdown_sessions()
     if tray is not None:
         tray.stop()
 

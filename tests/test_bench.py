@@ -143,10 +143,10 @@ def test_the_transport_is_set_where_the_pool_actually_reads_it(monkeypatch: pyte
 
 
 def test_switching_transport_ends_the_sessions_already_running(monkeypatch: pytest.MonkeyPatch):
-    ended: list[bool] = []
-    monkeypatch.setattr(sentinel.bridge, "shutdown_sessions", lambda: ended.append(True))
+    reset_sizes: list[int] = []
+    monkeypatch.setattr(sentinel.bridge, "reset_sessions", lambda size: reset_sizes.append(size))
     bench.apply_transport("one-shot")
-    assert ended, "a pool of four cannot be left answering a one-shot run's questions"
+    assert reset_sizes == [0], "a pool of four cannot be left answering a one-shot run's questions"
 
 
 # ---------------------------------------------------------------------------
