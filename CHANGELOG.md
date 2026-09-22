@@ -17,6 +17,7 @@
 - On phones, Record keeps the selected level and window visible in one disclosure. Its full filter controls remain one tap away, letting the returned evidence appear sooner in the first viewport.
 
 ### Changed
+- Changing a reading's parameters now hides the previous answer immediately until the new question returns. Taking the same question again keeps its timestamped answer visible while refreshing; a transport failure clears it rather than leaving stale rows under an error.
 - Reading outcome lines now use singular words for one returned item, including one dump file, record, sample, driver or signal.
 - Every reading's Method panel now offers the complete JSON response that the dashboard received, with default redaction and the method, outcome, warnings, and all evidence sections intact. It renders only when opened.
 - Reading section headers now explain what `raw`, `derived`, `invariant` and `inferred` mean in place, with a brief description and an expandable explanation for people learning how to judge the evidence.

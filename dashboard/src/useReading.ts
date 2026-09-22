@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Reading, Unauthorized, take } from './api';
 import { useApp } from './store';
 
@@ -12,42 +12,41 @@ export interface Taken<T> {
   retake: () => void;
 }
 
+type Result<T> = Pick<Taken<T>, 'state' | 'reading' | 'problem'> & { key: string };
+
 /** Take a reading when its parameters change, and on demand. The envelope's outcome is the view's to show. */
 export function useReading<T = unknown>(name: string, params: Record<string, ParamValue> = {}, enabled = true): Taken<T> {
   const key = JSON.stringify([name, params]);
-  const [state, setState] = useState<Taken<T>['state']>('idle');
-  const [reading, setReading] = useState<Reading<T> | null>(null);
-  const [problem, setProblem] = useState<string | null>(null);
+  const [result, setResult] = useState<Result<T>>({ key, state: 'idle', reading: null, problem: null });
   const [nonce, setNonce] = useState(0);
   const setSession = useApp((s) => s.setSession);
-  const latest = useRef(0);
 
   useEffect(() => {
     if (!enabled) return;
-    const mine = ++latest.current;
-    setState('taking');
-    setProblem(null);
+    let active = true;
+    setResult((previous) => ({ key, state: 'taking', reading: previous.key === key ? previous.reading : null, problem: null }));
     take<T>(name, params)
       .then((r) => {
-        if (mine !== latest.current) return;
-        setReading(r);
-        setState('done');
+        if (!active) return;
+        setResult({ key, state: 'done', reading: r, problem: null });
         setSession('open');
       })
       .catch((err: unknown) => {
-        if (mine !== latest.current) return;
+        if (!active) return;
         if (err instanceof Unauthorized) {
           setSession('closed');
-          setState('idle');
+          setResult({ key, state: 'idle', reading: null, problem: null });
           return;
         }
-        setProblem(err instanceof Error ? err.message : String(err));
-        setState('lost');
+        setResult({ key, state: 'lost', reading: null, problem: err instanceof Error ? err.message : String(err) });
       });
+    return () => { active = false; };
     // params is captured by key, deliberately.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, nonce, enabled]);
 
   const retake = useCallback(() => setNonce((n) => n + 1), []);
-  return { state, reading, problem, retake };
+  return result.key === key
+    ? { state: result.state, reading: result.reading, problem: result.problem, retake }
+    : { state: enabled ? 'taking' : 'idle', reading: null, problem: null, retake };
 }
