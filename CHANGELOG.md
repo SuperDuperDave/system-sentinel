@@ -8,6 +8,7 @@
 - Dashboard addresses now remember the selected view and an investigation moment. Refresh, copied links and browser back/forward return to the right screen; links to sections that load after a reading answer land at the section, and view changes focus the new title.
 - Record opens with a time-density view and leading sources for the returned System log rows. A bar or source opens and focuses one exact row below; the chart names its sample boundary instead of implying it covers the whole log.
 - Diagnostics shows a memory map after the person takes the reading: installed capacity, reported slot population and each returned module's configured speed against its rating, with links to the exact derived and Windows fields below.
+- Diagnostics now opens the PCIe reading with its shared-upstream groups: a bar for each returned group, exact endpoint counts and expandable device branches, followed by the Windows endpoint and bridge records. Bar lengths count endpoints and make no claim about bandwidth or fault likelihood.
 
 ### Changed
 - Network adapter inventory stays available when Windows cannot assemble IP configuration; affected `ip` fields are null with a reading warning instead of empty lists that suggest no addresses.

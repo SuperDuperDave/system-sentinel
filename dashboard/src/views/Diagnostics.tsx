@@ -2,9 +2,10 @@ import { useState } from 'react';
 import { AddToStack } from '../AddToStack';
 import { observed, type Section as SectionData } from '../api';
 import { OutcomeLine, firstLine, clock } from '../Outcome';
-import { Head, RowList, Section, Tree, Value, part } from '../Sections';
+import { Head, RowList, Section, Tree, part } from '../Sections';
 import { useReading } from '../useReading';
 import { MemoryMap, type MemorySummary } from './MemoryMap';
+import { PcieMap, type PcieGroup } from './PcieMap';
 import styles from './Diagnostics.module.css';
 
 /**
@@ -36,6 +37,7 @@ function Panel({ name, title, what }: { name: string; title: string; what: strin
   // Only a reading that observed the machine has anything to show. Whatever an unobserved one
   // carries, nothing of it is rendered: the outcome line is the whole answer.
   const sections = observed(taken.reading) ? taken.reading?.sections ?? [] : [];
+  const orderedSections = name === 'pcie' ? [...sections].sort((a, b) => Number(b.name === 'groups') - Number(a.name === 'groups')) : sections;
   const memory = name === 'memory' && observed(taken.reading) ? part<MemorySummary>(taken.reading, 'derived') : null;
 
   return (
@@ -52,7 +54,7 @@ function Panel({ name, title, what }: { name: string; title: string; what: strin
         </p>
       )}
       {memory ? <MemoryMap data={memory} /> : null}
-      {sections.map((s) => (
+      {orderedSections.map((s) => (
         <div key={s.name} className={styles.section} id={`diagnostic-${name}-${s.name}`}>
           <Section title={sectionTitle(s.name)} cls={s.class} basis={s.basis}>
             <Payload name={name} section={s} />
@@ -70,7 +72,7 @@ function Panel({ name, title, what }: { name: string; title: string; what: strin
  */
 function Payload({ name, section }: { name: string; section: SectionData<unknown> }) {
   const data = section.data;
-  if (name === 'pcie' && section.name === 'groups') return <Groups groups={data as Group[]} />;
+  if (name === 'pcie' && section.name === 'groups') return <PcieMap groups={data as PcieGroup[]} />;
   if (isDevices(data)) return <Devices devices={data} />;
   if (isRecords(data)) return <Records records={data} />;
 
@@ -113,11 +115,6 @@ interface LogRecord {
   Message?: string | null;
 }
 
-interface Group {
-  root_port: { instance_id: string; name: string };
-  members: { name: string; instance_id: string; class: string; status: string; problem: string; address: { address?: string } | null }[];
-}
-
 /** A device list: the name to scan, the state beside it, and the whole record on inspect. */
 function Devices({ devices }: { devices: Device[] }) {
   return (
@@ -133,35 +130,6 @@ function Devices({ devices }: { devices: Device[] }) {
         </>
       )}
       inspect={(d) => <Tree value={d} />}
-    />
-  );
-}
-
-/** Endpoints that share an upstream link: a fault on one can present on another. */
-function Groups({ groups }: { groups: Group[] }) {
-  return (
-    <RowList
-      items={groups}
-      idOf={(g) => g.root_port.instance_id}
-      layout={styles.groupRow}
-      cells={(g) => (
-        <>
-          <span className={styles.deviceName}>{g.root_port.name}</span>
-          <span className={`${styles.state} readout`}>{g.members.length} behind it</span>
-        </>
-      )}
-      inspect={(g) => (
-        <ul className={styles.members}>
-          {g.members.map((m) => (
-            <li key={m.instance_id} className={styles.member}>
-              <span className={styles.deviceName}>{m.name}</span>
-              <span className={`${styles.address} readout`}><Value value={m.address?.address ?? null} /></span>
-              <span className={`${styles.state} readout`}>{m.status === 'OK' ? 'ok' : m.status.toLowerCase()}</span>
-              <span className={`${styles.instance} readout`}>{m.instance_id}</span>
-            </li>
-          ))}
-        </ul>
-      )}
     />
   );
 }
@@ -201,6 +169,9 @@ const stamp = (iso: string): string => {
 function sectionTitle(name: string): string {
   if (name === 'raw') return 'As Windows reported it';
   if (name === 'derived') return 'Computed from it';
+  if (name === 'groups') return 'Shared upstream groups';
+  if (name === 'endpoints') return 'Endpoints Windows returned';
+  if (name === 'roots') return 'PCI bridges Windows returned';
   return name;
 }
 

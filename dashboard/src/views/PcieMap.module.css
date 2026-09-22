@@ -1,0 +1,44 @@
+.fabric { margin: 12px 0 0; }
+.summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 1px solid var(--rule-soft); border-bottom: 1px solid var(--rule-soft); }
+.summary > div { min-width: 0; padding: 14px 16px 15px; display: flex; flex-direction: column; gap: 5px; }
+.summary > div:first-child { padding-left: 0; }
+.summary > div + div { border-left: 1px solid var(--rule-soft); }
+.summary strong { color: var(--ink); font: 300 28px/1 var(--font-display); }
+.summary span { color: var(--muted); }
+.explain { max-width: 72ch; margin: 18px 0 20px; color: var(--body); }
+.groups { list-style: none; margin: 0; padding: 0; }
+.group { border-top: 1px solid var(--rule-soft); }
+.group:last-child { border-bottom: 1px solid var(--rule-soft); }
+.root { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; grid-template-areas: 'number name count' 'number bar bar'; gap: 9px 14px; align-items: center; padding: 14px 0; cursor: pointer; list-style: none; }
+.root::-webkit-details-marker { display: none; }
+.root:hover .rootName, .root:focus-visible .rootName { color: var(--ink); }
+.number { grid-area: number; color: var(--muted); align-self: start; padding-top: 2px; }
+.rootName { grid-area: name; min-width: 0; color: var(--body); overflow-wrap: anywhere; }
+.count { grid-area: count; color: var(--muted); font: 12.5px var(--font-readout); white-space: nowrap; }
+.bar { grid-area: bar; display: block; height: 4px; background: var(--rule-soft); }
+.bar > span { display: block; height: 100%; background: var(--body); }
+.rootId { margin: 0 0 10px 34px; color: var(--muted); overflow-wrap: anywhere; }
+.members { list-style: none; margin: 0 0 18px 34px; padding: 0 0 0 16px; border-left: 1px solid var(--rule); }
+.member { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: 'name state' 'class state' 'id id'; gap: 2px 12px; padding: 9px 0; min-width: 0; }
+.member::before { content: ''; position: absolute; left: -16px; top: 20px; width: 10px; height: 1px; background: var(--rule); }
+.member + .member { border-top: 1px solid var(--rule-soft); }
+.memberName { grid-area: name; min-width: 0; color: var(--ink); overflow-wrap: anywhere; }
+.memberClass { grid-area: class; color: var(--muted); }
+.memberState { grid-area: state; color: var(--body); text-align: right; overflow-wrap: anywhere; }
+.instance { grid-area: id; color: var(--muted); overflow-wrap: anywhere; font-size: 11px; }
+.empty { color: var(--muted); }
+.links { display: flex; flex-wrap: wrap; gap: 8px 20px; padding: 12px 0; }
+.links a { color: var(--body); border-bottom: 1px solid var(--rule); display: inline-flex; align-items: center; min-height: 30px; }
+.links a:hover { color: var(--ink); }
+
+@media (max-width: 680px) {
+  .summary > div { padding: 14px 8px; }
+  .summary > div:first-child { padding-left: 0; }
+  .summary strong { font-size: 23px; }
+  .summary span { font-size: 11px; }
+  .root { grid-template-columns: 24px minmax(0, 1fr); grid-template-areas: 'number name' 'number count' 'number bar'; gap: 5px 9px; }
+  .count { white-space: normal; }
+  .members { margin-left: 24px; }
+  .member { grid-template-columns: 1fr; grid-template-areas: 'name' 'class' 'state' 'id'; }
+  .memberState { text-align: left; }
+}

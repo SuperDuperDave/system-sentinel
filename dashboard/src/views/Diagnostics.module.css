@@ -33,7 +33,6 @@
 /* Rows. Every grid child sets its own min-width so a long instance id wraps instead of
    pushing the row wider than the phone. */
 .deviceRow,
-.groupRow,
 .recordRow { min-width: 0; }
 
 .deviceRow {
@@ -46,8 +45,6 @@
 .deviceName { grid-area: name; min-width: 0; overflow-wrap: anywhere; color: var(--ink); }
 .deviceClass { grid-area: class; min-width: 0; color: var(--muted); }
 .state { grid-area: state; min-width: 0; color: var(--muted); text-align: right; overflow-wrap: anywhere; }
-
-.groupRow { display: grid; grid-template-columns: 1fr auto; column-gap: 12px; align-items: baseline; }
 
 .recordRow {
   display: grid;
@@ -71,21 +68,6 @@
   overflow: hidden;
 }
 
-.members { list-style: none; margin: 0; padding: 0; }
-.member {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  grid-template-areas: 'name state' 'address state' 'instance instance';
-  column-gap: 12px;
-  row-gap: 2px;
-  padding: 8px 0;
-  align-items: baseline;
-  min-width: 0;
-}
-.member + .member { border-top: 1px solid var(--rule-soft); }
-.address { grid-area: address; color: var(--muted); min-width: 0; }
-.instance { grid-area: instance; color: var(--muted); min-width: 0; overflow-wrap: anywhere; font-size: 11px; }
-
 @media (min-width: 720px) {
   .deviceRow {
     grid-template-columns: minmax(0, 1fr) 120px 150px;
@@ -97,8 +79,4 @@
     row-gap: 0;
   }
   .message { -webkit-line-clamp: 1; }
-  .member {
-    grid-template-columns: minmax(0, 1fr) 90px 110px;
-    grid-template-areas: 'name address state' 'instance instance instance';
-  }
 }

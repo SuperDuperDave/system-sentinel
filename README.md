@@ -25,6 +25,7 @@ The dashboard address remembers the view you opened (`?view=machine`, for exampl
 Record shows when the returned System log rows cluster and which sources appear most often. Select a bar or source to open its exact row. The overview describes the returned sample; the detailed rows and their raw properties remain below it.
 
 Diagnostics takes deeper readings when asked. Memory shows the returned modules, reported slot population and configured speed beside each module's rating; the original Windows fields and derivation stay open below the overview.
+PCIe groups endpoints by the upstream parent Windows returned, so shared links can be inspected in place. The full endpoint and bridge records remain under that map.
 
 ## What it reads
 
