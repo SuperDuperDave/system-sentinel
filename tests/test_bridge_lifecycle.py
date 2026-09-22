@@ -1,6 +1,7 @@
 """Portable bridge lifecycle races, without starting an executable or querying Windows."""
 
 from contextlib import nullcontext
+from io import BytesIO
 from threading import Event, Thread
 
 import sentinel.bridge as bridge_module
@@ -85,11 +86,39 @@ def test_a_session_finishing_start_after_shutdown_is_discarded_before_lending(mo
     assert pool.stats() == stats  # the late child is retired exactly once
 
 
-def test_shutdown_between_checkout_and_write_falls_back(session_bridge, monkeypatch):
+def test_shutdown_between_checkout_and_write_falls_back(monkeypatch):
     """A checked-out session can lose its input pipe before its question is sent."""
-    assert session_bridge.run("# fake: ok-list").outcome == "ok"  # populate the idle pool
-    pool = bridge_module._pool_for(session_bridge)
-    assert pool is not None and pool.stats()["idle"] == 1
+    class ControlledProcess:
+        def __init__(self):
+            self.stdin = BytesIO()
+            self.stdout = None
+            self.stderr = None
+            self.pid = 1
+            self.exited = False
+
+        def poll(self):
+            return 0 if self.exited else None
+
+        def wait(self, timeout=None):
+            self.exited = True
+            return 0
+
+        def kill(self):
+            self.exited = True
+
+    process = ControlledProcess()
+    session = Session(process)
+    bridge = Bridge(exe="controlled-powershell", cwd=None)
+    fallback = BridgeResult("ok", items=[{"CPU": "x"}])
+    monkeypatch.setattr(bridge_module, "POOL_SIZE", 1)
+    monkeypatch.setattr(bridge_module, "_launch_slot", lambda timeout: nullcontext())
+    monkeypatch.setattr(Bridge, "_run_once", lambda self, script, *, timeout, depth: fallback)
+    pool = bridge_module._pool_for(bridge)
+    assert pool is not None
+    with pool._lock:
+        pool._sessions.append(session)
+        pool._idle.append(session)
+    assert pool.stats()["idle"] == 1
     about_to_ask = Event()
     release = Event()
     real_ask = Session.ask
@@ -105,7 +134,7 @@ def test_shutdown_between_checkout_and_write_falls_back(session_bridge, monkeypa
 
     def ask():
         try:
-            results.append(session_bridge.run("# fake: ok-object"))
+            results.append(bridge.run("# fake: ok-object"))
         except BaseException as exc:
             errors.append(exc)
 
@@ -118,7 +147,8 @@ def test_shutdown_between_checkout_and_write_falls_back(session_bridge, monkeypa
         release.set()
         worker.join(10)
     assert not worker.is_alive() and errors == [], errors
-    assert len(results) == 1 and results[0].outcome == "ok" and results[0].items == [{"CPU": "x"}]
+    assert results == [fallback]
+    assert session.discarded == "shutdown" and process.exited and process.stdin.closed
     stats = pool.stats()
     assert stats["alive"] == stats["idle"] == 0
     assert stats["discarded"] == {"shutdown": 1} and stats["fell_back"] == 1
