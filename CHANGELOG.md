@@ -1,6 +1,6 @@
 # Changelog
 
-## [1.1.0] - unreleased
+## [1.1.0] - 2026-09-21
 
 The moment, answered in one call and one click. "It froze at 02:14" now has a reading that names the stop, the bug check, the dump and the machine's last word before it, and a dashboard where every time that frames an investigation is a place you can go to.
 
