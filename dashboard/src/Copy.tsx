@@ -8,19 +8,21 @@ import styles from './Copy.module.css';
  * hand. The control says which of the two happened rather than failing silently.
  */
 export function CopyButton({ text, selectRef, label = 'Copy' }: { text: string; selectRef?: RefObject<HTMLElement | null>; label?: string }) {
-  const [state, setState] = useState<'ready' | 'copied' | 'select'>('ready');
+  const [feedback, setFeedback] = useState<{ text: string; kind: 'copied' | 'select' } | null>(null);
+  const state = feedback?.text === text ? feedback.kind : 'ready';
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => () => void (timer.current && clearTimeout(timer.current)), []);
 
   async function copy() {
+    if (timer.current) clearTimeout(timer.current);
     try {
       await navigator.clipboard.writeText(text);
-      setState('copied');
-      timer.current = setTimeout(() => setState('ready'), 2500);
+      setFeedback({ text, kind: 'copied' });
+      timer.current = setTimeout(() => setFeedback(null), 2500);
     } catch {
       selectAll(selectRef?.current ?? null);
-      setState('select');
+      setFeedback({ text, kind: 'select' });
     }
   }
 

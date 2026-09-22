@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Reading } from './api';
+import { CopyButton } from './Copy';
 import { Taken } from './useReading';
 import styles from './Outcome.module.css';
 
@@ -74,8 +75,10 @@ export function OutcomeLine<T>({ taken, noun = 'records', singular, emptyText }:
 /** How the reading was taken: one query, several, or the readings it drew on. */
 function Method({ reading }: { reading: Reading }) {
   const [showReading, setShowReading] = useState(false);
+  const readingText = useRef<HTMLPreElement>(null);
   const m = reading.method;
   const queries = m.queries ?? (m.query ? [m.query] : []);
+  const completeJson = showReading ? JSON.stringify(reading, null, 2) : null;
   return (
     <div className={styles.method}>
       <p className="label">How this was read · {m.kind}{reading.redacted.length ? ` · redacted: ${reading.redacted.join(', ')}` : ''}</p>
@@ -86,10 +89,11 @@ function Method({ reading }: { reading: Reading }) {
       {m.readings ? <pre className={`${styles.query} readout`}>{JSON.stringify(m.readings, null, 1)}</pre> : null}
       <details className={styles.complete} onToggle={(event) => setShowReading(event.currentTarget.open)}>
         <summary className="readout">Complete returned reading · JSON</summary>
-        {showReading ? (
+        {completeJson !== null ? (
           <>
             <p className={`${styles.completeNote} readout`}>The exact response this dashboard received. Default redaction applies.</p>
-            <pre className={`${styles.query} readout`}>{JSON.stringify(reading, null, 2)}</pre>
+            <CopyButton text={completeJson} selectRef={readingText} label="Copy reading JSON" />
+            <pre ref={readingText} className={`${styles.query} readout`}>{completeJson}</pre>
           </>
         ) : null}
       </details>
