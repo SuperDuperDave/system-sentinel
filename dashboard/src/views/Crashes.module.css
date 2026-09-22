@@ -29,6 +29,49 @@
 .reportFacts strong { min-width: 0; color: var(--body); font-size: 12px; font-weight: 500; overflow-wrap: anywhere; }
 .reportLimits { display: block; margin-top: 10px; color: var(--muted); font-size: 11px; line-height: 1.45; }
 
+/* Faults are counted from returned decoded instances; their raw record count remains above. */
+.faultOverview { margin: 18px 0 20px; border: 1px solid var(--rule); background: var(--surface-raised); }
+.faultOverviewHead { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 24px; padding: 18px 20px; border-bottom: 1px solid var(--rule-soft); }
+.faultOverviewHead p { margin: 0; }
+.faultOverviewHead > p { max-width: 61ch; color: var(--body); font-size: 13px; line-height: 1.5; }
+.faultOverviewHead h3 { margin: 5px 0 0; color: var(--ink); font-size: clamp(18px, 2vw, 23px); font-weight: 400; }
+.faultBasis { padding: 0 20px 8px; }
+.faultChoices { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; border-top: 1px solid var(--rule-soft); background: var(--rule-soft); }
+.faultChoice { display: flex; flex-direction: column; align-items: start; min-width: 0; min-height: 130px; padding: 13px 16px; text-align: left; background: var(--field); color: var(--ink); }
+.faultChoice:hover, .faultChoice:focus-visible, .faultChoiceSelected { background: var(--lit); }
+.faultChoice > span:first-child { color: var(--body); font-size: 12px; overflow-wrap: anywhere; }
+.faultChoice strong { margin: 10px 0 7px; font: 300 30px/1 var(--font-display); }
+.faultChoiceBar { display: block; width: 100%; height: 5px; background: var(--rule); }
+.faultChoiceBar span { display: block; height: 100%; background: var(--body); }
+.faultChoiceAction { margin-top: auto; padding-top: 10px; color: var(--muted); font-size: 11px; }
+.faultGroups { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-top: 1px solid var(--rule-soft); }
+.faultGroups > div { min-width: 0; padding: 15px 20px; }
+.faultGroups > div + div { border-left: 1px solid var(--rule-soft); }
+.faultGroups h4 { margin: 0 0 4px; color: var(--ink); font-size: 14px; font-weight: 500; }
+.faultGroups p { margin: 0; color: var(--muted); font-size: 11px; }
+.faultGroups ol { list-style: none; margin: 11px 0 0; padding: 0; }
+.faultGroups li { display: flex; justify-content: space-between; gap: 10px; padding: 5px 0; border-top: 1px solid var(--rule-soft); font-size: 13px; }
+.faultGroups li span { min-width: 0; overflow-wrap: anywhere; }
+.faultGroups li strong { flex: none; color: var(--ink); font-weight: 400; }
+.faultGroups .faultNone, .faultGroups .faultMore { margin-top: 10px; }
+.faultSummaryRaw { padding: 0 20px 14px; border-top: 1px solid var(--rule-soft); }
+.faultSummaryRaw summary { width: fit-content; min-height: 36px; padding: 10px 0 4px; cursor: pointer; color: var(--body); font-size: 12px; }
+.faultSummaryRaw summary:hover { color: var(--ink); }
+.faultSummaryRaw pre { max-height: 360px; margin: 8px 0 0; padding: 12px; overflow: auto; background: var(--inspection-well); color: var(--body); font-size: 11.5px; white-space: pre; }
+.faultRows { scroll-margin-top: 70px; }
+.faultRowsCount, .faultSummaryMissing, .faultRawMissing { margin: 10px 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+
+@media (max-width: 700px) {
+  .faultOverviewHead { padding: 16px; }
+  .faultBasis { padding-left: 16px; padding-right: 16px; }
+  .faultChoices { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .faultChoice { min-height: 118px; padding: 12px; }
+  .faultGroups { grid-template-columns: minmax(0, 1fr); }
+  .faultGroups > div { padding: 14px 16px; }
+  .faultGroups > div + div { border-left: 0; border-top: 1px solid var(--rule-soft); }
+  .faultSummaryRaw { padding-left: 16px; padding-right: 16px; }
+}
+
 /* The exact stop rows keep their own opening state so a sequence choice can focus the same row. */
 .stopRows { list-style: none; margin: 0; padding: 0; }
 .stopRowItem { border-top: 1px solid var(--rule-soft); }
@@ -70,7 +113,7 @@
 }
 
 .rawDisclosure { margin-top: 12px; color: var(--body); }
-.rawDisclosure summary { width: fit-content; cursor: pointer; }
+.rawDisclosure summary { width: fit-content; min-height: 36px; padding: 8px 0; cursor: pointer; }
 .rawDisclosure pre {
   max-height: 360px;
   margin: 10px 0 0;
@@ -78,7 +121,7 @@
   overflow: auto;
   overflow-wrap: normal;
   white-space: pre;
-  background: var(--deep);
+  background: var(--inspection-well);
   border-radius: 6px;
   font-size: 12px;
 }

@@ -2,7 +2,7 @@ import { ReactNode, useRef, useState } from 'react';
 import { AddToStack } from '../AddToStack';
 import { EventRecord, Reading, observed } from '../api';
 import { OutcomeLine, clock } from '../Outcome';
-import { Facts, Head, MomentLink, RowList, Section, Segmented, Value, ago, basisOf, byDay, duration, part, size } from '../Sections';
+import { Basis, Facts, Head, MomentLink, RowList, Section, Segmented, Value, ago, basisOf, byDay, duration, part, size } from '../Sections';
 import { useReading } from '../useReading';
 import { ReliabilityHistory } from './ReliabilityHistory';
 import styles from './Crashes.module.css';
@@ -61,6 +61,12 @@ interface Fault {
   report?: { id: string | null; code: string | null; name: string | null; parameters: string[]; bucket: string | null; dump_path: string | null; records: number[] };
 }
 
+interface FaultSummary {
+  by_kind: Record<string, number>;
+  applications: { name: string; count: number; first: string | null; last: string | null; modules: string[] }[];
+  live_kernel: { code: string | null; name: string | null; bucket: string | null; count: number; last: string | null }[];
+}
+
 /** One file under the Windows minidump, full dump and live kernel report locations. */
 interface DumpFile {
   name: string;
@@ -110,8 +116,10 @@ const KIND_WORD: Record<string, string> = {
 export function Crashes() {
   const [stopCount, setStopCount] = useState(5);
   const [faultCount, setFaultCount] = useState(30);
+  const [faultFilter, setFaultFilter] = useState<{ reading: Reading; kind: string | null } | null>(null);
   const [selection, setSelection] = useState<{ reading: Reading; index: number } | null>(null);
   const stopButtons = useRef(new Map<number, HTMLButtonElement>());
+  const faultRowsRef = useRef<HTMLDivElement>(null);
 
   const crash = useReading('crash', { count: stopCount });
   const faults = useReading('faults', { count: faultCount });
@@ -122,6 +130,9 @@ export function Crashes() {
   const selectedStop = selection?.reading === crash.reading ? selection.index : null;
   const faultRecords = part<EventRecord[]>(faults.reading, 'records') ?? [];
   const decoded = part<Fault[]>(faults.reading, 'decoded') ?? [];
+  const faultSummary = observed(faults.reading) ? part<FaultSummary>(faults.reading, 'summary') : null;
+  const selectedFaultKind = faultFilter?.reading === faults.reading && faultFilter.kind && faultSummary?.by_kind[faultFilter.kind] ? faultFilter.kind : null;
+  const shownFaults = selectedFaultKind ? decoded.filter((fault) => fault.kind === selectedFaultKind) : decoded;
   const files = part<DumpFile[]>(dumps.reading, 'files') ?? [];
   const times = new Map(faultRecords.map((r) => [r.RecordId, r.TimeCreated]));
 
@@ -132,6 +143,16 @@ export function Crashes() {
       const button = stopButtons.current.get(index);
       button?.scrollIntoView({ block: 'center' });
       button?.focus({ preventScroll: true });
+    });
+  }
+
+  function chooseFaultKind(kind: string | null) {
+    if (!faults.reading) return;
+    setFaultFilter({ reading: faults.reading, kind });
+    requestAnimationFrame(() => {
+      const target = faultRowsRef.current?.querySelector<HTMLButtonElement>('ol > li > button');
+      (target ?? faultRowsRef.current)?.scrollIntoView({ block: 'center' });
+      (target ?? faultRowsRef.current)?.focus({ preventScroll: true });
     });
   }
 
@@ -190,9 +211,15 @@ export function Crashes() {
         }
       >
         <OutcomeLine taken={faults} noun="records" emptyText="No application crash, hang or live kernel report in the Application log" />
+        {observed(faults.reading) && decoded.length > 0 ? faultSummary ? (
+          <FaultOverview summary={faultSummary} rawCount={faultRecords.length} decodedCount={decoded.length} basis={basisOf(faults.reading, 'summary')} selected={selectedFaultKind} onChoose={chooseFaultKind} />
+        ) : <p className={`${styles.faultSummaryMissing} readout`}>The derived fault summary was not returned; the decoded entries remain below.</p> : null}
         {observed(faults.reading) && decoded.length > 0 ? (
+          <div className={styles.faultRows} ref={faultRowsRef} tabIndex={-1} aria-label="Decoded fault instances in this returned sample">
+          <p className={`${styles.faultRowsCount} readout`}>{shownFaults.length} of {decoded.length} decoded fault {decoded.length === 1 ? 'instance' : 'instances'} shown{selectedFaultKind ? ` · ${faultKindLabel(selectedFaultKind)}` : ' · all kinds'}</p>
           <RowList
-            items={decoded}
+            key={`${faults.reading?.asked_at ?? ''}:${selectedFaultKind ?? 'all'}`}
+            items={shownFaults}
             idOf={(f) => f.RecordId}
             layout={styles.faultRow}
             cells={(f) => (
@@ -204,8 +231,9 @@ export function Crashes() {
                 <span className={`${styles.exception} readout`}>{exceptionOf(f)}</span>
               </>
             )}
-            inspect={(f) => <FaultDetail fault={f} at={times.get(f.RecordId)} envelope={faults.reading} />}
+            inspect={(f) => <FaultDetail fault={f} at={times.get(f.RecordId)} envelope={faults.reading} rawRecords={faultRecords} />}
           />
+          </div>
         ) : null}
       </Section>
 
@@ -254,6 +282,58 @@ export function Crashes() {
       </Section>
     </section>
   );
+}
+
+/** A map of the returned decoded instances, not a count of all faults on the machine. */
+function FaultOverview({ summary, rawCount, decodedCount, basis, selected, onChoose }: {
+  summary: FaultSummary;
+  rawCount: number;
+  decodedCount: number;
+  basis: string | null;
+  selected: string | null;
+  onChoose: (kind: string | null) => void;
+}) {
+  const kinds = Object.entries(summary.by_kind);
+  const peak = Math.max(1, ...kinds.map(([, count]) => count));
+  return (
+    <section className={styles.faultOverview} aria-labelledby="fault-overview-title">
+      <div className={styles.faultOverviewHead}>
+        <div><p className="label">Faults · derived summary</p><h3 id="fault-overview-title" className="display">What the returned records describe</h3></div>
+        <p>{decodedCount} decoded fault {decodedCount === 1 ? 'instance' : 'instances'} from {rawCount} returned Application-log {rawCount === 1 ? 'record' : 'records'}. Windows can write one live-kernel report across several records; these totals answer different questions.</p>
+      </div>
+      {basis ? <div className={styles.faultBasis}><Basis text={basis} /></div> : null}
+      <div className={styles.faultChoices} role="group" aria-label="Show decoded fault instances by kind">
+        <button type="button" className={`${styles.faultChoice} ${selected === null ? styles.faultChoiceSelected : ''}`} aria-pressed={selected === null} onClick={() => onChoose(null)}>
+          <span className="readout">All returned kinds</span><strong>{decodedCount}</strong><span className={`${styles.faultChoiceAction} readout`}>Show exact rows ↓</span>
+        </button>
+        {kinds.map(([kind, count]) => <button key={kind} type="button" className={`${styles.faultChoice} ${selected === kind ? styles.faultChoiceSelected : ''}`} aria-pressed={selected === kind} onClick={() => onChoose(kind)}>
+          <span className="readout">{faultKindLabel(kind)}</span><strong>{count}</strong><span className={styles.faultChoiceBar} aria-hidden="true"><span style={{ width: `${(count / peak) * 100}%` }} /></span><span className={`${styles.faultChoiceAction} readout`}>Show exact rows ↓</span>
+        </button>)}
+      </div>
+      <div className={styles.faultGroups}>
+        <div>
+          <h4>Programs in this sample</h4>
+          <p className="readout">Crashes and hangs together</p>
+          {summary.applications.length ? <ol>{summary.applications.slice(0, 3).map((app) => <li key={app.name}><span>{app.name}</span><strong className="readout">{app.count}</strong></li>)}</ol> : <p className={styles.faultNone}>None named in the returned instances.</p>}
+          {summary.applications.length > 3 ? <p className={`${styles.faultMore} readout`}>+{summary.applications.length - 3} more in the full summary</p> : null}
+        </div>
+        <div>
+          <h4>Live-kernel reports in this sample</h4>
+          <p className="readout">Grouped by code and bucket</p>
+          {summary.live_kernel.length ? <ol>{summary.live_kernel.slice(0, 3).map((item, index) => <li key={`${item.code}:${item.bucket}:${index}`}><span>{[item.code, item.name, item.bucket].filter(Boolean).join(' · ') || 'Unnamed report'}</span><strong className="readout">{item.count}</strong></li>)}</ol> : <p className={styles.faultNone}>None in the returned instances.</p>}
+          {summary.live_kernel.length > 3 ? <p className={`${styles.faultMore} readout`}>+{summary.live_kernel.length - 3} more in the full summary</p> : null}
+        </div>
+      </div>
+      <details className={styles.faultSummaryRaw}>
+        <summary className="readout">Full derived summary · exact returned fields</summary>
+        <pre className="readout">{JSON.stringify(summary, null, 2)}</pre>
+      </details>
+    </section>
+  );
+}
+
+function faultKindLabel(kind: string): string {
+  return kind === 'application crash' ? 'Program crashes' : kind === 'application hang' ? 'Program hangs' : kind === 'live kernel event' ? 'Live-kernel reports' : kind;
 }
 
 /** Three labeled points from each returned stop, with no claim that they form a timed line. */
@@ -429,8 +509,11 @@ function DumpHeaderDetail({ path }: { path: string }) {
 }
 
 /** One fault named field by field, in the words of the record it came from, and the moment it happened. */
-function FaultDetail({ fault, at: moment, envelope }: { fault: Fault; at?: string; envelope: Reading | null }) {
+function FaultDetail({ fault, at: moment, envelope, rawRecords }: { fault: Fault; at?: string; envelope: Reading | null; rawRecords: EventRecord[] }) {
   const f = fault.fields;
+  const rawIds = fault.report?.records?.length ? fault.report.records : [fault.RecordId];
+  const matchingRaw = rawRecords.filter((record) => rawIds.includes(record.RecordId));
+  const missingRaw = rawIds.filter((id) => !matchingRaw.some((record) => record.RecordId === id));
   const rows: [string, ReactNode][] = [];
   if (fault.report) {
     rows.push(['Code', <Value value={[fault.report.code, fault.report.name].filter(Boolean).join(' · ') || null} />]);
@@ -463,6 +546,11 @@ function FaultDetail({ fault, at: moment, envelope }: { fault: Fault; at?: strin
   return (
     <>
       <Facts rows={rows} />
+      {matchingRaw.length ? <details className={styles.rawDisclosure}>
+        <summary>Raw {matchingRaw.length === 1 ? 'record' : 'records'} · {matchingRaw.length} of {rawIds.length} returned</summary>
+        <pre className="readout">{JSON.stringify(matchingRaw.length === 1 ? matchingRaw[0] : matchingRaw, null, 2)}</pre>
+      </details> : <p className={`${styles.faultRawMissing} readout`}>No matching raw record was returned in this reading.</p>}
+      {missingRaw.length ? <p className={`${styles.faultRawMissing} readout`}>Raw {missingRaw.length === 1 ? 'record' : 'records'} {missingRaw.join(', ')} {missingRaw.length === 1 ? 'was' : 'were'} named by this decoded entry but not returned.</p> : null}
       <div className={styles.actions}>
         <MomentLink at={moment} />
         {envelope ? (

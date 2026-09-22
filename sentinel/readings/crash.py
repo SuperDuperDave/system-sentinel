@@ -251,7 +251,7 @@ EXCEPTIONS: dict[int, str] = {
 }
 
 DECODED_BASIS = (
-    "the positional properties named by this build's event manifests as observed on 2026-09-21; the bug check "
+    "the positional properties mapped from the Windows event manifests used by this build; the bug check "
     "code and the exception code named from Microsoft's references; the 6008 stop time read from the record's "
     "binary value as two SYSTEMTIME structures, local then UTC"
 )
@@ -270,7 +270,7 @@ STOPS_BASIS = (
 )
 
 FAULTS_BASIS = (
-    "the positional properties named by this build's event manifests as observed on 2026-09-21; the exception "
+    "the positional properties mapped from the Windows event manifests used by this build; the exception "
     "code named from Microsoft's NTSTATUS reference; a live kernel event is one entry per report id, taken from "
     "that report's latest record, carrying every record id it was written across"
 )
