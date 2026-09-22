@@ -62,7 +62,31 @@ interface Fault {
   kind: string;
   fields: Record<string, unknown>;
   exception?: { code: string | null; name: string | null };
+  process?: FaultProcess | null;
   report?: { id: string | null; code: string | null; name: string | null; parameters: string[]; bucket: string | null; dump_path: string | null; records: RecordId[] };
+}
+
+interface FaultProcess {
+  id: number | null;
+  id_status: string;
+  id_reason: string | null;
+  created_at: string | null;
+  creation_filetime: string | null;
+  creation_resolution_ns: number | null;
+  creation_status: string;
+  creation_reason: string | null;
+  warnings: string[];
+  source: {
+    provider_id: string | null;
+    event_id: number | null;
+    version: number | null;
+    id_field?: string;
+    id_property_index?: number;
+    creation_field?: string;
+    creation_property_index?: number;
+    creation_encoding?: string;
+    creation_basis?: string;
+  };
 }
 
 interface FaultSummary {
@@ -707,19 +731,19 @@ function FaultDetail({ fault, at: moment, envelope, rawRecords }: { fault: Fault
       rows.push(['Path', f.AppPath ? <span className={styles.path}>{String(f.AppPath)}</span> : <Value value={null} />]);
       rows.push(['Module path', f.ModulePath ? <span className={styles.path}>{String(f.ModulePath)}</span> : <Value value={null} />]);
     } else {
-      rows.push(['Started', <Value value={text(f.StartTime)} />]);
-      rows.push(['Terminated', <Value value={text(f.TerminationTime)} />]);
+      if (text(f.TerminationTime)) rows.push(['Raw termination value', <span><Value value={text(f.TerminationTime)} /> <span className={styles.quiet}>· retained as returned, not interpreted as a time</span></span>]);
       rows.push(['Hang type', <Value value={text(f.HangType)} />]);
       rows.push(['Report id', <Value value={text(f.ReportId)} />]);
     }
-    rows.push(['Process id', <Value value={text(f.ProcessId)} />]);
+    rows.push(...processRows(fault, moment));
   }
-  rows.push(['Time', <Value value={moment ?? null} />]);
+  rows.push(['Event time', <Value value={moment ?? null} />]);
   rows.push(['Record', <Value value={fault.RecordId} />]);
 
   return (
     <>
       <Facts rows={rows} />
+      {fault.process ? <ProcessSource process={fault.process} /> : null}
       {matchingRaw.length ? <details className={styles.rawDisclosure}>
         <summary>Raw {matchingRaw.length === 1 ? 'record' : 'records'} · {matchingRaw.length} of {rawIds.length} returned</summary>
         <pre className="readout">{JSON.stringify(matchingRaw.length === 1 ? matchingRaw[0] : matchingRaw, null, 2)}</pre>
@@ -736,6 +760,69 @@ function FaultDetail({ fault, at: moment, envelope, rawRecords }: { fault: Fault
       </div>
     </>
   );
+}
+
+function processRows(fault: Fault, eventAt?: string): [string, ReactNode][] {
+  const process = fault.process;
+  if (!process) {
+    const rawId = text(fault.fields.ProcessId);
+    return [
+      ['Process id', rawId ? <span><Value value={rawId} /> <span className={styles.quiet}>· raw value; this older reading did not validate its property layout</span></span> : <span className={styles.quiet}>unknown · take a fresh reading for normalized process facts</span>],
+      ['Process started', <span className={styles.quiet}>unknown · take a fresh reading to interpret the raw start value</span>],
+    ];
+  }
+  const rows: [string, ReactNode][] = [
+    ['Process id', process.id_status === 'ok' && process.id != null ? <Value value={process.id} /> : processUnknown(process.id_status, process.id_reason)],
+    ['Process started', process.creation_status === 'ok' && process.created_at ? processStart(process.created_at, eventAt) : processUnknown(process.creation_status, process.creation_reason)],
+  ];
+  process.warnings.forEach((warning, index) => rows.push([process.warnings.length === 1 ? 'Process warning' : `Process warning ${index + 1}`, <span className={styles.quiet}>{warning}</span>]));
+  return rows;
+}
+
+function processUnknown(status: string, reason: string | null): ReactNode {
+  return <span className={styles.quiet}>unknown · {reason ?? `interpretation status: ${status}`}</span>;
+}
+
+function processStart(createdAt: string, eventAt?: string): ReactNode {
+  const created = new Date(createdAt).getTime();
+  const event = eventAt ? new Date(eventAt).getTime() : Number.NaN;
+  if (!Number.isFinite(created) || !Number.isFinite(event)) return <span title={createdAt}>Recorded · see exact UTC below</span>;
+  const differenceMs = created - event;
+  if (Math.abs(differenceMs) < 1000) return <time dateTime={createdAt} title={createdAt}>within 1 s of this event</time>;
+  const elapsed = howLong(Math.max(1, Math.round(Math.abs(differenceMs) / 1000)));
+  return <time dateTime={createdAt} title={createdAt}>{elapsed} {differenceMs < 0 ? 'before' : 'after'} this event</time>;
+}
+
+/** Exact source fields stay one tap away from the useful interpretation and its limits. */
+function ProcessSource({ process }: { process: FaultProcess }) {
+  const source = process.source;
+  const rows: [string, ReactNode][] = [
+    ['Process id', <Value value={process.id} />],
+    ['PID interpretation', processStatus(process.id_status, process.id_reason)],
+    ['Process start UTC', <Value value={process.created_at} />],
+    ['FILETIME ticks', <Value value={process.creation_filetime} />],
+    ['Start interpretation', processStatus(process.creation_status, process.creation_reason)],
+    ['Creation encoding', <Value value={source.creation_encoding ?? null} />],
+    ['Encoding granularity', process.creation_resolution_ns == null ? <Value value={null} /> : `${process.creation_resolution_ns} ns per tick · this is not clock accuracy`],
+    ['Record source', <Value value={[source.provider_id, source.event_id == null ? null : `event ${source.event_id}`, source.version == null ? null : `version ${source.version}`].filter(Boolean).join(' · ') || null} />],
+    ['PID field', <Value value={fieldSource(source.id_field, source.id_property_index)} />],
+    ['Start field', <Value value={fieldSource(source.creation_field, source.creation_property_index)} />],
+    ['Start basis', <Value value={source.creation_basis ?? null} />],
+  ];
+  return <details className={styles.rawDisclosure}>
+    <summary>Process record · exact values and source</summary>
+    <Facts rows={rows} />
+    <p className={styles.quiet}>The PID and start are interpretations of a supported property layout; the basis above states how the provider describes the start field. They do not certify a unique process identity or establish a cause.</p>
+  </details>;
+}
+
+function processStatus(status: string, reason: string | null): ReactNode {
+  return <span>{status}{reason ? ` · ${reason}` : ''}</span>;
+}
+
+function fieldSource(field: string | undefined, index: number | undefined): string | null {
+  if (!field || index == null) return null;
+  return `${field} · property index ${index} (zero-based)`;
 }
 
 /** Every record the stop was composed from, so stacking it hands over the evidence and not the conclusion. */

@@ -31,6 +31,7 @@ from ..bridge import Bridge
 from ..reading import Param, Reading, Section, Spec, from_bridge, from_object, register
 from .dumps import DUMPS_SCRIPT, inventory, missing_file
 from .events import _utc_stamp, record_projection, since_clause, winevent
+from .fault_process import APPLICATION_ERROR, APPLICATION_ERROR_1000, APPLICATION_HANG, APPLICATION_HANG_1002, process_identity
 
 # The providers, spelled once. The same event id means different things under different providers:
 # 1001 is a bug check under WER-SystemErrorReporting and a report of any kind under Windows Error
@@ -40,8 +41,6 @@ KERNEL_POWER = "Microsoft-Windows-Kernel-Power"
 EVENTLOG = "EventLog"
 WER_SYSTEM = "Microsoft-Windows-WER-SystemErrorReporting"
 WER_REPORTING = "Windows Error Reporting"
-APPLICATION_ERROR = "Application Error"
-APPLICATION_HANG = "Application Hang"
 
 MAX_STOPS = 20
 MAX_FAULTS = 500
@@ -111,37 +110,6 @@ WER_REPORT = (
     "ReportStatus",
     "HashedBucket",
     "CabGuid",
-)
-
-APPLICATION_ERROR_1000 = (
-    "AppName",
-    "AppVersion",
-    "AppTimeStamp",
-    "ModuleName",
-    "ModuleVersion",
-    "ModuleTimeStamp",
-    "ExceptionCode",
-    "FaultingOffset",
-    "ProcessId",
-    "ProcessCreationTime",
-    "AppPath",
-    "ModulePath",
-    "IntegratorReportId",
-    "PackageFullName",
-    "PackageRelativeAppId",
-)
-
-APPLICATION_HANG_1002 = (
-    "AppName",
-    "AppVersion",
-    "ProcessId",
-    "StartTime",
-    "TerminationTime",
-    "ExeFileName",
-    "ReportId",
-    "PackageFullName",
-    "PackageRelativeAppId",
-    "HangType",
 )
 
 # EventLog 6008 and Kernel-General 13 carry positional properties this build's manifest does not
@@ -277,7 +245,10 @@ STOPS_BASIS = (
 FAULTS_BASIS = (
     "the positional properties mapped from the Windows event manifests used by this build; the exception "
     "code named from Microsoft's NTSTATUS reference; a live kernel event is one entry per report id, taken from "
-    "that report's latest record, carrying every record id it was written across"
+    "that report's latest record, carrying every record id it was written across. Application process facts "
+    "require a supported provider GUID, event ID, version and property count. Start values are interpreted as "
+    "FILETIME with the per-provider basis in process.source; each field retains its own validation status. "
+    "Encoding resolution is not clock accuracy, and PID/start time does not certify a unique process identity."
 )
 
 SUMMARY_BASIS = (
@@ -308,7 +279,8 @@ def decode(record: dict[str, Any]) -> dict[str, Any]:
     stop time or the exception where the record carries one."""
     provider = str(record.get("ProviderName") or "")
     event_id = _number(record.get("Id"))
-    properties = list(record.get("Properties") or [])
+    raw_properties = record.get("Properties")
+    properties = raw_properties if isinstance(raw_properties, list) else []
     kind, names = KINDS.get((provider, event_id if event_id is not None else -1), ("unnamed record", ()))
 
     entry: dict[str, Any] = {"RecordId": record.get("RecordId")}
@@ -319,8 +291,12 @@ def decode(record: dict[str, Any]) -> dict[str, Any]:
         kind = REPORT_KINDS.get(str(fields.get("EventName") or ""), "report")
     entry["kind"] = kind
     entry["fields"] = fields
+    if (provider, event_id) in ((APPLICATION_ERROR, 1000), (APPLICATION_HANG, 1002)):
+        entry["process"] = process_identity(record)
 
-    if len(properties) < len(names):
+    if not isinstance(raw_properties, list):
+        entry["error"] = "the record does not carry a property array"
+    elif len(properties) < len(names):
         # The map did not fit, so every name after the gap would be wrong. The mismatch is the
         # finding; what can still be read from the record — a message the machine wrote in words —
         # is read below, because a record that does not fit is exactly when the text is worth having.
@@ -1349,7 +1325,8 @@ register(
         description=(
             "What went wrong while the machine kept running: the programs that crashed or hung, and the kernel's "
             "own live reports (a GPU timeout, a watchdog) that did not stop it, each with the application, the "
-            "module and the exception named."
+            "module and the exception named. Supported application records include process ID and interpreted "
+            "creation time, with exact source values, per-field validity and interpretation limits."
         ),
         classes=("raw", "derived"),
         take=take_faults,

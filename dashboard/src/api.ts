@@ -34,6 +34,9 @@ export interface Reading<T = unknown> {
 export interface EventRecord {
   RecordId: RecordId;
   Id: number;
+  /** Added to newer readings so a positional property layout can be identified explicitly. */
+  ProviderId?: string | null;
+  Version?: number | null;
   Level: number;
   LevelDisplayName: string;
   ProviderName: string;

@@ -25,7 +25,8 @@ LOGS = ("System", "Application")
 # Windows PowerShell 5.1 serializes a calculated property that holds an array as {"value": [...], "Count": n},
 # and this way Properties is the array it is.
 RECORD_FIELDS = """RecordId = $_.RecordId; Id = $_.Id; Level = $_.Level; LevelDisplayName = $_.LevelDisplayName;
-        ProviderName = $_.ProviderName; MachineName = $_.MachineName; TaskDisplayName = $_.TaskDisplayName;
+        ProviderName = $_.ProviderName; ProviderId = if ($null -eq $_.ProviderId) { $null } else { $_.ProviderId.ToString('D') }; Version = $_.Version;
+        MachineName = $_.MachineName; TaskDisplayName = $_.TaskDisplayName;
         TimeCreated = $_.TimeCreated.ToUniversalTime().ToString('o'); Message = $_.Message;
         Properties = @($_.Properties | ForEach-Object { if ($_.Value -is [byte[]]) { [System.BitConverter]::ToString($_.Value).Replace('-','') } else { $_.Value } })"""
 

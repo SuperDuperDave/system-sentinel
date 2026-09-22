@@ -3,6 +3,7 @@
 ## [Unreleased] - 2026-09-22
 
 ### Added
+- Application crash and hang details now expose supported process IDs and interpreted creation times, with exact FILETIME values, source layout, independent validity and explicit limits. Unknown layouts and malformed values keep their raw evidence; inconsistent timestamps are flagged without being discarded.
 - Recorded process identity in minidump inspection: process ID and creation time when their validity flags permit, with one-second time precision and the exact 24-byte metadata prefix retained for review. CPU times and unused fields remain in the raw evidence; PID reuse and timestamp precision still limit cross-record matching.
 - Application dumps from the current Windows user's default CrashDumps directory, with explicit location coverage, bounded MDMP interpretation and raw structural evidence. Custom destinations and other accounts remain outside the discovery scope; application files cannot become reboot dump matches.
 - Opaque dump inspection references shared by the dashboard and agents, so private paths stay redacted while files remain selectable. References resolve against fresh inventories and explain when a restart requires refreshing the list.
