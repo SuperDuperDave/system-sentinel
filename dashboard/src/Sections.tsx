@@ -164,30 +164,47 @@ export function Facts({ rows }: { rows: [string, ReactNode][] }) {
   );
 }
 
+type RowId = string | number;
+
+type RowSelection =
+  | { openId: RowId | null; onOpenChange: (id: RowId | null) => void }
+  | { openId?: never; onOpenChange?: never };
+
+type RowIdentity<T> =
+  | ({ idOf: (item: T) => RowId; snapshot?: never } & RowSelection)
+  | { idOf?: never; snapshot: object; openId?: never; onOpenChange?: never };
+
 /**
  * Rows that inspect in place: the list is the glance, the open row is the detail, and nothing
  * moves. `layout` is the caller's grid class, so a view decides its own columns.
  *
- * By default a row is identified by its place in the list, because two rows can be identical in
- * every field the machine returned — two USB hubs on one driver, dated the same day — and
- * identifying those by content would open both at one tap. The list is replaced whole on every
- * take, so a position is stable for exactly as long as the reading is. Pass `idOf` where the
- * payload does carry a unique key and an open row should survive a retake.
+ * A unique source identity follows the same row across retakes and can be controlled by the
+ * view. Rows without one, such as identical driver entries, use their position only within an
+ * explicit snapshot. Pass the original section array or envelope: regrouping the same snapshot
+ * must not close a row, and a new snapshot must never transfer its selection to another row.
  */
 export function RowList<T>({
   items,
   idOf,
+  snapshot,
+  openId,
+  onOpenChange,
   layout,
   cells,
   inspect,
 }: {
   items: T[];
-  idOf?: (item: T) => string | number;
   layout?: string;
   cells: (item: T) => ReactNode;
   inspect?: (item: T) => ReactNode;
-}) {
-  const [open, setOpen] = useState<string | number | null>(null);
+} & RowIdentity<T>) {
+  const [selection, setSelection] = useState<{ id: RowId | null; snapshot: object | undefined }>({ id: null, snapshot });
+  const localOpen = idOf || selection.snapshot === snapshot ? selection.id : null;
+  const open = openId === undefined ? localOpen : openId;
+  const setOpen = (id: RowId | null) => {
+    if (onOpenChange) onOpenChange(id);
+    else setSelection({ id, snapshot });
+  };
   return (
     <ol className={styles.rows}>
       {items.map((item, position) => {
@@ -200,6 +217,7 @@ export function RowList<T>({
                 className={`${styles.rowBody} ${styles.rowButton} ${layout ?? ''}`}
                 onClick={() => setOpen(isOpen ? null : index)}
                 aria-expanded={isOpen}
+                data-row-id={index}
               >
                 {cells(item)}
               </button>

@@ -19,6 +19,7 @@
 - Hardware errors now shows a visible legend for the Windows event levels present in returned records; each record's symbol also has a spoken level name.
 
 ### Changed
+- Crash stops now open their exact evidence directly beneath the selected stop instead of scrolling to a second list. Crashes remembers its counts, fault filter and selected source identities while visiting other views; returning takes fresh readings and restores the same evidence and keyboard focus when available. A missing selection is named explicitly. Dump and hardware-error rows follow source identity across refreshes, and driver rows without a unique identifier close when their source snapshot changes.
 - Whole Signals readings and individual leads now keep later observations as separate Stack snapshots. Stack shows the reading's observation time beside the add time, and composed handoffs state the envelope's count without calling every kind of result a log record.
 - Changing a reading's parameters now hides the previous answer immediately until the new question returns. Taking the same question again keeps its timestamped answer visible while refreshing; a transport failure clears it rather than leaving stale rows under an error.
 - An empty Signals reading now says its conclusion is limited to inputs that answered, and calls out missing inputs in the outcome line. The input list and warnings still name each gap.

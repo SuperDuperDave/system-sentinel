@@ -59,6 +59,7 @@
 .faultSummaryRaw summary:hover { color: var(--ink); }
 .faultSummaryRaw pre { max-height: 360px; margin: 8px 0 0; padding: 12px; overflow: auto; background: var(--inspection-well); color: var(--body); font-size: 11.5px; white-space: pre; }
 .faultRows { scroll-margin-top: 70px; }
+.selectionMissing { margin: 12px 0; padding: 10px 12px; color: var(--body); background: var(--inspection-well); line-height: 1.5; }
 .faultRowsCount, .faultSummaryMissing, .faultRawMissing { margin: 10px 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
 
 @media (max-width: 700px) {
@@ -72,25 +73,18 @@
   .faultSummaryRaw { padding-left: 16px; padding-right: 16px; }
 }
 
-/* The exact stop rows keep their own opening state so a sequence choice can focus the same row. */
-.stopRows { list-style: none; margin: 0; padding: 0; }
-.stopRowItem { border-top: 1px solid var(--rule-soft); }
-.stopRowOpen { background: rgba(6, 16, 13, 0.5); margin: 0 calc(-1 * var(--gutter)); padding: 0 var(--gutter); }
-.stopRowButton { display: grid; align-items: baseline; column-gap: 10px; row-gap: 2px; width: 100%; max-width: 100%; min-width: 0; min-height: 44px; padding: 10px 0; overflow: hidden; text-align: left; color: var(--body); }
-.stopRowButton:hover { color: var(--ink); }
-.stopInspect:not(:empty) { padding: 2px 0 18px; }
+.sequenceFinding { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; margin-top: 10px; color: var(--body); overflow-wrap: anywhere; }
+.sequenceFinding strong { color: var(--ink); font-size: 14px; font-weight: 500; }
+.sequenceFinding > span { font-size: 12px; }
+.sequenceDetail { padding: 8px 20px 20px; background: var(--inspection-well); }
 
 @media (max-width: 700px) {
   .sequenceHead { padding: 16px; }
   .sequenceButton { padding: 14px 16px; }
+  .sequenceDetail { padding-left: 16px; padding-right: 16px; }
   .sequencePhases { grid-template-columns: minmax(0, 1fr); gap: 0; }
   .phase { padding: 9px 0; }
   .phase + .phase { padding-left: 0; border-left: 0; border-top: 1px solid var(--rule-soft); }
-}
-
-@media (min-width: 900px) {
-  .stopRowOpen { margin: 0 -16px; padding: 0 16px; border-radius: 6px; }
-  .stopRowButton { min-height: 0; padding: 9px 0; column-gap: 14px; }
 }
 
 /* A moment on the left, what happened beside it, and the file or code that belongs to it. */
@@ -147,39 +141,6 @@
 
 @media (max-width: 700px) {
   .streamDirectoryStatus { display: block; margin: 3px 0 0 20px; }
-}
-
-/* A stop: when it came back, how long it was gone, what it wrote down, what it left on disk. */
-.stopRow {
-  grid-template-columns: 62px minmax(0, 1fr);
-  grid-template-areas:
-    'time check'
-    'down dump';
-}
-.down { grid-area: down; color: var(--muted); white-space: nowrap; }
-.check {
-  grid-area: check;
-  min-width: 0;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0 8px;
-  color: var(--ink);
-  overflow-wrap: anywhere;
-}
-.code { color: var(--muted); }
-.dumpName { grid-area: dump; color: var(--body); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-@media (min-width: 900px) {
-  .stopRow {
-    /* The downtime is as wide as it needs to be: "down 17 h 56 min" in the readout face is wider
-       than any fixed column that also suits "down 40 s", and a column it overflows runs into the
-       bug check beside it. */
-    grid-template-columns: 76px max-content minmax(0, 1fr) 190px;
-    grid-template-areas: 'time down check dump';
-    column-gap: 16px;
-  }
-  .dumpName { text-align: right; }
 }
 
 /* A fault: the program or the kernel report, the module it failed in, and the exception. */

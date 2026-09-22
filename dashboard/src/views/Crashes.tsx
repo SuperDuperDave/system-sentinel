@@ -1,9 +1,10 @@
-import { ReactNode, useRef, useState } from 'react';
+import { ReactNode, useEffect, useRef, useState } from 'react';
 import { AddToStack } from '../AddToStack';
 import { EventRecord, Reading, observed } from '../api';
 import { OutcomeLine, clock } from '../Outcome';
 import { Basis, Facts, Head, MomentLink, RowList, Section, Segmented, Value, ago, basisOf, byDay, duration, part, size } from '../Sections';
 import { useReading } from '../useReading';
+import { useApp } from '../store';
 import { ReliabilityHistory } from './ReliabilityHistory';
 import styles from './Crashes.module.css';
 
@@ -132,41 +133,60 @@ const KIND_WORD: Record<string, string> = {
  * which is itself the finding; the bucket WER named is shown as WER's words, not as a cause.
  */
 export function Crashes() {
-  const [stopCount, setStopCount] = useState(5);
-  const [faultCount, setFaultCount] = useState(30);
-  const [faultFilter, setFaultFilter] = useState<{ reading: Reading; kind: string | null } | null>(null);
-  const [selection, setSelection] = useState<{ reading: Reading; index: number } | null>(null);
+  const { stopCount, faultCount, faultKind, stopId, faultId, dumpPath, focus } = useApp((s) => s.crashesView);
+  const setCrashesView = useApp((s) => s.setCrashesView);
+  const returnTo = useRef(focus);
   const stopButtons = useRef(new Map<number, HTMLButtonElement>());
   const faultRowsRef = useRef<HTMLDivElement>(null);
+  const dumpRowsRef = useRef<HTMLDivElement>(null);
+  const missingStopRef = useRef<HTMLParagraphElement>(null);
+  const missingFaultRef = useRef<HTMLParagraphElement>(null);
+  const missingDumpRef = useRef<HTMLParagraphElement>(null);
 
   const crash = useReading('crash', { count: stopCount });
   const faults = useReading('faults', { count: faultCount });
   const dumps = useReading('dumps');
 
   const stops = part<Stop[]>(crash.reading, 'stops') ?? [];
-  const indexedStops = stops.map((stop, index) => ({ stop, index }));
-  const selectedStop = selection?.reading === crash.reading ? selection.index : null;
+  const selectedStopIndex = stops.findIndex((stop) => stopIdentity(stop) === stopId);
+  const selectedStop = selectedStopIndex < 0 ? null : selectedStopIndex;
   const faultRecords = part<EventRecord[]>(faults.reading, 'records') ?? [];
   const decoded = part<Fault[]>(faults.reading, 'decoded') ?? [];
   const faultSummary = observed(faults.reading) ? part<FaultSummary>(faults.reading, 'summary') : null;
-  const selectedFaultKind = faultFilter?.reading === faults.reading && faultFilter.kind && faultSummary?.by_kind[faultFilter.kind] ? faultFilter.kind : null;
+  const selectedFaultKind = faultKind && faultSummary?.by_kind[faultKind] ? faultKind : null;
   const shownFaults = selectedFaultKind ? decoded.filter((fault) => fault.kind === selectedFaultKind) : decoded;
   const files = part<DumpFile[]>(dumps.reading, 'files') ?? [];
   const times = new Map(faultRecords.map((r) => [r.RecordId, r.TimeCreated]));
 
-  function inspectStop(index: number) {
-    if (!crash.reading) return;
-    setSelection({ reading: crash.reading, index });
-    requestAnimationFrame(() => {
-      const button = stopButtons.current.get(index);
-      button?.scrollIntoView({ block: 'center' });
-      button?.focus({ preventScroll: true });
-    });
+  // Returning takes fresh readings. Reopen only the same source identity, and return keyboard
+  // focus after it arrives. A missing item gets a visible explanation rather than another row.
+  useEffect(() => {
+    const destination = returnTo.current;
+    if (!destination) return;
+    const taken = destination === 'stop' ? crash : destination === 'fault' ? faults : dumps;
+    if (taken.state === 'idle' || taken.state === 'taking') return;
+    returnTo.current = null;
+    if (!observed(taken.reading)) return;
+    const root = destination === 'fault' ? faultRowsRef.current : dumpRowsRef.current;
+    const id = destination === 'fault' ? faultId : dumpPath;
+    const row = destination === 'stop'
+      ? selectedStop === null ? null : stopButtons.current.get(selectedStop)
+      : [...(root?.querySelectorAll<HTMLButtonElement>('button[data-row-id]') ?? [])].find((button) => button.dataset.rowId === id);
+    const missing = destination === 'stop' ? missingStopRef.current : destination === 'fault' ? missingFaultRef.current : missingDumpRef.current;
+    const target = row ?? missing;
+    target?.scrollIntoView({ block: 'center' });
+    target?.focus({ preventScroll: true });
+  }, [crash, faults, dumps, selectedStop, faultId, dumpPath]);
+
+  function chooseStop(index: number | null) {
+    returnTo.current = null;
+    setCrashesView({ stopId: index === null ? null : stopIdentity(stops[index]), focus: index === null ? null : 'stop' });
   }
 
   function chooseFaultKind(kind: string | null) {
     if (!faults.reading) return;
-    setFaultFilter({ reading: faults.reading, kind });
+    returnTo.current = null;
+    setCrashesView({ faultKind: kind, faultId: null, focus: null });
     requestAnimationFrame(() => {
       const target = faultRowsRef.current?.querySelector<HTMLButtonElement>('ol > li > button');
       (target ?? faultRowsRef.current)?.scrollIntoView({ block: 'center' });
@@ -175,43 +195,23 @@ export function Crashes() {
   }
 
   return (
-    <section>
+    <section onPointerDownCapture={() => { returnTo.current = null; }} onKeyDownCapture={() => { returnTo.current = null; }} onWheelCapture={() => { returnTo.current = null; }}>
       <Head title="Crashes">
-        <Segmented value={stopCount} onChange={setStopCount} options={STOP_COUNTS.map((c) => ({ value: c, label: `last ${c}` }))} label="How many stops" />
+        <Segmented value={stopCount} onChange={(count) => setCrashesView({ stopCount: count })} options={STOP_COUNTS.map((c) => ({ value: c, label: `last ${c}` }))} label="How many stops" />
         {crash.reading ? <AddToStack item={{ kind: 'reading', envelope: crash.reading, title: `Unplanned stops, last ${stopCount}` }} label="Stack this reading" /> : null}
       </Head>
       <OutcomeLine taken={crash} noun="stops" singular="stop" emptyText="No unplanned stop among the starts read" />
+      {observed(crash.reading) && stopId && selectedStop === null ? <p ref={missingStopRef} className={`${styles.selectionMissing} readout`} role="status" tabIndex={-1}>The previously selected stop is not in this returned reading.</p> : null}
 
       {observed(crash.reading) && stops.length > 0 ? (
         <Section title="Stops" cls="derived" basis={basisOf(crash.reading, 'stops')} note="newest first">
-          <StopSequence stops={stops} selected={selectedStop} onInspect={inspectStop} />
-          {byDay(indexedStops, ({ stop }) => whenOf(stop)).map(([label, rows]) => (
-            <div key={label}>
-              <p className={`${styles.day} label`}>{label}</p>
-              <ol className={styles.stopRows}>
-                {rows.map(({ stop, index }) => <li key={index} className={`${styles.stopRowItem} ${selectedStop === index ? styles.stopRowOpen : ''}`}>
-                  <button
-                    ref={(node) => { if (node) stopButtons.current.set(index, node); else stopButtons.current.delete(index); }}
-                    className={`${styles.stopRowButton} ${styles.stopRow}`}
-                    onClick={() => setSelection(selectedStop === index || !crash.reading ? null : { reading: crash.reading, index })}
-                    aria-expanded={selectedStop === index}
-                    aria-controls={`stop-detail-${index}`}
-                  >
-                    <span className={`${styles.time} readout`}>{at(whenOf(stop))}</span>
-                    <span className={`${styles.down} readout`}>{stop.down_seconds == null ? '' : `down ${howLong(stop.down_seconds)}`}</span>
-                    <span className={styles.check}>
-                      {stop.bugcheck?.name ?? stop.bugcheck?.code ?? <span className={styles.quiet}>{stop.no_bugcheck_recorded ? 'no bug check recorded' : 'no bug check named'}</span>}
-                      {stop.bugcheck?.name && stop.bugcheck.code ? <span className={`${styles.code} readout`}>{stop.bugcheck.code}</span> : null}
-                    </span>
-                    <span className={`${styles.dumpName} readout`}>{stop.dump?.name ?? ''}</span>
-                  </button>
-                  <div id={`stop-detail-${index}`} className={styles.stopInspect}>
-                    {selectedStop === index ? <StopDetail stop={stop} envelope={crash.reading} /> : null}
-                  </div>
-                </li>)}
-              </ol>
-            </div>
-          ))}
+          <StopSequence
+            stops={stops}
+            selected={selectedStop}
+            envelope={crash.reading}
+            onInspect={(index) => chooseStop(selectedStop === index ? null : index)}
+            registerButton={(index, node) => { if (node) stopButtons.current.set(index, node); else stopButtons.current.delete(index); }}
+          />
         </Section>
       ) : null}
 
@@ -223,12 +223,13 @@ export function Crashes() {
         basis={basisOf(faults.reading, 'decoded')}
         controls={
           <>
-            <Segmented value={faultCount} onChange={setFaultCount} options={FAULT_COUNTS.map((c) => ({ value: c, label: `last ${c}` }))} label="How many records" />
+            <Segmented value={faultCount} onChange={(count) => setCrashesView({ faultCount: count })} options={FAULT_COUNTS.map((c) => ({ value: c, label: `last ${c}` }))} label="How many records" />
             {faults.reading ? <AddToStack item={{ kind: 'reading', envelope: faults.reading, title: `Faults, last ${faultCount}` }} /> : null}
           </>
         }
       >
         <OutcomeLine taken={faults} noun="records" singular="record" emptyText="No application crash, hang or live kernel report in the Application log" />
+        {observed(faults.reading) && faultId && !shownFaults.some((fault) => faultIdentity(fault) === faultId) ? <p ref={missingFaultRef} className={`${styles.selectionMissing} readout`} role="status" tabIndex={-1}>The previously selected fault is not in this returned reading.</p> : null}
         {observed(faults.reading) && decoded.length > 0 ? faultSummary ? (
           <FaultOverview summary={faultSummary} rawCount={faultRecords.length} decodedCount={decoded.length} basis={basisOf(faults.reading, 'summary')} selected={selectedFaultKind} onChoose={chooseFaultKind} />
         ) : <p className={`${styles.faultSummaryMissing} readout`}>The derived fault summary was not returned; the decoded entries remain below.</p> : null}
@@ -236,9 +237,10 @@ export function Crashes() {
           <div className={styles.faultRows} ref={faultRowsRef} tabIndex={-1} aria-label="Decoded fault instances in this returned sample">
           <p className={`${styles.faultRowsCount} readout`}>{shownFaults.length} of {decoded.length} decoded fault {decoded.length === 1 ? 'instance' : 'instances'} shown{selectedFaultKind ? ` · ${faultKindLabel(selectedFaultKind)}` : ' · all kinds'}</p>
           <RowList
-            key={`${faults.reading?.asked_at ?? ''}:${selectedFaultKind ?? 'all'}`}
             items={shownFaults}
-            idOf={(f) => f.RecordId}
+            idOf={faultIdentity}
+            openId={faultId}
+            onOpenChange={(id) => { returnTo.current = null; setCrashesView({ faultId: id === null ? null : String(id), focus: id === null ? null : 'fault' }); }}
             layout={styles.faultRow}
             cells={(f) => (
               <>
@@ -262,12 +264,17 @@ export function Crashes() {
         controls={dumps.reading ? <AddToStack item={{ kind: 'reading', envelope: dumps.reading, title: 'Crash dump inventory' }} /> : null}
       >
         <OutcomeLine taken={dumps} noun="dump files" singular="dump file" emptyText="No dump files under the Windows dump locations" />
+        {observed(dumps.reading) && dumpPath && !files.some((file) => file.path === dumpPath) ? <p ref={missingDumpRef} className={`${styles.selectionMissing} readout`} role="status" tabIndex={-1}>The previously selected dump file is not in this returned inventory.</p> : null}
+        <div ref={dumpRowsRef}>
         {observed(dumps.reading) && files.length > 0
           ? byDay(files, (f) => f.modified).map(([label, rows]) => (
               <div key={label}>
                 <p className={`${styles.day} label`}>{label}</p>
                 <RowList
                   items={rows}
+                  idOf={(file) => file.path}
+                  openId={dumpPath}
+                  onOpenChange={(id) => { returnTo.current = null; setCrashesView({ dumpPath: id === null ? null : String(id), focus: id === null ? null : 'dump' }); }}
                   layout={styles.fileRow}
                   cells={(f) => (
                     <>
@@ -297,9 +304,21 @@ export function Crashes() {
               </div>
             ))
           : null}
+        </div>
       </Section>
     </section>
   );
+}
+
+/** Prefer the System start's record identity; report-only stops retain their report identity. */
+function stopIdentity(stop: Stop): string {
+  if (stop.records.start != null) return `start:${stop.records.start}:${stop.started_at}`;
+  if (stop.records.power_41 != null) return `power:${stop.records.power_41}:${stop.announced_at}`;
+  return JSON.stringify([stop.started_at, stop.announced_at, stop.reported_at, stop.records.report]);
+}
+
+function faultIdentity(fault: Fault): string {
+  return `${fault.Log ?? 'Application'}:${fault.RecordId}`;
 }
 
 /** A map of the returned decoded instances, not a count of all faults on the machine. */
@@ -355,7 +374,13 @@ function faultKindLabel(kind: string): string {
 }
 
 /** Three labeled points from each returned stop, with no claim that they form a timed line. */
-function StopSequence({ stops, selected, onInspect }: { stops: Stop[]; selected: number | null; onInspect: (index: number) => void }) {
+function StopSequence({ stops, selected, envelope, onInspect, registerButton }: {
+  stops: Stop[];
+  selected: number | null;
+  envelope: Reading | null;
+  onInspect: (index: number) => void;
+  registerButton: (index: number, node: HTMLButtonElement | null) => void;
+}) {
   return (
     <section className={styles.sequence} aria-labelledby="stop-sequence-title">
       <div className={styles.sequenceHead}>
@@ -367,15 +392,21 @@ function StopSequence({ stops, selected, onInspect }: { stops: Stop[]; selected:
           const last = stop.last_record_before;
           const relation = recordToEstimate(last?.TimeCreated, stop.stopped_at);
           const reportOnly = Boolean(stop.reported_at && !last && !stop.stopped_at && !stop.started_at && !stop.announced_at);
-          return <li key={index}>
+          return <li key={stopIdentity(stop)}>
             <button
+              ref={(node) => registerButton(index, node)}
               type="button"
               className={`${styles.sequenceButton} ${selected === index ? styles.sequenceSelected : ''}`}
               onClick={() => onInspect(index)}
               aria-expanded={selected === index}
               aria-controls={`stop-detail-${index}`}
             >
-              <span className={styles.sequenceLabel}><span className="readout">{String(index + 1).padStart(2, '0')} / returned stop</span><span className="readout">Inspect exact stop ↓</span></span>
+              <span className={styles.sequenceLabel}><span className="readout">{String(index + 1).padStart(2, '0')} / returned stop</span><span className="readout">{selected === index ? 'Hide exact stop' : 'Inspect exact stop'}</span></span>
+              {!reportOnly ? <span className={styles.sequenceFinding}>
+                <strong>{[stop.bugcheck?.name, stop.bugcheck?.code].filter(Boolean).join(' · ') || (stop.no_bugcheck_recorded ? 'No bug check recorded' : 'No bug check named')}</strong>
+                {stop.down_seconds == null ? null : <span className="readout">down {howLong(stop.down_seconds)}</span>}
+                {stop.dump?.name ? <span className="readout">{stop.dump.name}</span> : null}
+              </span> : null}
               {reportOnly ? <span className={styles.reportOnly}>
                 <span className={styles.reportMain}><span className="label">Windows error report filed</span><strong className="readout">{stamp(stop.reported_at)}</strong></span>
                 <span className={styles.reportFacts}>
@@ -403,6 +434,9 @@ function StopSequence({ stops, selected, onInspect }: { stops: Stop[]; selected:
               </span>
               {stop.reported_at ? <span className={`${styles.reported} readout`}>Report filed {stamp(stop.reported_at)}{!stop.started_at && !stop.stopped_at ? ' · only report timing is available' : ''}</span> : null}</>}
             </button>
+            <div id={`stop-detail-${index}`} className={selected === index ? styles.sequenceDetail : undefined}>
+              {selected === index ? <StopDetail stop={stop} envelope={envelope} /> : null}
+            </div>
           </li>;
         })}
       </ol>
@@ -650,11 +684,6 @@ function FaultDetail({ fault, at: moment, envelope, rawRecords }: { fault: Fault
       </div>
     </>
   );
-}
-
-/** The moment a stop belongs to: the start it was announced at, else what is left of it, else when its report was filed. */
-function whenOf(stop: Stop): string {
-  return stop.started_at ?? stop.announced_at ?? stop.stopped_at ?? stop.reported_at ?? '';
 }
 
 /** Every record the stop was composed from, so stacking it hands over the evidence and not the conclusion. */

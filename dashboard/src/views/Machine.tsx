@@ -178,6 +178,7 @@ export function Machine() {
               <p className={`${styles.day} label`}>{label}</p>
               <RowList
                 items={rows}
+                snapshot={driverRows}
                 layout={styles.driverRow}
                 cells={(d) => (
                   <>

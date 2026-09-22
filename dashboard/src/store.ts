@@ -12,6 +12,17 @@ interface PerformanceViewState {
   selectedAt: string | null;
 }
 
+interface CrashesViewState {
+  stopCount: number;
+  faultCount: number;
+  faultKind: string | null;
+  stopId: string | null;
+  faultId: string | null;
+  dumpPath: string | null;
+  /** Which open evidence to return to after following its System record. */
+  focus: 'stop' | 'fault' | 'dump' | null;
+}
+
 export const VIEWS: { id: ViewId; label: string; group: ViewGroup }[] = [
   { id: 'record', label: 'Record', group: 'Evidence' },
   { id: 'errors', label: 'Hardware errors', group: 'Evidence' },
@@ -64,6 +75,9 @@ interface AppState {
   /** Keep the Performance window and selected sample while its view is unmounted for a record jump. */
   performanceView: PerformanceViewState;
   setPerformanceView: (change: Partial<PerformanceViewState>) => void;
+  /** Remember controls and source identities within this tab, never raw evidence or paths in the URL. */
+  crashesView: CrashesViewState;
+  setCrashesView: (change: Partial<CrashesViewState>) => void;
   /** Restore a browser history entry without writing another entry. */
   restoreAddress: () => void;
 }
@@ -87,5 +101,7 @@ export const useApp = create<AppState>((set, get) => ({
   },
   performanceView: { hours: 6, endChoice: 'now', selectedAt: null },
   setPerformanceView: (change) => set((state) => ({ performanceView: { ...state.performanceView, ...change } })),
+  crashesView: { stopCount: 5, faultCount: 30, faultKind: null, stopId: null, faultId: null, dumpPath: null, focus: null },
+  setCrashesView: (change) => set((state) => ({ crashesView: { ...state.crashesView, ...change } })),
   restoreAddress: () => set(navigationFromAddress()),
 }));

@@ -165,6 +165,7 @@ export function Errors() {
         <Section title="Signatures" cls="derived" basis={basisOf(storms.reading, 'signatures')} note={`${signatures.length} distinct, most seen first`}>
           <RowList
             items={signatures}
+            idOf={(signature) => signature.id}
             layout={styles.sigRow}
             cells={(s) => (
               <>
@@ -201,6 +202,7 @@ export function Errors() {
         {observed(whea.reading) && records.length > 0 ? (
           <RowList
             items={records}
+            idOf={(record) => record.RecordId}
             layout={styles.recordRow}
             cells={(r) => (
               <>
