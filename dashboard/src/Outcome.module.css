@@ -32,6 +32,10 @@
 }
 .method { margin-top: 12px; }
 .method p { margin: 0 0 6px; }
+.complete { min-width: 0; max-width: 100%; margin-top: 10px; }
+.complete summary { width: fit-content; min-height: 32px; padding: 6px 0; color: var(--ink); cursor: pointer; }
+.complete summary:hover { text-decoration: underline; }
+.completeNote { color: var(--muted); font-size: 12px; }
 .query {
   margin: 0 0 8px;
   padding: 10px 12px;

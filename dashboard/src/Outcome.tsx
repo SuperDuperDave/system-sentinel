@@ -72,6 +72,7 @@ export function OutcomeLine<T>({ taken, noun = 'records', emptyText }: { taken: 
 
 /** How the reading was taken: one query, several, or the readings it drew on. */
 function Method({ reading }: { reading: Reading }) {
+  const [showReading, setShowReading] = useState(false);
   const m = reading.method;
   const queries = m.queries ?? (m.query ? [m.query] : []);
   return (
@@ -82,6 +83,15 @@ function Method({ reading }: { reading: Reading }) {
       ))}
       {m.source ? <p className={`${styles.query} readout`}>{m.source}</p> : null}
       {m.readings ? <pre className={`${styles.query} readout`}>{JSON.stringify(m.readings, null, 1)}</pre> : null}
+      <details className={styles.complete} onToggle={(event) => setShowReading(event.currentTarget.open)}>
+        <summary className="readout">Complete returned reading · JSON</summary>
+        {showReading ? (
+          <>
+            <p className={`${styles.completeNote} readout`}>The exact response this dashboard received. Default redaction applies.</p>
+            <pre className={`${styles.query} readout`}>{JSON.stringify(reading, null, 2)}</pre>
+          </>
+        ) : null}
+      </details>
     </div>
   );
 }
