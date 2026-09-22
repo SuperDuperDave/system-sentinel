@@ -132,7 +132,11 @@ def test_reliability_answers_or_windows_kept_no_record():
     bridge = real_bridge_or_skip()
     r = asyncio.run(take("reliability", bridge, {"days": 7}))
     assert r.outcome in ("ok", "empty"), r.error
-    assert [s.name for s in r.sections] == ["records", "stability", "days"]
+    assert [s.name for s in r.sections] == ["records", "stability", "days", "collection"]
+    collection = r.section("collection").data
+    for name in ("records", "stability"):
+        assert collection[name]["outcome"] in ("ok", "empty"), collection[name]
+        assert collection[name]["returned"] == len(r.section(name).data)
     rollup = r.section("days").data
     assert set(rollup) >= {"from", "to", "days", "sources", "index_now", "index_lowest"}
     if r.outcome == "ok":

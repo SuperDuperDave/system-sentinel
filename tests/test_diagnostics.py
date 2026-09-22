@@ -115,7 +115,16 @@ RELIABILITY_RECORDS = [
      "InsertionStrings": ["example.exe"], "User": "SOMEBOX\\someone", "ComputerName": "SOMEBOX"},
 ]
 
-RELIABILITY_PAYLOAD = {"records": RELIABILITY_RECORDS, "stability": RELIABILITY_STABILITY, "window_days": 30, "warnings": []}
+def reliability_payload(record_rows, stability_rows, **outcomes):
+    collection = {}
+    for name, rows in (("records", record_rows), ("stability", stability_rows)):
+        outcome = outcomes.get(name, "ok" if rows else "empty")
+        observed = outcome in ("ok", "empty")
+        collection[name] = {"outcome": outcome, "available": len(rows) if observed else None, "returned": len(rows), "limit": 500 if name == "records" else None, "error": None if observed else "synthetic source failure"}
+    return {"records": record_rows, "stability": stability_rows, "collection": collection, "window_days": 30, "warnings": []}
+
+
+RELIABILITY_PAYLOAD = reliability_payload(RELIABILITY_RECORDS, RELIABILITY_STABILITY)
 
 # Stops as crash composes them: two that share a bug check, two that wrote none, one on its own.
 def _stop(started_at: str, code: str | None = None, name: str | None = None) -> dict:
@@ -391,25 +400,97 @@ def test_a_day_with_records_and_no_index_is_still_a_day():
 def test_reliability_returns_both_raw_sections_and_the_rollup():
     reading = asyncio.run(take("reliability", payload_bridge(), {}))
     assert reading.outcome == "ok" and reading.count == 3
-    assert [(s.name, s.cls) for s in reading.sections] == [("records", "raw"), ("stability", "raw"), ("days", "derived")]
+    assert [(s.name, s.cls) for s in reading.sections] == [("records", "raw"), ("stability", "raw"), ("days", "derived"), ("collection", "raw")]
     assert reading.section("days").basis
     assert reading.section("records").data[0]["ComputerName"] == "SOMEBOX"  # redaction happens at the boundary
     assert "-30" in reading.method["query"]
 
 
 def test_a_machine_windows_kept_no_record_of_is_empty_not_ok():
-    bridge = FakeBridge(BridgeResult("ok", items=[{"records": [], "stability": [], "window_days": 30, "warnings": []}]))
+    bridge = FakeBridge(BridgeResult("ok", items=[reliability_payload([], [])]))
     reading = asyncio.run(take("reliability", bridge, {}))
     assert reading.outcome == "empty" and reading.count == 0 and reading.error is None
-    assert [s.name for s in reading.sections] == ["records", "stability", "days"]
+    assert [s.name for s in reading.sections] == ["records", "stability", "days", "collection"]
 
 
 def test_one_class_answering_and_the_other_not_is_still_an_observed_reading():
-    payload = {"records": RELIABILITY_RECORDS, "stability": [], "window_days": 30, "warnings": ["Win32_ReliabilityStabilityMetrics did not answer: nope"]}
+    payload = reliability_payload(RELIABILITY_RECORDS, [], stability="failed")
     reading = asyncio.run(take("reliability", FakeBridge(BridgeResult("ok", items=[payload])), {}))
     assert reading.outcome == "ok" and reading.count == 3
-    assert any("Win32_ReliabilityStabilityMetrics" in w for w in reading.warnings)
+    assert any("stability did not answer" in w for w in reading.warnings)
     assert all(d["index_last"] is None for d in reading.section("days").data["days"])
+
+
+@pytest.mark.parametrize("records,stability,expected", [
+    ("failed", "failed", "failed"), ("denied", "denied", "denied"),
+    ("denied", "failed", "failed"), ("empty", "failed", "failed"),
+    ("failed", "empty", "failed"), ("empty", "denied", "denied"),
+])
+def test_no_data_from_a_partial_or_failed_collection_is_not_an_observed_absence(records, stability, expected):
+    payload = reliability_payload([], [], records=records, stability=stability)
+    reading = asyncio.run(take("reliability", FakeBridge(BridgeResult("ok", items=[payload])), {}))
+    assert reading.outcome == expected and not reading.observed
+    assert reading.count is None and reading.error["kind"] == expected
+    assert reading.section("collection").data["records"]["outcome"] == records
+    assert reading.section("collection").data["stability"]["outcome"] == stability
+
+
+def test_stability_without_event_observation_keeps_counts_unknown_in_rollup_and_signals():
+    payload = reliability_payload([], RELIABILITY_STABILITY, records="failed")
+    reading = asyncio.run(take("reliability", FakeBridge(BridgeResult("ok", items=[payload])), {}))
+    assert reading.outcome == "ok" and reading.count is None
+    days = reading.section("days").data
+    assert days["sources"] is None and days["index_now"] == 6.2
+    assert all(row["records"] is None and row["event_types"] is None for row in days["days"])
+    signals, _ = take_signals_sync(_inputs(reliability=reading))
+    fall = next(s for s in signals if s["id"] == "transition:reliability-index-fall")
+    assert fall["evidence"]["records"] is None and fall["evidence"]["event_types"] is None
+    assert "could not be observed" in fall["summary"]
+
+
+@pytest.mark.parametrize("collection", [None, {}, {"records": {"outcome": "empty", "available": 0, "returned": 1}}])
+def test_missing_or_inconsistent_source_results_do_not_certify_an_empty_machine(collection):
+    payload = {"records": [], "stability": [], "collection": collection}
+    reading = asyncio.run(take("reliability", FakeBridge(BridgeResult("ok", items=[payload])), {}))
+    assert reading.outcome == "failed" and not reading.observed
+
+
+@pytest.mark.parametrize("source,rows,metadata", [
+    ("records", [], {"outcome": "empty", "available": 5, "returned": 0, "limit": 500}),
+    ("records", [{}, {}], {"outcome": "ok", "available": 2, "returned": 2, "limit": 1}),
+    ("stability", [{}], {"outcome": "ok", "available": 2, "returned": 1, "limit": None}),
+    ("records", [], {"outcome": "empty", "available": 0, "returned": 0, "limit": 0}),
+    ("records", [], {"outcome": "empty", "available": 0, "returned": 0, "limit": True}),
+    ("records", [], {"outcome": "empty", "available": 0, "returned": 0, "limit": "500"}),
+    ("records", [], {"outcome": "empty", "available": 0, "returned": 0}),
+])
+def test_contradictory_source_coverage_cannot_certify_observation(source, rows, metadata):
+    payload = reliability_payload([], [])
+    payload[source] = rows
+    payload["collection"][source] = metadata
+    reading = asyncio.run(take("reliability", FakeBridge(BridgeResult("ok", items=[payload])), {}))
+    assert reading.outcome == "failed" and not reading.observed and reading.count is None
+    assert reading.section(source).data == []
+    assert reading.section("collection").data[source]["outcome"] == "failed"
+    other = "stability" if source == "records" else "records"
+    assert reading.section("collection").data[other]["outcome"] == "empty"
+
+
+def test_reliability_exposes_the_sources_returned_and_available_counts():
+    payload = reliability_payload(RELIABILITY_RECORDS, RELIABILITY_STABILITY)
+    payload["collection"]["records"].update(available=900, limit=3)
+    reading = asyncio.run(take("reliability", FakeBridge(BridgeResult("ok", items=[payload])), {}))
+    source = reading.section("collection").data["records"]
+    assert (source["available"], source["returned"], source["limit"]) == (900, 3, 3)
+    assert reading.count == 3
+
+
+def test_rows_from_an_incomplete_source_never_enter_the_observed_rollup():
+    payload = reliability_payload(RELIABILITY_RECORDS, RELIABILITY_STABILITY, records="failed")
+    reading = asyncio.run(take("reliability", FakeBridge(BridgeResult("ok", items=[payload])), {}))
+    assert reading.outcome == "ok" and reading.count is None
+    assert reading.section("records").data == []
+    assert reading.section("days").data["sources"] is None
 
 
 def test_a_window_outside_the_range_is_refused():

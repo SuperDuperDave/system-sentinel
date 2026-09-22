@@ -226,24 +226,21 @@ catch {
 """
 
 CONSTRAINTS_SCRIPT = r"""
-$warnings = @()
-
 # Every present device the machine is not simply using: disabled by a person, without a
 # driver, or in error. One query over all of them, so the reason is the device's own.
-$devices = @()
-try {
-    $devices = @(Get-PnpDevice -PresentOnly -ErrorAction Stop |
-        Where-Object { $_.Status -ne 'OK' -or ([string]$_.Problem -ne 'CM_PROB_NONE' -and [string]$_.Problem) } |
-        Select-Object @{Name='Name'; Expression={ [string]$_.FriendlyName }},
-            @{Name='InstanceId'; Expression={ [string]$_.InstanceId }},
-            @{Name='Class'; Expression={ [string]$_.Class }},
-            @{Name='Status'; Expression={ [string]$_.Status }},
-            @{Name='Problem'; Expression={ [string]$_.Problem }},
-            ProblemDescription,
-            @{Name='Service'; Expression={ [string]$_.Service }})
-} catch { $warnings += "Get-PnpDevice did not answer: $($_.Exception.Message)" }
+# This is the only source: if it fails, the bridge must report that failure rather than an
+# empty list that would claim every device is working.
+$devices = @(Get-PnpDevice -PresentOnly -ErrorAction Stop |
+    Where-Object { $_.Status -ne 'OK' -or ([string]$_.Problem -ne 'CM_PROB_NONE' -and [string]$_.Problem) } |
+    Select-Object @{Name='Name'; Expression={ [string]$_.FriendlyName }},
+        @{Name='InstanceId'; Expression={ [string]$_.InstanceId }},
+        @{Name='Class'; Expression={ [string]$_.Class }},
+        @{Name='Status'; Expression={ [string]$_.Status }},
+        @{Name='Problem'; Expression={ [string]$_.Problem }},
+        ProblemDescription,
+        @{Name='Service'; Expression={ [string]$_.Service }})
 
-[pscustomobject]@{ devices = $devices; warnings = $warnings }
+[pscustomobject]@{ devices = $devices }
 """
 
 # ---------------------------------------------------------------------------
@@ -912,8 +909,10 @@ def _index_fall(days: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "transitions",
             "transition:reliability-index-fall",
             f"Windows' reliability index fell {fall} on {day['day']}",
-            "Windows' index changed between adjacent UTC days. The events returned for this day are shown here, but the index does not identify which event drove the change.",
-            {"day": day["day"], "index_before": left_at, "index_min": _float(day.get("index_min")), "fall": fall, "records": day.get("records") or {}, "event_types": day.get("event_types") or []},
+            "Windows' index changed between adjacent UTC days. "
+            + ("Reliability events could not be observed for this reading. " if day.get("records") is None else "The events returned for this day are shown here. ")
+            + "The index does not identify which event drove the change.",
+            {"day": day["day"], "index_before": left_at, "index_min": _float(day.get("index_min")), "fall": fall, "records": day.get("records"), "event_types": day.get("event_types")},
             ["reliability"],
         )
     ]

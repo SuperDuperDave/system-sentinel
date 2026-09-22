@@ -10,8 +10,8 @@ interface ReliabilityDay {
   day: string;
   index_last: number | null;
   index_min: number | null;
-  records: Record<string, number>;
-  event_types: { source: string; event_id: number | null; count: number }[];
+  records: Record<string, number> | null;
+  event_types: { source: string; event_id: number | null; count: number }[] | null;
 }
 
 interface Rollup {
@@ -48,8 +48,8 @@ function calendar(days: ReliabilityDay[]): { day: string; row: ReliabilityDay | 
   });
 }
 
-function recordCount(row: ReliabilityDay): number {
-  return Object.values(row.records).reduce((total, count) => total + count, 0);
+function recordCount(row: ReliabilityDay): number | null {
+  return row.records === null ? null : Object.values(row.records).reduce((total, count) => total + count, 0);
 }
 
 function eventLabel(source: string, id: number | null): string {
@@ -81,7 +81,8 @@ export function ReliabilityHistory() {
   const [chosen, setChosen] = useState<string | null>(null);
   const selected = days.find((day) => day.day === chosen) ?? [...days].reverse().find((day) => day.row);
   const row = selected?.row ?? null;
-  const max = Math.max(1, ...days.map((day) => day.row ? recordCount(day.row) : 0));
+  const max = Math.max(1, ...days.map((day) => day.row ? recordCount(day.row) ?? 0 : 0));
+  const selectedCount = row ? recordCount(row) : null;
   const indexes = days.map((day) => day.row?.index_last ?? null);
   const indexPath = indexes.map((value, i) => {
     if (value == null || !Number.isFinite(value)) return '';
@@ -99,7 +100,7 @@ export function ReliabilityHistory() {
       controls={taken.reading ? <AddToStack item={{ kind: 'reading', envelope: taken.reading, title: 'Windows reliability record, last 30 days' }} /> : null}
     >
       <p className={styles.intro}>Windows keeps both fault reports and informational events here, including successful updates. The bars count all returned events; the selected day names each type. Its index is Windows' measure, not a cause finding.</p>
-      <OutcomeLine taken={taken} noun="reliability events" singular="reliability event" emptyText="Windows returned no reliability history for this window" />
+      <OutcomeLine taken={taken} noun={taken.reading?.count === null ? 'reliability history' : 'reliability events'} singular="reliability event" emptyText="Windows returned no reliability history for this window" />
       {observed(taken.reading) && days.length > 0 ? (
         <>
           <figure className={styles.figure}>
@@ -129,7 +130,7 @@ export function ReliabilityHistory() {
                     key={day}
                     type="button"
                     className={`${styles.day} ${entry ? '' : styles.missing} ${active ? styles.active : ''}`}
-                    aria-label={`${dateLabel(day, true)} UTC: ${count === null ? 'no daily row returned' : `${count} reliability ${count === 1 ? 'event' : 'events'} returned`}${entry?.index_last == null ? '' : `, last index ${entry.index_last}`}`}
+                    aria-label={`${dateLabel(day, true)} UTC: ${count === null ? entry ? 'event count unavailable' : 'no daily row returned' : `${count} reliability ${count === 1 ? 'event' : 'events'} returned`}${entry?.index_last == null ? '' : `, last index ${entry.index_last}`}`}
                     aria-pressed={active}
                     onClick={() => setChosen(day)}
                   >
@@ -147,19 +148,19 @@ export function ReliabilityHistory() {
               <span>{dateLabel(days[days.length - 1].day)}</span>
             </figcaption>
           </figure>
-          <p className={`${styles.key} readout`}>A dot is a returned day with no records. A short dash means Windows returned no daily row; it is unknown, not zero.</p>
+          <p className={`${styles.key} readout`}>A dot means the returned event count is zero. A short dash means the count is unknown: no daily row was returned, or the event source did not answer.</p>
           <label className={`${styles.pickerLabel} label`} htmlFor="reliability-day">Inspect a day</label>
           <select id="reliability-day" className={styles.picker} value={selected?.day ?? ''} onChange={(event) => setChosen(event.target.value)}>
-            {days.map(({ day, row: entry }) => <option key={day} value={day}>{dateLabel(day, true)} · {entry ? `${recordCount(entry)} events` : 'no daily row'}</option>)}
+            {days.map(({ day, row: entry }) => <option key={day} value={day}>{dateLabel(day, true)} · {entry ? recordCount(entry) === null ? 'event count unavailable' : `${recordCount(entry)} events` : 'no daily row'}</option>)}
           </select>
           {row ? (
             <div className={styles.inspect} aria-live="polite">
               <h3 className={styles.dayTitle}>{dateLabel(row.day, true)} <span className="readout">UTC</span></h3>
               <p className={styles.summary}>
-                Windows returned {recordCount(row)} reliability {recordCount(row) === 1 ? 'event' : 'events'}.
+                {selectedCount === null ? 'No event count could be established for this day.' : `Windows returned ${selectedCount} reliability ${selectedCount === 1 ? 'event' : 'events'}.`}
                 {row.index_last == null ? ' No stability index was returned for this day.' : ` Its last reported stability index was ${row.index_last.toFixed(1)} of 10${row.index_min == null ? '' : `; its lowest hourly value was ${row.index_min.toFixed(1)}`}.`}
               </p>
-              {row.event_types.length ? (
+              {row.event_types?.length ? (
                 <dl className={styles.sources}>
                   {row.event_types.map(({ source, event_id, count }) => <div key={`${source}:${event_id}`}><dt>{eventLabel(source, event_id)}</dt><dd className="readout">{count}</dd></div>)}
                 </dl>

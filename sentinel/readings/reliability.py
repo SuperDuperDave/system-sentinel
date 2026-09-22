@@ -29,17 +29,20 @@ DEEP = 8
 
 RELIABILITY_SCRIPT_TEMPLATE = r"""
 $warnings = @()
-$since = (Get-Date).AddDays(-{days})
+$until = Get-Date
+$since = $until.AddDays(-{days})
 
 # Each class in its own try: one of them answering and the other not is still an observed reading,
 # as long as the one that did not is a warning rather than a silence.
 # Newest first and bounded: the only other unbounded raw section would be this one, and an agent
 # taking the reading pays for every Message string in it. The bound says so when it bites.
 $records = @()
-$held = 0
+$held = $null
+$records_outcome = 'failed'
+$records_error = $null
 try {
     $all = @(Get-CimInstance Win32_ReliabilityRecords -ErrorAction Stop |
-        Where-Object { $_.TimeGenerated -and $_.TimeGenerated -ge $since } |
+        Where-Object { $_.TimeGenerated -and $_.TimeGenerated -ge $since -and $_.TimeGenerated -le $until } |
         Sort-Object TimeGenerated -Descending)
     $held = $all.Count
     $records = @($all | Select-Object -First {cap} |
@@ -58,14 +61,22 @@ try {
             }
         })
     if ($held -gt {cap}) { $warnings += "the window holds $held reliability records; only the newest {cap} are returned" }
-} catch { $warnings += "Win32_ReliabilityRecords did not answer: $($_.Exception.Message)" }
+    $records_outcome = if ($records.Count) { 'ok' } else { 'empty' }
+} catch {
+    $records = @()
+    $held = $null
+    $records_outcome = if ($_.CategoryInfo.Category -eq 'PermissionDenied' -or $_.Exception -is [System.UnauthorizedAccessException]) { 'denied' } else { 'failed' }
+    $records_error = $_.Exception.Message
+}
 
 # One row per hour, on UTC hour boundaries, for about the last thirty days however many were asked
 # for: the window the class itself keeps is shorter than the window this reading can be given.
 $stability = @()
+$stability_outcome = 'failed'
+$stability_error = $null
 try {
     $stability = @(Get-CimInstance Win32_ReliabilityStabilityMetrics -ErrorAction Stop |
-        Where-Object { $_.TimeGenerated -and $_.TimeGenerated -ge $since } |
+        Where-Object { $_.TimeGenerated -and $_.TimeGenerated -ge $since -and $_.TimeGenerated -le $until } |
         ForEach-Object {
             [pscustomobject]@{
                 TimeGenerated        = $_.TimeGenerated.ToUniversalTime().ToString('o')
@@ -75,13 +86,31 @@ try {
                 RelID                = $_.RelID
             }
         })
-} catch { $warnings += "Win32_ReliabilityStabilityMetrics did not answer: $($_.Exception.Message)" }
+    $stability_outcome = if ($stability.Count) { 'ok' } else { 'empty' }
+} catch {
+    $stability = @()
+    $stability_outcome = if ($_.CategoryInfo.Category -eq 'PermissionDenied' -or $_.Exception -is [System.UnauthorizedAccessException]) { 'denied' } else { 'failed' }
+    $stability_error = $_.Exception.Message
+}
 
 [pscustomobject]@{
     records     = $records
     stability   = $stability
     window_days = {days}
     warnings    = $warnings
+    collection  = [pscustomobject]@{
+        window_start = $since.ToUniversalTime().ToString('o')
+        window_end = $until.ToUniversalTime().ToString('o')
+        records = [pscustomobject]@{
+            outcome = $records_outcome; available = $held; returned = $records.Count
+            limit = {cap}; error = $records_error
+        }
+        stability = [pscustomobject]@{
+            outcome = $stability_outcome
+            available = $(if ($stability_outcome -in @('ok', 'empty')) { $stability.Count } else { $null })
+            returned = $stability.Count; limit = $null; error = $stability_error
+        }
+    }
 }
 """
 
@@ -94,6 +123,8 @@ DAYS_BASIS = (
     "the current index is the last one reported, and the lowest is the day whose lowest hour was "
     "lowest. A day's index fall points at a day to inspect; it does not establish which event "
     "caused it or diagnose the machine."
+    " If the reliability-record source did not answer, daily records, event types and the window's "
+    "source counts are null: the available stability index does not establish zero events."
 )
 
 
@@ -101,7 +132,7 @@ def reliability_script(days: int) -> str:
     return RELIABILITY_SCRIPT_TEMPLATE.replace("{days}", str(int(days))).replace("{cap}", str(RECORD_CAP))
 
 
-def reliability_days(records: list[dict[str, Any]], stability: list[dict[str, Any]]) -> dict[str, Any]:
+def reliability_days(records: list[dict[str, Any]], stability: list[dict[str, Any]], *, records_observed: bool = True) -> dict[str, Any]:
     """The window, day by day: where the index stood, how low it went, and what Windows counted."""
     hours: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in stability:
@@ -127,13 +158,13 @@ def reliability_days(records: list[dict[str, Any]], stability: list[dict[str, An
                 "day": day,
                 "index_last": indexes[-1] if indexes else None,
                 "index_min": min(indexes) if indexes else None,
-                "records": dict(sorted(counted.get(day, Counter()).items(), key=lambda kv: (-kv[1], kv[0]))),
+                "records": dict(sorted(counted.get(day, Counter()).items(), key=lambda kv: (-kv[1], kv[0]))) if records_observed else None,
                 "event_types": [
                     {"source": source, "event_id": event_id, "count": count}
                     for (source, event_id), count in sorted(
                         typed.get(day, Counter()).items(), key=lambda kv: (-kv[1], kv[0][0], str(kv[0][1]))
                     )
-                ],
+                ] if records_observed else None,
             }
         )
 
@@ -144,7 +175,7 @@ def reliability_days(records: list[dict[str, Any]], stability: list[dict[str, An
         "from": stamps[0] if stamps else None,
         "to": stamps[-1] if stamps else None,
         "days": days,
-        "sources": dict(sorted(sources.items(), key=lambda kv: (-kv[1], kv[0]))),
+        "sources": dict(sorted(sources.items(), key=lambda kv: (-kv[1], kv[0]))) if records_observed else None,
         "index_now": next((d["index_last"] for d in reversed(days) if d["index_last"] is not None), None),
         "index_lowest": {"day": lowest["day"], "index": lowest["index_min"]} if lowest else None,
     }
@@ -157,23 +188,58 @@ def take_reliability(bridge: Bridge, params: dict[str, Any]) -> Reading:
 
     script = reliability_script(days)
     result = bridge.run(script, depth=DEEP)
+    coverage: dict[str, Any] = {}
 
     def build(payload: dict[str, Any]) -> list[Section]:
-        records = [r for r in (payload.get("records") or []) if isinstance(r, dict)]
-        stability = [r for r in (payload.get("stability") or []) if isinstance(r, dict)]
+        collection = payload.get("collection")
+        collection = collection if isinstance(collection, dict) else {}
+        coverage.update({"window_start": collection.get("window_start"), "window_end": collection.get("window_end")})
+        rows: dict[str, list[dict[str, Any]]] = {}
+        for name in ("records", "stability"):
+            source, rows[name] = _source(collection.get(name), payload.get(name))
+            coverage[name] = source
+        records, stability = rows["records"], rows["stability"]
         return [
             Section("records", "raw", records),
             Section("stability", "raw", stability),
-            Section("days", "derived", reliability_days(records, stability), basis=DAYS_BASIS),
+            Section("days", "derived", reliability_days(records, stability, records_observed=coverage["records"]["outcome"] in ("ok", "empty")), basis=DAYS_BASIS),
+            Section("collection", "raw", coverage),
         ]
 
     reading = from_object("reliability", params, script, result, build)
     if reading.observed:
         records = reading.section("records").data
-        reading.count = len(records)
-        if not records and not reading.section("stability").data:
-            reading.outcome = "empty"  # Windows keeps no record of this machine yet: a finding
+        failures = [name for name in ("records", "stability") if coverage[name]["outcome"] not in ("ok", "empty")]
+        for name in failures:
+            reading.warnings.append(f"Reliability {name} did not answer: {coverage[name]['error']}")
+        reading.count = len(records) if "records" not in failures else None
+        if records or reading.section("stability").data:
+            reading.outcome = "ok"  # Useful partial evidence stays available, with its source limits.
+        elif failures:
+            reading.outcome = "denied" if all(coverage[name]["outcome"] == "denied" for name in failures) else "failed"
+            reading.count = None
+            reading.error = {"kind": reading.outcome, "detail": "No reliability history could be established because " + " and ".join(failures) + " did not answer."}
+        else:
+            reading.outcome = "empty"  # Both sources answered and neither returned history.
     return reading
+
+
+def _source(value: Any, rows: Any) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """An empty array cannot certify that a source was read; require its completed result."""
+    problem = "the collector did not return a valid source outcome"
+    if isinstance(value, dict) and value.get("outcome") in ("failed", "denied"):
+        return {**value, "available": None, "returned": 0, "error": value.get("error") or "the source did not answer"}, []
+    if isinstance(value, dict) and value.get("outcome") in ("ok", "empty"):
+        valid_rows = isinstance(rows, list) and all(isinstance(row, dict) for row in rows)
+        available, returned = value.get("available"), value.get("returned")
+        limit = value.get("limit")
+        valid_limit = "limit" in value and (limit is None or type(limit) is int and limit > 0)
+        valid_counts = type(available) is int and type(returned) is int and available >= returned >= 0
+        complete = valid_counts and valid_limit and returned == (available if limit is None else min(available, limit))
+        if valid_rows and complete and returned == len(rows) and (value["outcome"] == "empty") == (returned == 0):
+            return {**value, "error": None}, rows
+        problem = "the collector's source outcome and returned rows disagree"
+    return {"outcome": "failed", "available": None, "returned": 0, "limit": None, "error": problem}, []
 
 
 def _day(stamp: Any) -> str | None:
