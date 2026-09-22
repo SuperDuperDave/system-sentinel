@@ -19,6 +19,25 @@ import { clock } from './Outcome';
 import { useApp } from './store';
 import styles from './Sections.module.css';
 
+const CLASS_MEANING: Record<Cls, { short: string; detail: string }> = {
+  raw: {
+    short: 'returned fields, possibly limited',
+    detail: 'Fields returned by a reading’s source, including Windows, or exact locally stored sample rows. A reading may select fields or limit how much it returns; default privacy redaction still applies.',
+  },
+  derived: {
+    short: 'computed from raw',
+    detail: 'Computed from raw evidence by a stated rule, such as a count, bucket, signature, or decoded structure. Basis names the inputs and rule.',
+  },
+  invariant: {
+    short: 'stable across readings',
+    detail: 'A fact established as stable across readings. A current inventory item that can change is not an invariant.',
+  },
+  inferred: {
+    short: 'lead to investigate',
+    detail: 'A pattern the tool noticed for a person or agent to investigate. It is never a diagnosis; Basis names the rule.',
+  },
+};
+
 /**
  * One section of a reading whose sections differ in shape. `section` in api.ts types every section
  * of a reading alike, which is right for a reading that returns one kind of record and wrong for
@@ -102,7 +121,13 @@ export function SectionHead({
     <div className={styles.sectionHead}>
       <div className={styles.sectionLine}>
         {title ? <h2 className={styles.sectionTitle}>{title}</h2> : null}
-        <span className={`${styles.cls} label`}>{cls}</span>
+        <details className={styles.classHelp}>
+          <summary className={styles.classSummary}>
+            <span className={`${styles.cls} label`}>{cls}</span>
+            <span className={`${styles.classDescriptor} readout`}>{' · '}{CLASS_MEANING[cls].short}</span>
+          </summary>
+          <p className={styles.classDetail}>{CLASS_MEANING[cls].detail}</p>
+        </details>
         {children ? <div className={styles.sectionControls}>{children}</div> : null}
       </div>
       {note ? <p className={`${styles.note} readout`}>{note}</p> : null}

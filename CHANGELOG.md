@@ -16,6 +16,7 @@
 - On phones, Record keeps the selected level and window visible in one disclosure. Its full filter controls remain one tap away, letting the returned evidence appear sooner in the first viewport.
 
 ### Changed
+- Reading section headers now explain what `raw`, `derived`, `invariant` and `inferred` mean in place, with a brief description and an expandable explanation for people learning how to judge the evidence.
 - Record now leads with a plain-language question and a clearer sampled time-and-source panel, then opens a more legible exact row with its complete returned JSON. The tool's Field Instrument refinement increases the base reading sizes and keyboard focus visibility while keeping the same source and raw evidence paths.
 - The source basis shown with decoded stops and faults now describes the event-manifest mapping without a fixed observation date in product copy.
 - Crash descriptions now say precisely that the last System record is the last one before the next start. Its timestamp may be later than Windows' estimated stop and does not by itself establish cause.

@@ -94,7 +94,7 @@ Only `ok` and `empty` say the requested source was observed. For `performance_hi
 
 | Class | Meaning |
 | --- | --- |
-| `raw` | Windows' returned fields, sometimes projected and bounded by the reading, or the exact local sample rows for `performance_history`; default redaction applies. |
+| `raw` | Fields returned by the reading's source, usually Windows, sometimes projected and bounded by the reading; `performance_history` returns exact local sample rows. Default redaction applies. |
 | `derived` | Computed from raw by a stated rule (a count, a bucket, a signature, a decoded structure). The section names its inputs and rule in `basis`. |
 | `invariant` | A fact established as stable across readings; do not use for a current inventory that can change. |
 | `inferred` | A lead: a pattern the tool noticed that a person or an agent should investigate. Never a diagnosis. `basis` names the rule. |

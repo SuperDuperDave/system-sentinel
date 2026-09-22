@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from datetime import UTC
 from pathlib import Path
 from typing import Any
@@ -215,7 +216,9 @@ def test_every_fetched_record_is_decoded_in_the_records_order():
     assert {d["kind"] for d in decoded} == {
         "start", "clean shutdown", "unexpected shutdown", "unexpected shutdown, logged at the next start", "bug check", "bug check report"
     }
-    assert reading.section("decoded").basis.startswith("the positional properties named by this build's event manifests")
+    basis = reading.section("decoded").basis
+    assert basis is not None and "Windows event manifests" in basis
+    assert re.search(r"\b20\d\d-\d\d-\d\d\b", basis) is None
 
 
 # ---------------------------------------------------------------- the rule
