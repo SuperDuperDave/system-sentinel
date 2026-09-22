@@ -123,6 +123,21 @@ def test_minidump_exposes_bounded_raw_streams_and_a_useful_summary():
     assert summary["thread_count"] == 12 and summary["module_count"] == 0
 
 
+def test_a_later_stream_of_the_same_type_is_intentionally_not_sampled():
+    item = mdmp_item()
+    prefix = bytearray(base64.b64decode(item["prefix"]))
+    struct.pack_into("<I", prefix, 8, 5)
+    item["prefix"] = base64.b64encode(prefix).decode()
+    directory = bytearray(base64.b64decode(item["directory"]))
+    directory += struct.pack("<III", 6, 168, 700)
+    item["directory"] = base64.b64encode(directory).decode()
+
+    reading = take_dump_header(FakeBridge(BridgeResult("ok", items=[item])), {"path": PATH})
+    later = reading.section("streams").data["entries"][4]
+    assert later["name"] == "exception" and later["sample_status"] == "skipped_duplicate"
+    assert "sample" not in later and not reading.warnings
+
+
 def test_exception_address_is_located_in_a_recorded_module_without_a_cause_claim():
     item = mdmp_item()
     directory = bytearray(base64.b64decode(item["directory"]))

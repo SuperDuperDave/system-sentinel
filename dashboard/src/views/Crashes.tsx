@@ -90,6 +90,24 @@ interface DumpInspection {
   limit: string;
 }
 
+interface DumpStreamEntry {
+  index: number;
+  type: number;
+  name: string;
+  offset: number;
+  bytes: number;
+  range_status: string;
+  sample?: { offset: number; bytes_read: number };
+  sample_status?: string;
+  recorded_count?: number;
+  modules?: unknown[];
+}
+
+interface DumpStreams {
+  offset: number;
+  entries: DumpStreamEntry[];
+}
+
 const STOP_COUNTS = [5, 20];
 const FAULT_COUNTS = [30, 100];
 const STOP_STAMP = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -466,7 +484,9 @@ function StopDetail({ stop, envelope }: { stop: Stop; envelope: Reading | null }
 /** Read just the selected file's header when the person opens its detail. */
 function DumpHeaderDetail({ path }: { path: string }) {
   const taken = useReading('dump_header', { path });
+  const [rawOpen, setRawOpen] = useState(false);
   const info = part<DumpInspection>(taken.reading, 'inspection');
+  const streams = part<DumpStreams>(taken.reading, 'streams');
   const raw = taken.reading?.sections.filter((section) => section.class === 'raw') ?? [];
   const rows: [string, ReactNode][] = info ? [
     ['Format', info.format],
@@ -497,14 +517,82 @@ function DumpHeaderDetail({ path }: { path: string }) {
       <p className="label">Inside the dump</p>
       <OutcomeLine taken={taken} noun="dump inspection" emptyText="This file is no longer in the dump inventory" />
       {observed(taken.reading) && info ? <Facts rows={rows} /> : null}
+      {observed(taken.reading) && info?.directory_status ? <DumpStreamDirectory status={info.directory_status} declared={info.streams} streams={streams} /> : null}
       {observed(taken.reading) && raw.length > 0 ? (
-        <details className={styles.rawDisclosure}>
+        <details className={styles.rawDisclosure} onToggle={(event) => setRawOpen(event.currentTarget.open)}>
           <summary>Raw file readout</summary>
-          <pre>{JSON.stringify(raw, null, 2)}</pre>
+          {rawOpen ? <pre>{JSON.stringify(raw, null, 2)}</pre> : null}
         </details>
       ) : null}
       {taken.reading ? <div className={styles.actions}><AddToStack item={{ kind: 'reading', envelope: taken.reading, title: 'Dump inspection', verbosity: 'summary' }} label="Stack this dump inspection" /></div> : null}
     </>
+  );
+}
+
+const DIRECTORY_STATUS: Record<string, string> = {
+  ok: 'Directory read',
+  invalid_entries: 'Directory read · some ranges outside file',
+  outside_file: 'Directory outside file',
+  invalid_offset: 'Invalid directory offset',
+  incomplete: 'Directory read incomplete',
+  limit: 'Declared count exceeds read limit',
+};
+
+const FIXED_SAMPLE_BYTES: Record<number, number> = { 3: 4, 4: 4, 6: 168, 7: 32 };
+
+function streamRange(status: string): string {
+  if (status === 'within_file') return 'Declared range within file';
+  if (status === 'outside_file') return 'Declared range outside file';
+  if (status === 'empty') return 'Empty · no bytes declared';
+  return `Unknown · ${status || 'no status returned'}`;
+}
+
+function streamSample(entry: DumpStreamEntry): string {
+  if (entry.range_status === 'outside_file') return 'Not read · range outside file';
+  if (entry.range_status === 'empty') return 'Not read · empty stream';
+  if (entry.range_status !== 'within_file') return 'Unknown · range status unavailable';
+  const minimum = FIXED_SAMPLE_BYTES[entry.type];
+  if (minimum === undefined) return 'Not sampled · this type has no bounded metadata read';
+  if (entry.sample_status === 'skipped_duplicate') return 'Not sampled · earlier stream of this type was selected';
+  if (entry.sample_status === 'incomplete') return 'Metadata sample changed or was truncated';
+  const read = entry.sample?.bytes_read;
+  if (read === undefined) return 'Metadata sample unavailable';
+  if (read < minimum) return `Truncated fixed metadata · ${read} of ${minimum} bytes read`;
+  if (entry.type === 4 && entry.recorded_count !== undefined) {
+    if (entry.recorded_count > 128) return `${read.toLocaleString()} metadata bytes read · module count exceeds 128-record limit`;
+    if (!entry.modules) return `${read.toLocaleString()} metadata bytes read · module list incomplete`;
+  }
+  return `${read.toLocaleString()} metadata ${read === 1 ? 'byte' : 'bytes'} read${read < entry.bytes ? ' · bounded prefix' : ''}`;
+}
+
+/** The directory is a map of declared ranges and a few sampled prefixes, not a file validation. */
+function DumpStreamDirectory({ status, declared, streams }: { status: string; declared?: number; streams: DumpStreams | null }) {
+  const entries = streams?.entries ?? [];
+  const directoryStatus = DIRECTORY_STATUS[status] ?? `Unknown directory status · ${status}`;
+  return (
+    <details className={styles.streamDirectory}>
+      <summary>Stream directory <span className={styles.streamDirectoryStatus}>{directoryStatus} · {entries.length} of {declared ?? '?'} entries returned</span></summary>
+      <div className={styles.streamDirectoryBody}>
+        <p>{streams ? `The file header points to this directory at offset ${streams.offset.toLocaleString()}. ` : ''}Each size and offset comes from the directory. Only selected fixed metadata prefixes were read; these ranges do not validate the dump contents.</p>
+        {entries.length ? <ol className={styles.streamEntries}>
+          {entries.map((entry) => {
+            const range = streamRange(entry.range_status);
+            const sample = streamSample(entry);
+            return <li key={entry.index}>
+              <div className={styles.streamEntryHead}>
+                <strong>{entry.name === `stream ${entry.type}` ? 'Unknown stream name' : entry.name}</strong>
+                <span className="readout">#{entry.index + 1} · type {entry.type}</span>
+              </div>
+              <dl className={styles.streamEntryFacts}>
+                <div><dt>Declared</dt><dd className="readout">{entry.bytes.toLocaleString()} bytes at offset {entry.offset.toLocaleString()}</dd></div>
+                <div><dt>Range</dt><dd className={entry.range_status === 'outside_file' ? styles.streamIssue : undefined}>{range}</dd></div>
+                <div><dt>Metadata</dt><dd className={sample.startsWith('Truncated') || sample.includes('incomplete') || sample.includes('unavailable') ? styles.streamIssue : undefined}>{sample}</dd></div>
+              </dl>
+            </li>;
+          })}
+        </ol> : <p className={styles.streamNoEntries}>{declared === 0 && status === 'ok' ? 'No streams declared.' : 'No directory entries were returned for inspection.'}</p>}
+      </div>
+    </details>
   );
 }
 

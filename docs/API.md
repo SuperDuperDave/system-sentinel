@@ -148,6 +148,8 @@ The app samples `load` in the background by default at 60-second intervals wheth
 
 Records from a log (`events`, `record`, `whea`, `crash`, `faults`, the stream) share one shape: `RecordId`, `Id`, `Level`, `LevelDisplayName`, `ProviderName`, `MachineName`, `TaskDisplayName`, `TimeCreated` (UTC, ISO), `Message`, `Properties` (the event's data, binary values as hex). A reading that asks two logs in one query adds `Log` to it, so a record says which log it came from: `crash` and `faults` carry it, the readings that ask one log do not.
 
+For `MDMP`, the raw `streams.entries` list includes every directory entry even when its fixed metadata was not sampled. A later stream of a type already sampled has `sample_status: skipped_duplicate`; that planned limit is distinct from an unavailable or incomplete read. Crashes presents this list with each declared range and read status before the exact raw file readout.
+
 ## The moment
 
 "It froze at 02:14." The log does not announce a freeze; the next start does, and the facts that name one stop are spread over four records in two logs and a file on disk.

@@ -195,16 +195,21 @@ def decode_directory(prefix: bytes, directory: bytes | None, status: str, file_s
         warnings.append("The minidump stream directory could not be read completely.")
         return raw, summary, warnings
     summary["directory_status"] = "ok"
+    sampled_kinds: set[int] = set()
     for index in range(count):
         kind, size, offset = struct.unpack_from("<III", directory, index * DIRECTORY_ENTRY_BYTES)
         range_status = "empty" if size == 0 else "within_file" if offset + size <= file_size else "outside_file"
         entry: dict[str, Any] = {"index": index, "type": kind, "name": STREAM_NAMES.get(kind, f"stream {kind}"), "offset": offset, "bytes": size, "range_status": range_status}
+        duplicate_sample_kind = kind in SAMPLE_BYTES and size > 0 and kind in sampled_kinds
+        if kind in SAMPLE_BYTES and size > 0:
+            sampled_kinds.add(kind)
         bundle = samples.get(index)
         if bundle is not None and kind in SAMPLE_BYTES and range_status == "within_file":
             sample, names = bundle
             minimum_sample = min(size, 4 if kind == 4 else SAMPLE_BYTES[kind])
             if len(sample) == minimum_sample or (kind == 4 and len(sample) <= size and len(sample) <= SAMPLE_BYTES[4]):
                 entry["sample"] = {"offset": offset, "bytes_hex": sample.hex(" "), "bytes_read": len(sample)}
+                entry["sample_status"] = "read"
                 if kind in (3, 4):
                     if len(sample) >= 4:
                         entry["recorded_count"] = struct.unpack_from("<I", sample)[0]
@@ -234,9 +239,12 @@ def decode_directory(prefix: bytes, directory: bytes | None, status: str, file_s
                     else:
                         warnings.append(f"Stream {index} has no complete system record in its bounded prefix.")
             else:
+                entry["sample_status"] = "incomplete"
                 warnings.append(f"Stream {index} changed or was truncated while its metadata was read.")
         elif kind in SAMPLE_BYTES and range_status == "within_file" and size > 0:
-            warnings.append(f"Stream {index} metadata could not be read.")
+            entry["sample_status"] = "skipped_duplicate" if duplicate_sample_kind else "unavailable"
+            if not duplicate_sample_kind:
+                warnings.append(f"Stream {index} metadata could not be read.")
         if range_status == "outside_file":
             warnings.append(f"Stream {index} points beyond the current file length.")
         raw["entries"].append(entry)
