@@ -6,13 +6,14 @@ envelope and that the outcome is one the machine can answer with.
 
 import asyncio
 import base64
+import threading
 from datetime import UTC, datetime, timedelta
 
 import pytest
 
 import sentinel.bridge
 from sentinel import readings  # noqa: F401
-from sentinel.bridge import OUTCOMES, Bridge, sessions_report
+from sentinel.bridge import OUTCOMES, Bridge, Session, sessions_report
 from sentinel.reading import REGISTRY, Section, from_bridge, from_object, take
 from sentinel.readings.health import learn_identity
 from tests.conftest import real_bridge_or_skip
@@ -57,6 +58,83 @@ def test_health_answers():
     data = r.section("bridge").data
     assert data["bridge"]["available"] and data["bridge"]["powershell"]
     assert data["decoder"]["present"] is True
+
+
+def test_a_session_finishing_start_after_shutdown_does_not_serve_a_reading(monkeypatch):
+    """Exercise the startup handover with a real child, independent of scheduling luck."""
+    bridge = real_bridge_or_skip()
+    monkeypatch.setattr(sentinel.bridge, "POOL_SIZE", 1)
+    started = threading.Event()
+    release = threading.Event()
+    real_start = Session.start
+    real_one_shot = Bridge._run_once
+    late: list[Session] = []
+    windows_pids: list[int] = []
+    one_shot_calls: list[str] = []
+    results = []
+    errors: list[BaseException] = []
+    script = "[pscustomobject]@{ Answer = 'after-shutdown' }"
+
+    def held_start(cls, located, *, timeout):
+        session = real_start(located, timeout=timeout)
+        late.append(session)
+        pid = session.ask("[pscustomobject]@{ Pid = $PID }", timeout=10, depth=2)
+        assert pid.outcome == "ok" and len(pid.items) == 1, pid
+        windows_pid = pid.items[0]["Pid"]
+        assert type(windows_pid) is int and windows_pid > 0
+        windows_pids.append(windows_pid)
+        started.set()
+        assert release.wait(20), "shutdown did not release the started session"
+        return session
+
+    def one_shot(self, question, *, timeout, depth):
+        one_shot_calls.append(question)
+        return real_one_shot(self, question, timeout=timeout, depth=depth)
+
+    monkeypatch.setattr(Session, "start", classmethod(held_start))
+    monkeypatch.setattr(Bridge, "_run_once", one_shot)
+
+    def ask():
+        try:
+            results.append(bridge.run(script, timeout=30))
+        except BaseException as exc:
+            errors.append(exc)
+
+    worker = threading.Thread(target=ask, daemon=True)
+    worker.start()
+    try:
+        assert started.wait(20), "the real session did not finish its startup probe"
+        pool = sentinel.bridge._pool_for(bridge)
+        assert pool is not None and pool._starting == 1
+        sentinel.bridge.shutdown_sessions()
+        assert pool._closed and pool.stats()["alive"] == 0
+    finally:
+        release.set()
+        worker.join(40)
+        for session in late:
+            if session.alive:
+                session.discard("test cleanup")
+    assert not worker.is_alive() and not errors, errors
+    assert len(late) == 1 and len(results) == 1
+    assert results[0].outcome == "ok" and results[0].items == [{"Answer": "after-shutdown"}], results[0]
+    assert one_shot_calls == [script]
+    session = late[0]
+    assert session.discarded == "shutdown" and session.answered == 1  # only the PID probe ran there
+    assert session._proc.poll() is not None and all(not reader.is_alive() for reader in session._readers)
+    stats = pool.stats()
+    assert stats["alive"] == stats["idle"] == stats["answered"] == stats["start_failures"] == 0
+    assert stats["fell_back"] == 1 and stats["discarded"] == {"shutdown": 1}
+
+    # On WSL the Popen PID is a relay PID; ask Windows about the actual session PID as well.
+    windows_pid = windows_pids[0]
+    with monkeypatch.context() as once:
+        once.setattr(sentinel.bridge, "POOL_SIZE", 0)
+        gone = bridge.run(
+            f"[pscustomobject]@{{ Alive = [bool](Get-Process -Id {windows_pid} -ErrorAction SilentlyContinue) }}",
+            timeout=20,
+            depth=2,
+        )
+    assert gone.outcome == "ok" and gone.items == [{"Alive": False}], gone
 
 
 @pytest.mark.parametrize("transport", ("one-shot", "session"))

@@ -565,7 +565,7 @@ class Session:
         try:
             stdin.write(line.encode("utf-8") + b"\n")
             stdin.flush()
-        except OSError as exc:
+        except (OSError, ValueError) as exc:
             self.discard("died")
             raise SessionLost(f"the session stopped listening: {exc}") from exc
 
@@ -659,6 +659,8 @@ class Pool:
         """Stop every session this pool holds, including one that is out with a question: at the
         end of a process that is exactly the session that would be left behind. Each is given a
         moment to end by itself first, and the question that loses its session is launched instead.
+        Startup runs outside the lock; if it finishes after closure, checkout disposes of that
+        session before lending it. Shutdown does not wait for an in-progress startup probe.
         """
         with self._lock:
             self._closed = True
@@ -742,8 +744,15 @@ class Pool:
             return None
         with self._lock:
             self._starting -= 1
-            self._sessions.append(started)
-        return started
+            if not self._closed:
+                self._sessions.append(started)
+                return started
+            self._count("shutdown", 1)
+            self._lock.notify_all()
+        # Shutdown could not collect a session still owned by startup. Retire it here, outside
+        # the lock, before the pending question falls back to its own one-shot process.
+        started.discard("shutdown")
+        return None
 
     def _release(self, session: Session) -> None:
         """Take a session back: onto the idle list if it is still good for another question, out of
