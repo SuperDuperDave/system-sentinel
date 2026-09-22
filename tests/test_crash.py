@@ -77,8 +77,20 @@ def from_moment(moment: str) -> dict[str, Any]:
 
 
 def crash(body: dict[str, Any] | None = None, outcome: str = "ok", **params: Any):
+    if body is not None and "collection" not in body:
+        body = {**body, "collection": collection_for(body, params.get("count", 5), params.get("moment"))}
     items = [body] if body is not None else []
     return asyncio.run(take("crash", FakeBridge(BridgeResult(outcome, items=items, took_ms=12)), params))
+
+
+def collection_for(body: dict[str, Any], count: int = 5, moment: str | None = None) -> dict[str, Any]:
+    """Successful synthetic queries, including explicit bounds rather than inferred absence."""
+    result: dict[str, Any] = {}
+    for name, limit in (("system", module.record_cap(count, moment)), ("reports", 3 * count + 6)):
+        returned = len(body.get(name, []))
+        result[name] = {"outcome": "ok" if returned else "empty", "returned": returned, "limit": limit, "bound_reached": returned == limit, "error": None}
+    result["before"] = [{"anchor": row["Anchor"], "at": None, "outcome": "ok", "returned": 1, "error": None} for row in body.get("before", [])]
+    return result
 
 
 def faults(records: list[dict[str, Any]], outcome: str = "ok", **params: Any):
@@ -402,9 +414,126 @@ def test_a_moment_with_no_start_after_it_is_empty_and_says_so():
 
 
 def test_a_log_that_held_nothing_at_all_is_empty_not_failed():
-    reading = crash(None, outcome="empty", count=5)
+    reading = crash(payload(system=[], reports=[], before=[]), count=5)
     assert reading.outcome == "empty" and reading.count == 0 and reading.error is None
-    assert [s.name for s in reading.sections] == ["records", "decoded", "stops"]
+    assert [s.name for s in reading.sections] == ["records", "decoded", "stops", "collection"]
+
+
+def test_an_empty_bridge_payload_cannot_certify_that_both_logs_answered():
+    reading = crash(None, outcome="empty")
+    assert reading.outcome == "failed" and not reading.observed and reading.count is None
+
+
+@pytest.mark.parametrize("system,reports,expected", [
+    ("failed", "failed", "failed"), ("denied", "denied", "denied"),
+    ("failed", "denied", "failed"), ("empty", "failed", "failed"),
+    ("denied", "empty", "denied"),
+])
+def test_primary_source_gaps_cannot_certify_no_stops(system, reports, expected):
+    body = payload(system=[], reports=[], before=[])
+    body["collection"] = collection_for(body)
+    for name, outcome in (("system", system), ("reports", reports)):
+        if outcome != "empty":
+            body["collection"][name].update(outcome=outcome, bound_reached=None, error="synthetic refusal")
+    reading = crash(body)
+    assert reading.outcome == expected and reading.count is None and not reading.observed
+    assert reading.error["kind"] == expected
+
+
+@pytest.mark.parametrize("moment", [None, "2026-01-01T00:00:00Z"])
+def test_surviving_reports_remain_stops_when_system_collection_fails(moment):
+    body = payload()
+    body["collection"] = collection_for(body, moment=moment)
+    body["collection"]["system"].update(outcome="failed", bound_reached=None, error="synthetic System failure")
+    reading = crash(body, moment=moment or "")
+    assert reading.outcome == "ok" and reading.count > 0
+    assert all(stop["started_at"] is None and stop["records"]["report"] for stop in reading.section("stops").data)
+    assert all(row["Log"] == "Application" for row in reading.section("records").data)
+    assert not any("no start follows" in warning for warning in reading.warnings)
+
+
+def test_failed_or_limited_reports_cannot_certify_no_bugcheck():
+    for failed in (True, False):
+        body = payload(reports=[] if failed else [record(2100)] * 21)
+        body["collection"] = collection_for(body)
+        if failed:
+            body["collection"]["reports"].update(outcome="failed", bound_reached=None, error="synthetic Application failure")
+        reading = crash(body)
+        stop = next(s for s in reading.section("stops").data if s["records"]["power_41"] == 900)
+        assert reading.outcome == "ok" and stop["no_bugcheck_recorded"] is None
+        assert reading.warnings
+
+
+def test_a_clean_looking_start_with_failed_reports_is_not_called_clean():
+    moment = "2026-09-06T00:00:00Z"
+    body = from_moment(moment)
+    body["collection"] = collection_for(body, moment=moment)
+    body["collection"]["reports"].update(outcome="failed", bound_reached=None, error="synthetic Application failure")
+    reading = crash(body, moment=moment)
+    assert reading.outcome == "ok"  # Later stops survive, while the first start remains unknown.
+    assert any("could not be classified" in warning for warning in reading.warnings)
+    assert not any("announced no unplanned stop" in warning for warning in reading.warnings)
+
+
+@pytest.mark.parametrize("collection", [None, {}, {"system": {"outcome": "empty", "returned": 0}}])
+def test_missing_query_results_do_not_certify_observation(collection):
+    body = payload(system=[], reports=[], before=[], collection=collection)
+    reading = crash(body)
+    assert reading.outcome == "failed" and not reading.observed
+
+
+def test_contradictory_query_counts_are_discarded_with_a_valid_other_source():
+    body = payload(system=[], reports=[], before=[])
+    body["collection"] = collection_for(body)
+    body["collection"]["system"]["returned"] = 1
+    reading = crash(body)
+    assert reading.outcome == "failed" and reading.count is None
+    assert reading.section("collection").data["reports"]["outcome"] == "empty"
+
+
+def test_failed_before_lookup_does_not_reuse_partial_rows():
+    body = payload()
+    body["collection"] = collection_for(body)
+    failed = body["collection"]["before"][0]
+    failed.update(outcome="denied", returned=0, error="synthetic last-record denial")
+    reading = crash(body)
+    stop = next(s for s in reading.section("stops").data if (s["records"]["start"] or s["records"]["power_41"]) == failed["anchor"])
+    assert reading.outcome == "ok" and stop["last_record_before"] is None and stop["quiet_seconds"] is None
+    assert stop["last_record_collection"]["outcome"] == "denied"
+    assert any("synthetic last-record denial" in warning for warning in reading.warnings)
+
+
+def test_duplicate_lookup_outcomes_cannot_pair_an_old_row_with_a_new_failure():
+    body = payload()
+    body["collection"] = collection_for(body)
+    first = body["collection"]["before"][0]
+    body["collection"]["before"].append({**first, "outcome": "denied", "returned": 0, "error": "synthetic second lookup failure"})
+    reading = crash(body)
+    stop = next(s for s in reading.section("stops").data if (s["records"]["start"] or s["records"]["power_41"]) == first["anchor"])
+    assert stop["last_record_before"] is None and stop["last_record_collection"]["outcome"] == "failed"
+    assert "duplicate lookup outcomes" in stop["last_record_collection"]["error"]
+
+
+def test_missing_lookup_metadata_does_not_certify_that_no_lookup_was_needed():
+    body = payload()
+    body["collection"] = collection_for(body)
+    body["collection"]["before"] = []
+    reading = crash(body)
+    stops = [s for s in reading.section("stops").data if s["records"]["power_41"]]
+    assert stops
+    assert all(s["last_record_before"] is None and s["last_record_collection"]["outcome"] == "not_returned" for s in stops)
+
+
+def test_reports_beyond_a_capped_moment_window_keep_unknown_session_association():
+    moment = "2026-08-01T00:00:00Z"
+    body = payload(system=list(reversed(clean_sessions(24))), reports=[record(2000)], before=[])
+    assert len(body["system"]) == module.record_cap(5, moment)
+    reading = crash(body, moment=moment)
+    assert reading.outcome == "ok" and reading.count == 1
+    stop = reading.section("stops").data[0]
+    assert stop["reported_at"] and stop["started_at"] is None
+    assert stop["records"]["start"] is None and stop["records"]["report"] == [2000]
+    assert any("session association is unknown" in warning for warning in reading.warnings)
 
 
 # ---------------------------------------------------------------- faults
@@ -481,8 +610,10 @@ def test_faults_keeps_the_sections_apart():
 
 @pytest.fixture
 def client():
+    body = payload()
+    body["collection"] = collection_for(body, count=1)
     bridge = FakeBridge(
-        result=BridgeResult("ok", items=[payload()], took_ms=5),
+        result=BridgeResult("ok", items=[body], took_ms=5),
         by_marker={"$env:COMPUTERNAME": identity_result("WORKBENCH", "someone")},
     )
     app = create_app(State(bridge=bridge, token=TOKEN))
@@ -520,7 +651,7 @@ def test_a_stop_arrives_redacted_like_every_other_reading(client: TestClient):
 STOP_KEYS = {
     "started_at", "announced_at", "stopped_at",
     "reported_at", "down_seconds", "bugcheck", "no_bugcheck_recorded",
-    "power", "dump", "last_record_before", "quiet_seconds", "records",
+    "power", "dump", "last_record_before", "last_record_collection", "quiet_seconds", "records",
 }
 
 
@@ -528,7 +659,7 @@ STOP_KEYS = {
 def test_crash_answers_on_this_machine():
     reading = asyncio.run(take("crash", real_bridge_or_skip(), {"count": 3}))
     assert reading.outcome in ("ok", "empty"), reading.error
-    assert [s.name for s in reading.sections] == ["records", "decoded", "stops"]
+    assert [s.name for s in reading.sections] == ["records", "decoded", "stops", "collection"]
     for stop in reading.section("stops").data:
         assert set(stop) == STOP_KEYS
         assert set(stop["records"]) == {"start", "power_41", "eventlog_6008", "wer_1001", "report"}

@@ -877,7 +877,7 @@ def _repeated_stops(stops: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "transitions",
                 f"transition:repeated-stop:{'no-bugcheck' if none_recorded else code}",
                 f"{len(group)} stops wrote no bug check" if none_recorded else f"{len(group)} stops share bug check {f'{code} ({name})' if name else code}",
-                "These stops recorded nothing beyond the fact that they happened: the machine did not get far enough to write a bug check, which is itself the evidence. What it was doing before each one is the record before its start."
+                "Each stop's Kernel-Power record carried bug check code 0, and the returned logs supplied no bug check for that stop. This does not establish why no code was recorded. The record before each start provides further context."
                 if none_recorded
                 else "More than one stop was announced with this bug check. What they have in common is a lead; whether they have one cause is for the dumps and the record before each start to say.",
                 {"stops": len(group), "code": None if none_recorded else code, "name": name, "started_at": [s.get("started_at") for s in group]},

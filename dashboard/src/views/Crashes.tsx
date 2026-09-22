@@ -40,11 +40,12 @@ interface Stop {
   started_at: string | null;
   announced_at: string | null;
   stopped_at: string | null;
-  /** When Windows Error Reporting filed the report: the one time a stop the System log no longer holds still carries. */
+  /** When Windows Error Reporting filed the report, including a report with no returned System session. */
   reported_at: string | null;
   down_seconds: number | null;
   bugcheck: Bugcheck | null;
-  no_bugcheck_recorded: boolean;
+  no_bugcheck_recorded: boolean | null;
+  last_record_collection?: { outcome: string; returned: number; error: string | null };
   power: { sleep_in_progress?: unknown; power_button_timestamp?: unknown; whea_boot_error_count?: unknown; boot_app_status?: unknown; checkpoint?: unknown } | null;
   dump: Dump | null;
   last_record_before: LastRecord | null;
@@ -403,7 +404,7 @@ function StopSequence({ stops, selected, envelope, onInspect, registerButton }: 
             >
               <span className={styles.sequenceLabel}><span className="readout">{String(index + 1).padStart(2, '0')} / returned stop</span><span className="readout">{selected === index ? 'Hide exact stop' : 'Inspect exact stop'}</span></span>
               {!reportOnly ? <span className={styles.sequenceFinding}>
-                <strong>{[stop.bugcheck?.name, stop.bugcheck?.code].filter(Boolean).join(' · ') || (stop.no_bugcheck_recorded ? 'No bug check recorded' : 'No bug check named')}</strong>
+                <strong>{[stop.bugcheck?.name, stop.bugcheck?.code].filter(Boolean).join(' · ') || (stop.no_bugcheck_recorded === null ? 'Bug check status unknown' : stop.no_bugcheck_recorded ? 'No bug check recorded' : 'No bug check named')}</strong>
                 {stop.down_seconds == null ? null : <span className="readout">down {howLong(stop.down_seconds)}</span>}
                 {stop.dump?.name ? <span className="readout">{stop.dump.name}</span> : null}
               </span> : null}
@@ -417,7 +418,7 @@ function StopSequence({ stops, selected, envelope, onInspect, registerButton }: 
               </span> : <><span className={styles.sequencePhases}>
                 <span className={styles.phase}>
                   <span className={`${styles.phaseLabel} label`}>Last System record before restart</span>
-                  <strong className="readout">{last ? stamp(last.TimeCreated, 'Time not recorded') : 'Not recorded'}</strong>
+                  <strong className="readout">{last ? stamp(last.TimeCreated, 'Time not recorded') : lastRecordStatus(stop)}</strong>
                   {last ? <span className={styles.phaseNote}>{[last.ProviderName, last.Id == null ? null : `event ${last.Id}`].filter(Boolean).join(' · ') || 'Source not recorded'}</span> : null}
                   {relation ? <span className={styles.phaseRelation}>{relation}</span> : null}
                 </span>
@@ -464,6 +465,15 @@ function recordToEstimate(recordAt: string | null | undefined, estimateAt: strin
  * System record before restart. Then the two moves that follow — the record before the next
  * start and the stop itself onto the stack.
  */
+function lastRecordStatus(stop: Stop): string {
+  const outcome = stop.last_record_collection?.outcome;
+  if (outcome === 'denied') return 'Access denied';
+  if (outcome === 'failed') return 'Lookup failed';
+  if (outcome === 'not_returned') return 'Lookup unavailable';
+  if (outcome === 'not_requested') return 'Not requested';
+  return 'No record returned';
+}
+
 function StopDetail({ stop, envelope }: { stop: Stop; envelope: Reading | null }) {
   const moment = stop.started_at ?? stop.announced_at ?? stop.reported_at;
   const ids = recordIds(stop);
@@ -482,7 +492,8 @@ function StopDetail({ stop, envelope }: { stop: Stop; envelope: Reading | null }
   } else {
     rows.push([
       'Bug check',
-      stop.no_bugcheck_recorded ? <span className={styles.quiet}>none recorded: the Kernel-Power 41 carried bug check code 0</span> : <Value value={null} />,
+      stop.no_bugcheck_recorded === null ? <span className={styles.quiet}>Unknown: the log queries were incomplete; code 0 in Kernel-Power alone cannot establish absence.</span>
+        : stop.no_bugcheck_recorded ? <span className={styles.quiet}>none recorded: the Kernel-Power 41 carried bug check code 0</span> : <Value value={null} />,
     ]);
   }
   rows.push(['Dump', stop.dump ? <Value value={stop.dump.name} /> : <span className={styles.quiet}>none matched</span>]);
@@ -495,6 +506,8 @@ function StopDetail({ stop, envelope }: { stop: Stop; envelope: Reading | null }
     const last = stop.last_record_before;
     rows.push(['Last System record before restart', <Value value={[last.TimeCreated, last.ProviderName, last.Id, last.LevelDisplayName].filter((v) => v != null).join(' · ')} />]);
     rows.push(['Until next start', stop.quiet_seconds == null ? <Value value={null} /> : <Value value={howLong(stop.quiet_seconds)} />]);
+  } else {
+    rows.push(['Last System record before restart', <span className={styles.quiet}>{lastRecordStatus(stop)}{stop.last_record_collection?.error ? `: ${stop.last_record_collection.error}` : ''}</span>]);
   }
   // The one field of the 41 that points somewhere else: hardware errors counted at that boot are
   // the Errors view's subject, and a stop that carries them is worth reading there too.

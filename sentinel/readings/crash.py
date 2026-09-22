@@ -266,7 +266,10 @@ STOPS_BASIS = (
     "value, reported_at is when the report was filed, and last_record_before is the last System record before the "
     "start of a stop the 41 announced. The dump is the file the 1001 names, else a .dmp the report attached, else "
     "the newest dump written between the stop and half an hour past the start or the report, because the file is "
-    "written while the machine comes back; matched_by says which."
+    "written while the machine comes back; matched_by says which. Collection names each event-log query's "
+    "outcome and bound. Missing queries preserve surviving evidence; no_bugcheck_recorded is null when "
+    "incomplete queries cannot establish absence, and last_record_collection distinguishes a failed lookup "
+    "from an observed empty one."
 )
 
 FAULTS_BASIS = (
@@ -517,29 +520,44 @@ def faults_query(clause: str) -> str:
 
 CRASH_SCRIPT_TEMPLATE = r"""
 $warnings = @()
+function Get-CrashQueryFailure($failure) {
+    if ($failure.FullyQualifiedErrorId -like 'NoMatchingEventsFound*') { return 'empty' }
+    if ($failure.CategoryInfo.Category -eq 'PermissionDenied' -or $failure.Exception -is [System.UnauthorizedAccessException]) { return 'denied' }
+    return 'failed'
+}
 
 $system = @()
+$system_outcome = 'failed'
+$system_error = $null
 try {
     $q = @"
 {system_query}
 "@
     $system = @(Get-WinEvent -FilterXml ([xml]$q) -MaxEvents {system_max}{oldest} -ErrorAction Stop |
         {projection})
+    $system_outcome = if ($system.Count) { 'ok' } else { 'empty' }
 } catch {
-    if ($_.FullyQualifiedErrorId -notlike 'NoMatchingEventsFound*') { $warnings += "The System log's stop records did not read: $($_.Exception.Message)" }
+    $system = @()
+    $system_outcome = Get-CrashQueryFailure $_
+    if ($system_outcome -ne 'empty') { $system_error = $_.Exception.Message }
 }
 
 # What Windows filed about the stop. The Application log keeps these months longer than the System
 # log keeps the stop itself, so a report can outlive the session it belongs to.
 $reports = @()
+$reports_outcome = 'failed'
+$reports_error = $null
 try {
     $rq = @"
 {reports_query}
 "@
     $reports = @(Get-WinEvent -FilterXml ([xml]$rq) -MaxEvents {reports_max}{oldest} -ErrorAction Stop |
         {projection})
+    $reports_outcome = if ($reports.Count) { 'ok' } else { 'empty' }
 } catch {
-    if ($_.FullyQualifiedErrorId -notlike 'NoMatchingEventsFound*') { $warnings += "The bug check reports did not read: $($_.Exception.Message)" }
+    $reports = @()
+    $reports_outcome = Get-CrashQueryFailure $_
+    if ($reports_outcome -ne 'empty') { $reports_error = $_.Exception.Message }
 }
 
 $dumps = @()
@@ -550,20 +568,35 @@ catch { $warnings += "The dump inventory did not read: $($_.Exception.Message)" 
 # before the announcement itself where the log's retention begins after that start. The starts are
 # already in hand, so this costs one indexed query each and no second launch.
 $before = @()
+$before_collection = @()
+$queried_anchors = @{}
 $announced = @($system | Where-Object { $_.Id -eq 41 -and $_.ProviderName -eq '{kernel_power}' } | Sort-Object TimeCreated {anchor_sort} | Select-Object -First {anchors})
 foreach ($stop in $announced) {
     $opened = @($system | Where-Object { $_.Id -eq 12 -and $_.ProviderName -eq '{kernel_general}' -and $_.TimeCreated -le $stop.TimeCreated } | Sort-Object TimeCreated -Descending | Select-Object -First 1)
     $at = if ($opened.Count -gt 0) { $opened[0] } else { $stop }
     $anchor = $at.RecordId
+    if ($queried_anchors.ContainsKey($anchor)) { continue }
+    $queried_anchors[$anchor] = $true
     $moment = $at.TimeCreated
+    $previous = @()
+    $previous_outcome = 'failed'
+    $previous_error = $null
     try {
         $bq = @"
 <QueryList><Query Id='0' Path='System'><Select Path='System'>*[System[TimeCreated[@SystemTime&lt;'$moment']]]</Select></Query></QueryList>
 "@
-        $before += @(Get-WinEvent -FilterXml ([xml]$bq) -MaxEvents 1 -ErrorAction Stop |
+        $previous = @(Get-WinEvent -FilterXml ([xml]$bq) -MaxEvents 1 -ErrorAction Stop |
             {before_projection})
+        $previous_outcome = if ($previous.Count) { 'ok' } else { 'empty' }
     } catch {
-        if ($_.FullyQualifiedErrorId -notlike 'NoMatchingEventsFound*') { $warnings += "The record before a start did not read: $($_.Exception.Message)" }
+        $previous = @()
+        $previous_outcome = Get-CrashQueryFailure $_
+        if ($previous_outcome -ne 'empty') { $previous_error = $_.Exception.Message }
+    }
+    $before += $previous
+    $before_collection += [pscustomobject]@{
+        anchor = $anchor; at = $moment; outcome = $previous_outcome
+        returned = $previous.Count; error = $previous_error
     }
 }
 
@@ -573,6 +606,17 @@ foreach ($stop in $announced) {
     dumps    = $dumps
     before   = $before
     warnings = $warnings
+    collection = [pscustomobject]@{
+        system = [pscustomobject]@{
+            outcome = $system_outcome; returned = $system.Count; limit = {system_max}; error = $system_error
+            bound_reached = $(if ($system_outcome -in @('ok', 'empty')) { $system.Count -eq {system_max} } else { $null })
+        }
+        reports = [pscustomobject]@{
+            outcome = $reports_outcome; returned = $reports.Count; limit = {reports_max}; error = $reports_error
+            bound_reached = $(if ($reports_outcome -in @('ok', 'empty')) { $reports.Count -eq {reports_max} } else { $null })
+        }
+        before = $before_collection
+    }
 }
 """
 
@@ -673,12 +717,34 @@ def report_groups(reports: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def compose(payload: dict[str, Any], count: int, moment: str | None) -> dict[str, Any]:
     """The records as fetched, each one decoded, and the stops the rule composes from them."""
-    system = list(payload.get("system") or [])
-    reports = list(payload.get("reports") or [])
+    coverage = payload.get("collection")
+    coverage = coverage if isinstance(coverage, dict) else {}
+    collection: dict[str, Any] = {}
+    collection["system"], system = _query_result(coverage.get("system"), payload.get("system"), record_cap(count, moment))
+    collection["reports"], reports = _query_result(coverage.get("reports"), payload.get("reports"), 3 * count + 6)
     dumps = list(payload.get("dumps") or [])
-    before = {r.get("Anchor"): r for r in (payload.get("before") or [])}
+    before: dict[Any, dict[str, Any]] = {}
+    before_collection: dict[Any, dict[str, Any]] = {}
+    before_rows = payload.get("before")
+    before_rows = before_rows if isinstance(before_rows, list) else []
+    attempts = coverage.get("before")
+    for attempt in attempts if isinstance(attempts, list) else []:
+        if not isinstance(attempt, dict) or type(attempt.get("anchor")) is not int:
+            continue
+        anchor = attempt["anchor"]
+        rows = [r for r in before_rows if isinstance(r, dict) and r.get("Anchor") == anchor]
+        source, rows = _query_result(attempt, rows)
+        if anchor in before_collection:
+            source, rows = {"outcome": "failed", "returned": 0, "error": "the collector returned duplicate lookup outcomes for this anchor"}, []
+        before.pop(anchor, None)
+        source.update(anchor=anchor, at=attempt.get("at"))
+        before_collection[anchor] = source
+        if rows:
+            before[anchor] = rows[0]
+    collection["before"] = list(before_collection.values())
     records = system + reports
-    warnings: list[str] = []
+    warnings = [f"{label} did not answer: {collection[name]['error']}" for name, label in (("system", "System stop records"), ("reports", "Application bug check reports")) if not _observed(collection[name])]
+    warnings.extend(f"The record before start {source['anchor']} did not answer: {source['error']}" for source in collection["before"] if not _observed(source))
 
     found = sessions(system)
     groups = report_groups(reports)
@@ -688,53 +754,101 @@ def compose(payload: dict[str, Any], count: int, moment: str | None) -> dict[str
     # a session is left out rather than reported as a stop with no known start, and a report older
     # than everything fetched is left out rather than reported as a stop the log lost; both are one
     # larger count away, and the warning below says when the bound bit.
-    capped = len(system) >= record_cap(count, moment)
+    capped = collection["system"].get("bound_reached") is True
     if capped and not moment and found and found[0]["start"] is None:
         found = found[1:]
 
     # A report belongs to the session its time falls in; one that falls before everything the
     # System log still holds is a stop of its own, with only what the report says.
     unplaced = list(groups)
+    system_end = max((_sort_key(r.get("TimeCreated")) for r in system), default=None)
     for index, session in enumerate(found):
         nxt = found[index + 1]["begins_at"] if index + 1 < len(found) else None
-        session["reports"] = [g for g in unplaced if _within(g["at"], session["begins_at"], nxt)]
+        # An oldest-first query that reached its cap cannot establish an open-ended final
+        # session. A later report may belong to a start that this query never reached.
+        open_end = not (moment and capped and nxt is None)
+        session["reports"] = [g for g in unplaced if _within(g["at"], session["begins_at"], nxt) and (open_end or g["at"] <= system_end)]
         unplaced = [g for g in unplaced if g not in session["reports"]]
-    if capped:
+    if capped and not moment:
         unplaced = []
-    in_session = [dict(_stop(session, dumps, before), _session=index) for index, session in enumerate(found) if _is_stop(session)]
+    complete = all(_observed(collection[name]) and not collection[name]["bound_reached"] for name in ("system", "reports"))
+    in_session = [dict(_stop(session, dumps, before, before_collection, complete), _session=index) for index, session in enumerate(found) if _is_stop(session)]
+    orphans = [_orphan_stop(group, dumps) for group in unplaced]
+    if moment and capped and orphans:
+        warnings.append("Some bug check reports fall outside the returned System window; their session association is unknown.")
 
     if moment:
-        stops, warnings = _from_moment(found, in_session, count, moment)
+        stops, moment_warnings = _from_moment(found, in_session, orphans, count, moment, collection)
+        warnings.extend(moment_warnings)
     else:
-        orphans = [_orphan_stop(group, dumps) for group in unplaced]
         stops = sorted(in_session + orphans, key=lambda s: _sort_key(s["_at"]), reverse=True)[:count]
     if capped and len(stops) < count and not (moment and warnings):
         warnings.append(f"the query's record bound was reached after {len(stops)} stops; ask for fewer, or take `events` over the window")
+    if collection["reports"].get("bound_reached"):
+        warnings.append("the bug check report bound was reached; older or later reports may be outside this reading")
 
     for stop in stops:
         stop.pop("_at", None)
         stop.pop("_session", None)
-    return {"records": records, "decoded": [decode(r) for r in records], "stops": stops, "warnings": warnings}
+    return {"records": records, "decoded": [decode(r) for r in records], "stops": stops, "warnings": warnings, "collection": collection}
+
+
+def _observed(source: dict[str, Any]) -> bool:
+    return source["outcome"] in ("ok", "empty")
+
+
+def _query_result(value: Any, rows: Any, limit: int | None = None) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Accept rows only with a matching completed query result; a cap does not reveal a total."""
+    source: dict[str, Any] = {"outcome": "failed", "returned": 0, "error": "the collector did not return a valid query outcome"}
+    if limit is not None:
+        source.update(limit=limit, bound_reached=None)
+    if not isinstance(value, dict):
+        return source, []
+    if value.get("outcome") in ("failed", "denied"):
+        source.update(outcome=value["outcome"], error=value.get("error") or "the query did not answer")
+        return source, []
+    if value.get("outcome") in ("ok", "empty"):
+        returned = value.get("returned")
+        valid_rows = isinstance(rows, list) and all(isinstance(row, dict) for row in rows)
+        valid_count = type(returned) is int and 0 <= returned <= (limit or 1)
+        valid_bound = limit is None or value.get("limit") == limit and type(value.get("bound_reached")) is bool and value["bound_reached"] == (returned == limit)
+        if valid_rows and valid_count and valid_bound and returned == len(rows) and (value["outcome"] == "empty") == (returned == 0):
+            source.update(outcome=value["outcome"], returned=returned, error=None)
+            if limit is not None:
+                source["bound_reached"] = returned == limit
+            return source, rows
+        source["error"] = "the collector's query outcome and returned rows disagree"
+    return source, []
 
 
 def _is_stop(session: dict[str, Any]) -> bool:
     return _find(session["records"], KERNEL_POWER, 41) is not None or bool(session.get("reports"))
 
 
-def _from_moment(found: list[dict[str, Any]], stops: list[dict[str, Any]], count: int, moment: str) -> tuple[list[dict[str, Any]], list[str]]:
+def _from_moment(found: list[dict[str, Any]], stops: list[dict[str, Any]], orphans: list[dict[str, Any]], count: int, moment: str, collection: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
     """A moment asks one question: what did the first start after it announce? A clean start and no
     start at all are different answers, and neither is a stop. From that session the count runs
     forward, because the moment is where the person's question begins, not where the log does."""
     opened = next((index for index, session in enumerate(found) if session["start"] is not None), None)
     if opened is None:
+        partial = sorted(stops + orphans, key=lambda stop: _sort_key(stop["_at"]))[:count]
+        if any(not _observed(collection[name]) for name in ("system", "reports")) or collection["system"]["bound_reached"] or partial:
+            return partial, [f"the first start after {moment} could not be established from the returned System records; any returned stops retain only their available evidence"]
         return [], [f"no start follows {moment}; nothing after it announced a stop"]
+    available = sorted(
+        [stop for stop in stops if stop["_session"] >= opened]
+        + [stop for stop in orphans if _sort_key(stop["_at"]) >= found[opened]["begins_at"]],
+        key=lambda stop: _sort_key(stop["_at"]),
+    )[:count]
     if not _is_stop(found[opened]):
         started = _iso(found[opened]["begins_at"])
+        if any(not _observed(collection[name]) or collection[name]["bound_reached"] for name in ("system", "reports")):
+            return available, [f"the first start after {moment}, at {started}, could not be classified because the stop queries are incomplete; later returned stops remain available"]
         return [], [f"the first start after {moment}, at {started}, announced no unplanned stop: no Kernel-Power 41 and no bug check report in that session"]
-    return [stop for stop in stops if stop["_session"] >= opened][:count], []
+    return available, []
 
 
-def _stop(session: dict[str, Any], dumps: list[dict[str, Any]], before: dict[Any, dict[str, Any]]) -> dict[str, Any]:
+def _stop(session: dict[str, Any], dumps: list[dict[str, Any]], before: dict[Any, dict[str, Any]], before_collection: dict[Any, dict[str, Any]], complete: bool) -> dict[str, Any]:
     records = session["records"]
     start = session["start"]
     power = _find(records, KERNEL_POWER, 41)
@@ -753,6 +867,7 @@ def _stop(session: dict[str, Any], dumps: list[dict[str, Any]], before: dict[Any
     last_record = before.get((anchor or {}).get("RecordId")) if anchor else None
     at = started_at or announced_at
     reported_at = _iso(groups[0]["at"]) if groups else None
+    no_bugcheck = bool(power) and not bugcheck and _number(_field(power, KERNEL_POWER_41, "BugcheckCode")) == 0
 
     return {
         "_at": at or stopped_at or reported_at,
@@ -762,10 +877,14 @@ def _stop(session: dict[str, Any], dumps: list[dict[str, Any]], before: dict[Any
         "reported_at": reported_at,
         "down_seconds": _seconds(stopped_at, started_at),
         "bugcheck": bugcheck,
-        "no_bugcheck_recorded": bool(power) and not bugcheck and _number(_field(power, KERNEL_POWER_41, "BugcheckCode")) == 0,
+        "no_bugcheck_recorded": None if no_bugcheck and not complete else no_bugcheck,
         "power": _power_facts(power),
         "dump": _dump(wer, latest, dumps, stopped_at, started_at, reported_at),
         "last_record_before": _last_record(last_record),
+        "last_record_collection": before_collection.get((anchor or {}).get("RecordId"), {
+            "outcome": "not_returned" if power else "not_requested", "returned": 0,
+            "error": "No lookup result was returned for this stop." if power else None,
+        }),
         "quiet_seconds": _seconds((last_record or {}).get("TimeCreated"), at) if last_record else None,
         "records": {
             "start": (start or {}).get("RecordId"),
@@ -778,8 +897,7 @@ def _stop(session: dict[str, Any], dumps: list[dict[str, Any]], before: dict[Any
 
 
 def _orphan_stop(group: dict[str, Any], dumps: list[dict[str, Any]]) -> dict[str, Any]:
-    """A report older than the System log's retention: the stop happened, and this is all that is
-    left of it."""
+    """A report without a returned session; query failure and retention are different reasons."""
     facts = group["facts"]
     return {
         "_at": _iso(group["at"]),
@@ -793,6 +911,7 @@ def _orphan_stop(group: dict[str, Any], dumps: list[dict[str, Any]]) -> dict[str
         "power": None,
         "dump": _dump_from_report(facts, dumps, _iso(group["at"])),
         "last_record_before": None,
+        "last_record_collection": {"outcome": "not_requested", "returned": 0, "error": None},
         "quiet_seconds": None,
         "records": {"start": None, "power_41": None, "eventlog_6008": None, "wer_1001": None, "report": group["record_ids"]},
     }
@@ -1013,6 +1132,7 @@ def take_crash(bridge: Bridge, params: dict[str, Any]) -> Reading:
             Section("records", "raw", composed["records"]),
             Section("decoded", "derived", composed["decoded"], basis=DECODED_BASIS),
             Section("stops", "derived", composed["stops"], basis=STOPS_BASIS),
+            Section("collection", "raw", composed["collection"]),
         ]
 
     reading = from_object("crash", params, script, result, build)
@@ -1023,8 +1143,15 @@ def take_crash(bridge: Bridge, params: dict[str, Any]) -> Reading:
         stops = composed.get("stops") or []
         reading.count = len(stops)
         reading.warnings.extend(composed.get("warnings") or [])
-        if not stops:
-            reading.outcome = "empty"  # the machine answered; it announced no unplanned stop
+        failures = [source for name, source in composed["collection"].items() if name != "before" and not _observed(source)]
+        if stops:
+            reading.outcome = "ok"
+        elif failures:
+            reading.outcome = "denied" if all(source["outcome"] == "denied" for source in failures) else "failed"
+            reading.count = None
+            reading.error = {"kind": reading.outcome, "detail": "No stop could be established because a primary event-log query did not answer."}
+        else:
+            reading.outcome = "empty"  # Both primary sources answered within the stated bounds.
     return reading
 
 
