@@ -7,7 +7,7 @@ import pytest
 
 from sentinel import readings  # noqa: F401
 from sentinel.bridge import BridgeResult
-from sentinel.reading import REGISTRY, Param, Spec, from_bridge, take
+from sentinel.reading import REGISTRY, Param, Section, Spec, from_bridge, from_object, take
 from sentinel.readings.events import _utc_stamp, events_script, record_script, since_clause
 from tests.conftest import FakeBridge
 
@@ -35,6 +35,98 @@ def test_object_shape_unwraps_the_single_item():
     r = from_bridge("system", {}, "q", BridgeResult("ok", items=[{"CPU": "x"}]), section="snapshot", shape="object")
     assert r.sections[0].data == {"CPU": "x"}
     assert r.count is None
+
+
+def _object_reading(adapter, result, built):
+    def build(payload):
+        built.append(payload)
+        return [Section("snapshot", "raw", payload)]
+
+    args = ("synthetic", {"selected": "example"}, "  synthetic object collector  ", result)
+    if adapter == "from_object":
+        return from_object(*args, build)
+    return from_bridge(*args, section="snapshot", shape="object")
+
+
+@pytest.mark.parametrize("adapter", ["from_object", "from_bridge"])
+@pytest.mark.parametrize(("outcome", "items"), [
+    pytest.param("ok", [], id="ok-without-an-object"),
+    pytest.param("empty", [], id="empty-stream"),
+    pytest.param("empty", [{"devices": []}], id="empty-outcome-with-an-object"),
+    pytest.param("ok", [None], id="null"),
+    pytest.param("ok", ["synthetic scalar"], id="string"),
+    pytest.param("ok", [7], id="number"),
+    pytest.param("ok", [[]], id="empty-array-object"),
+    pytest.param("ok", [[{"devices": []}]], id="nested-array-object"),
+    pytest.param("ok", [{"devices": []}, {"devices": [{"Name": "synthetic problem"}]}], id="two-conflicting-objects"),
+    pytest.param("ok", [{"devices": []}, "stray output"], id="object-then-scalar"),
+    pytest.param("ok", ["stray output", {"devices": []}], id="scalar-then-object"),
+])
+def test_object_readings_reject_unexpected_output_before_building_sections(adapter, outcome, items):
+    result = BridgeResult(outcome, items=items, took_ms=17, warnings=["synthetic bridge warning"])
+    built = []
+    reading = _object_reading(adapter, result, built)
+    assert reading.outcome == "failed" and not reading.observed
+    assert reading.count is None and reading.sections == [] and built == []
+    assert reading.error and reading.error["kind"] == "failed"
+    assert "object" in reading.error["detail"].lower()
+    assert reading.method == {"kind": "powershell", "query": "synthetic object collector"}
+    assert reading.params == {"selected": "example"} and reading.took_ms == 17
+    assert reading.warnings == ["synthetic bridge warning"]
+    assert result.outcome == outcome and result.items == items
+
+
+@pytest.mark.parametrize("adapter", ["from_object", "from_bridge"])
+def test_one_object_with_empty_arrays_remains_available_to_the_collector(adapter):
+    payload = {"devices": [], "records": []}
+    result = BridgeResult("ok", items=[payload], took_ms=13, warnings=["synthetic bridge warning"])
+    built = []
+    reading = _object_reading(adapter, result, built)
+    assert reading.outcome == "ok" and reading.observed and reading.error is None
+    assert reading.count is None
+    assert [(section.name, section.cls, section.data) for section in reading.sections] == [
+        ("snapshot", "raw", {"devices": [], "records": []}),
+    ]
+    assert built == ([payload] if adapter == "from_object" else [])
+    assert reading.took_ms == 13 and reading.warnings == ["synthetic bridge warning"]
+
+
+@pytest.mark.parametrize("adapter", ["from_object", "from_bridge"])
+@pytest.mark.parametrize("outcome", ["failed", "denied", "unavailable", "timeout"])
+def test_object_readings_preserve_real_bridge_failures_without_building(adapter, outcome):
+    result = BridgeResult(outcome, error="synthetic collection failure", took_ms=19, warnings=["synthetic warning"])
+    built = []
+    reading = _object_reading(adapter, result, built)
+    assert reading.outcome == outcome and not reading.observed
+    assert reading.error == {"kind": outcome, "detail": "synthetic collection failure"}
+    assert reading.sections == [] and reading.count is None and built == []
+    assert reading.method == {"kind": "powershell", "query": "synthetic object collector"}
+    assert reading.took_ms == 19 and reading.warnings == ["synthetic warning"]
+
+
+def test_object_warning_extraction_and_builder_changes_preserve_the_bridge_payload():
+    devices = []
+    payload = {"devices": devices, "warnings": ["synthetic source gap"]}
+    result = BridgeResult("ok", items=[payload], warnings=["synthetic bridge warning"])
+    built = []
+
+    def build(received):
+        assert "warnings" not in received
+        received["builder_marker"] = True
+        built.append(received)
+        return [Section("snapshot", "raw", received)]
+
+    first = from_object("synthetic", {}, "query", result, build)
+    second = from_object("synthetic", {}, "query", result, build)
+    assert first.warnings == second.warnings == ["synthetic bridge warning", "synthetic source gap"]
+    assert result.items == [{"devices": [], "warnings": ["synthetic source gap"]}]
+    assert built[0] is not payload and built[1] is not payload and built[0] is not built[1]
+    assert all(received["devices"] is devices for received in built)
+    assert all(reading.section("snapshot").data["builder_marker"] is True for reading in (first, second))
+    first.warnings.append("local reading note")
+    assert result.warnings == ["synthetic bridge warning"]
+    assert payload["warnings"] == ["synthetic source gap"]
+    assert second.warnings == ["synthetic bridge warning", "synthetic source gap"]
 
 
 def test_spec_coerces_defaults_types_and_choices():

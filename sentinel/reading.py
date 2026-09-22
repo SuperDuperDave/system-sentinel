@@ -189,9 +189,14 @@ def from_bridge(
     cls: Class = "raw",
     shape: Literal["list", "object"] = "list",
 ) -> Reading:
-    """Turn a bridge result into a reading with one section of the given class."""
+    """Turn a bridge result into one section; an object collector must return exactly one object."""
     method = {"kind": "powershell", "query": textwrap.dedent(script).strip()}
     reading = Reading(reading=name, params=params, outcome=result.outcome, method=method, took_ms=result.took_ms, warnings=list(result.warnings))
+    if shape == "object" and reading.observed:
+        if result.outcome != "ok" or len(result.items) != 1 or not isinstance(result.items[0], dict):
+            reading.outcome = "failed"
+            reading.error = {"kind": "failed", "detail": "The collector must return exactly one object; its response was missing or had an unexpected shape."}
+            return reading
     if result.outcome == "ok":
         data: Any = result.items if shape == "list" else result.items[0]
         reading.sections = [Section(section, cls, data)]
@@ -217,28 +222,16 @@ def from_object(
     every observation lives, so a test can hold the rule rather than the passthrough. A
     ``warnings`` list in the payload is lifted into the envelope and never reaches a section: it
     says which sub-query did not answer, so an absence the tool could not look at is distinguishable
-    from an observed nothing. On ``empty``, ``build`` sees an empty payload and decides the sections.
+    from an observed nothing. The collector must return exactly one object, even when its inner
+    collections are empty. Missing or ambiguous output never reaches ``build``. The payload is
+    copied before warnings are lifted, preserving the bridge result for its other consumers.
     """
-    reading = Reading(
-        reading=name,
-        params=params,
-        outcome=result.outcome,
-        method={"kind": "powershell", "query": textwrap.dedent(script).strip()},
-        took_ms=result.took_ms,
-        warnings=list(result.warnings),
-    )
-    if result.outcome == "ok":
-        payload = result.items[0]
-        if not isinstance(payload, dict):
-            reading.outcome = "failed"
-            reading.error = {"kind": "failed", "detail": "the query did not return an object"}
-            return reading
-        reading.warnings.extend(str(w) for w in (payload.pop("warnings", None) or []))
-        reading.sections = build(payload)
-    elif result.outcome == "empty":
-        reading.sections = build({})
-    else:
-        reading.error = {"kind": result.outcome, "detail": result.error or ""}
+    reading = from_bridge(name, params, script, result, shape="object")
+    if not reading.observed:
+        return reading
+    payload = reading.sections[0].data.copy()
+    reading.warnings.extend(str(w) for w in (payload.pop("warnings", None) or []))
+    reading.sections = build(payload)
     return reading
 
 

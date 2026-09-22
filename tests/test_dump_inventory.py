@@ -177,7 +177,7 @@ def test_one_invalid_location_does_not_erase_another_locations_files(invalid):
 def test_empty_bridge_output_is_missing_metadata_not_an_empty_inventory():
     reading = take_dumps(FakeBridge(BridgeResult("empty", items=[])), {})
     assert reading.outcome == "failed" and not reading.observed and reading.count is None
-    assert reading.section("collection").data["complete"] is False
+    assert reading.sections == [] and "exactly one object" in reading.error["detail"]
 
 
 @pytest.mark.parametrize("outcome", ["denied", "failed"])

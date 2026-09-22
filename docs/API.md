@@ -90,6 +90,8 @@ Every reading is one request for evidence, returned in one envelope. Most ask Wi
 
 Only `ok` and `empty` say the requested source was observed. For `performance_history`, `empty` means the local store held no samples in that window; it says nothing about what the machine was doing then. Treat the other four as "not observed".
 
+A collector that returns one structured object must actually return exactly one object. Missing, scalar or multiple-object output yields `failed`, a null count and no evidence sections; the adapter never chooses the first of several answers or substitutes an empty object. An object containing legitimately empty collections remains valid, and the reading determines its outcome from those collections. List collectors can still return observed empty lists or multiple rows.
+
 **`sections[].class`** is one of:
 
 | Class | Meaning |

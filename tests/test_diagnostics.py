@@ -28,6 +28,7 @@ from sentinel.readings.diagnostics import (
     power_derived,
     power_script,
     sleep_model,
+    take_constraints,
     take_signals_sync,
     transition_kind,
     transitions_query,
@@ -360,6 +361,17 @@ def test_every_device_working_is_an_empty_reading_not_an_absent_one():
     bridge = FakeBridge(BridgeResult("ok", items=[{"devices": [], "warnings": []}]))
     reading = asyncio.run(take("constraints", bridge, {}))
     assert reading.outcome == "empty" and reading.count == 0 and reading.error is None
+
+
+@pytest.mark.parametrize("result", [
+    BridgeResult("empty"),
+    BridgeResult("ok", items=[{"devices": []}, {"devices": CONSTRAINT_DEVICES}]),
+])
+def test_missing_or_ambiguous_device_object_cannot_claim_every_device_is_working(result):
+    reading = take_constraints(FakeBridge(result), {})
+    assert reading.outcome == "failed" and not reading.observed
+    assert reading.count is None and reading.sections == []
+    assert "exactly one object" in reading.error["detail"]
 
 
 def test_constraints_returns_raw_and_derived():

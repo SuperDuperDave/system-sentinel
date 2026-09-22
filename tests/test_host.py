@@ -12,7 +12,7 @@ import pytest
 import sentinel.bridge
 from sentinel import readings  # noqa: F401
 from sentinel.bridge import OUTCOMES, Bridge, sessions_report
-from sentinel.reading import REGISTRY, take
+from sentinel.reading import REGISTRY, Section, from_bridge, from_object, take
 from sentinel.readings.health import learn_identity
 from tests.conftest import real_bridge_or_skip
 
@@ -56,6 +56,34 @@ def test_health_answers():
     data = r.section("bridge").data
     assert data["bridge"]["available"] and data["bridge"]["powershell"]
     assert data["decoder"]["present"] is True
+
+
+@pytest.mark.parametrize("transport", ("one-shot", "session"))
+def test_object_collectors_require_one_answer_from_the_real_transport(transport, monkeypatch):
+    monkeypatch.setattr(sentinel.bridge, "POOL_SIZE", 0 if transport == "one-shot" else 1)
+    bridge = real_bridge_or_skip()
+    cases = [
+        ("[pscustomobject]@{ devices = @() }", "ok"),
+        ("$nothing = 1", "failed"),
+        ("[pscustomobject]@{ devices = @() }; [pscustomobject]@{ devices = @('synthetic problem') }", "failed"),
+        ("'stray output'; [pscustomobject]@{ devices = @() }", "failed"),
+    ]
+    for script, expected in cases:
+        result = bridge.run("& { " + script + " }")
+        built = []
+
+        def build(payload, built=built):
+            built.append(payload)
+            return [Section("devices", "raw", payload["devices"])]
+
+        composed = from_object("synthetic", {}, script, result, build)
+        direct = from_bridge("synthetic", {}, script, result, shape="object")
+        assert composed.outcome == direct.outcome == expected, (result, composed.error, direct.error)
+        if expected == "ok":
+            assert built == [{"devices": []}]
+        else:
+            assert built == [] and composed.sections == direct.sections == []
+            assert composed.count is None and direct.count is None
 
 
 def test_identity_is_learned_and_never_empty():
