@@ -252,5 +252,39 @@ def test_aggregate_performance_snapshot_answers_with_numbers_on_windows():
     assert isinstance(snapshot["at"], str)
 
 
+def test_process_pressure_answers_with_bounded_numeric_rows_on_windows():
+    bridge = real_bridge_or_skip()
+    reading = asyncio.run(take("processes", bridge, {}))
+    assert reading.outcome == "ok", (reading.outcome, reading.error, reading.warnings)
+    snapshot = reading.section("snapshot").data
+    rows = reading.section("processes").data
+    assert 0 < len(rows) <= 2048
+    assert snapshot["returned_processes"] == len(rows)
+    assert any(row["private_working_set_bytes"] is not None for row in rows)
+
+
+def test_process_response_limit_keeps_synthetic_leaders_from_all_three_metrics():
+    from sentinel.readings.processes import PROCESS_SCRIPT
+
+    bridge = real_bridge_or_skip()
+    mock = r'''
+function Get-CimInstance {
+ param([string]$ClassName)
+ if ($ClassName -eq 'Win32_ComputerSystem') { return [pscustomobject]@{ NumberOfLogicalProcessors = 8 } }
+ foreach ($n in 1..2052) {
+   [pscustomobject]@{ IDProcess=$n; Name="synthetic"; PercentProcessorTime=$(if($n -eq 2052){800}else{0}); WorkingSetPrivate=$(if($n -eq 2051){999999}else{1}); PrivateBytes=1; IODataBytesPersec=$(if($n -eq 2050){999999}else{0}); IOReadBytesPersec=0; IOWriteBytesPersec=0; HandleCount=1; ThreadCount=1 }
+ }
+}
+'''
+    result = bridge.run(mock + PROCESS_SCRIPT, timeout=45)
+    assert result.outcome == "ok", result.error
+    payload = result.items[0]
+    rows = payload["processes"]
+    ids = {int(row["pid"]) for row in rows}
+    assert payload["total_processes"] == 2052 and len(ids) == 2048
+    assert {2050, 2051, 2052} <= ids
+    assert payload["warnings"]
+
+
 def _moment(stamp: str) -> datetime:
     return datetime.fromisoformat(str(stamp).replace("Z", "+00:00"))

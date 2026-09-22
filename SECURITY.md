@@ -6,6 +6,8 @@ System Sentinel reads one machine and runs on it. The server binds to `127.0.0.1
 
 While the app runs, it samples aggregate processor, memory and physical-disk counters every minute by default. It keeps only a UTC time and whitelisted numeric fields in daily JSONL files under the local data directory's `performance/` folder, for at most 30 calendar days. No process name, path, account or device identifier goes in a sample. The authenticated Performance view and API can pause collection, choose a 60–600 second interval and clear retained samples; a corrupt setting stops collection. Sampling does not call an external service. An explicit capture or handoff can include the resulting reading, so review it before sending as with other evidence.
 
+When the authenticated Performance view is open, it also asks Windows for a fresh per-process snapshot about once a minute. Names and PIDs can reveal what someone is running; the response is kept in the open view and is never added to the background history. An agent can ask for `processes` through the same authenticated API or MCP tool. This first reading does not request executable paths or command lines. A person or agent may explicitly stack or capture a process reading; review those artifacts before sending them.
+
 ## What someone could do
 
 ### Someone on the same network

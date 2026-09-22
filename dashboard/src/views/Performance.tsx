@@ -5,6 +5,7 @@ import { OutcomeLine } from '../Outcome';
 import { Facts, Head, Section, Segmented, Tree, part, size } from '../Sections';
 import { useApp } from '../store';
 import { useReading } from '../useReading';
+import { ProcessPressure } from './ProcessPressure';
 import styles from './Performance.module.css';
 
 interface Sample {
@@ -108,7 +109,9 @@ export function Performance() {
   return (
     <section>
       <Head title="Performance">{history.reading ? <AddToStack item={{ kind: 'reading', envelope: history.reading }} label="Stack this history" /> : null}</Head>
-      <p className={styles.lede}>The computer's own event log keeps what happened. These local numeric samples keep what processor, memory and disk activity looked like before it happened. A gap in the trace means no sample was kept there.</p>
+      <p className={styles.lede}>Fresh process use and numeric history collected locally every minute by default. A gap in the history means no sample was kept.</p>
+
+      <ProcessPressure />
 
       <section className={styles.collection} aria-label="Local collection">
         <div className={styles.collectionTop}>
@@ -126,6 +129,7 @@ export function Performance() {
         {controlProblem ? <p className={styles.controlProblem} role="alert">Could not change collection: {controlProblem}</p> : null}
       </section>
 
+      <h2 className={styles.historyTitle}>Stored history</h2>
       <div className={styles.windowControls}>
         <Segmented value={hours} onChange={(value) => { setHours(value); setSelectedIndex(null); }} options={HOURS.map((value) => ({ value, label: `${value} h` }))} label="History window" />
         {moment ? <Segmented value={endChoice} onChange={(value) => { setEndChoice(value); setSelectedIndex(null); }} options={[{ value: 'now', label: 'Until now' }, { value: 'held', label: 'Before held moment' }]} label="Window end" /> : null}

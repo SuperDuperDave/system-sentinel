@@ -12,6 +12,7 @@
 .lastAttempt { margin: 18px 0 0; }
 .controlProblem { color: var(--ink); border-left: 2px solid var(--ink); padding-left: 10px; }
 .windowControls { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: end; margin: 12px 0; }
+.historyTitle { color: var(--ink); font-size: clamp(21px, 2.6vw, 27px); font-weight: 500; margin: 0 0 8px; }
 .rangeLine { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 18px; color: var(--muted); margin: 22px 0 12px; font-size: 12px; }
 .charts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 .trace { min-width: 0; border: 1px solid var(--rule); background: var(--deep); padding: 15px; }
