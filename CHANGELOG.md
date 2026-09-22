@@ -16,8 +16,10 @@
 - Diagnostics shows a memory map after the person takes the reading: installed capacity, reported slot population and each returned module's configured speed against its rating, with links to the exact derived and Windows fields below.
 - Diagnostics now opens the PCIe reading with its shared-upstream groups: a bar for each returned group, exact endpoint counts and expandable device branches, followed by the Windows endpoint and bridge records. Bar lengths count endpoints and make no claim about bandwidth or fault likelihood.
 - On phones, Record keeps the selected level and window visible in one disclosure. Its full filter controls remain one tap away, letting the returned evidence appear sooner in the first viewport.
+- Hardware errors now shows a visible legend for the Windows event levels present in returned records; each record's symbol also has a spoken level name.
 
 ### Changed
+- Whole Signals readings and individual leads now keep later observations as separate Stack snapshots. Stack shows the reading's observation time beside the add time, and composed handoffs state the envelope's count without calling every kind of result a log record.
 - Changing a reading's parameters now hides the previous answer immediately until the new question returns. Taking the same question again keeps its timestamped answer visible while refreshing; a transport failure clears it rather than leaving stale rows under an error.
 - An empty Signals reading now says its conclusion is limited to inputs that answered, and calls out missing inputs in the outcome line. The input list and warnings still name each gap.
 - The dashboard now distinguishes a failed connection from a rejected access token. A fresh page waits for the cheap catalog check, offers a focused retry when the service cannot answer, and reserves the wrong-token message for an actual 401 response.

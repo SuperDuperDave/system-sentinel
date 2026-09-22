@@ -68,9 +68,9 @@ class Item:
         """What makes two items the same evidence. A note is never a duplicate: it is written, not taken."""
         if self.kind == "note" or not self.reading:
             return None
-        # A lead is a snapshot: the same rule can report different evidence later. Keep a
-        # second observation distinct while still refusing the same snapshot twice.
-        moment = self.reading.get("asked_at") if self.kind == "selection" and self.reading.get("reading") == "signals" else None
+        # Signals are snapshots: a later scan can report different leads or evidence even
+        # with the same parameters. Keep it distinct without duplicating one held scan.
+        moment = self.reading.get("asked_at") if self.reading.get("reading") == "signals" else None
         return (self.reading.get("reading"), json.dumps(self.reading.get("params"), sort_keys=True), tuple(sorted(self.ids or ())), moment)
 
 
@@ -343,6 +343,8 @@ def _item_lines(position: int, item: dict[str, Any]) -> list[str]:
     lines.append(f"- reading: `{envelope.get('reading', 'unknown')}`" + (f" ({params})" if params else ""))
     lines.append(f"- asked at: {envelope.get('asked_at', 'unknown')}")
     lines.append(f"- outcome: {_outcome_text(envelope)}")
+    if isinstance(envelope.get("count"), int):
+        lines.append(f"- reading count: {envelope['count']}")
     lines.append(f"- method: {(envelope.get('method') or {}).get('kind', 'unknown')}")
 
     records = _records(envelope)
@@ -393,9 +395,7 @@ def _outcome_text(envelope: dict[str, Any]) -> str:
         "denied": "not observed: Windows refused",
         "timeout": "not observed: the query did not finish",
     }.get(outcome)
-    count = envelope.get("count")
-    counted = f", {count} record{'' if count == 1 else 's'}" if isinstance(count, int) and outcome == "ok" else ""
-    return f"{outcome} — {said}{counted}" if said else str(outcome)
+    return f"{outcome} — {said}" if said else str(outcome)
 
 
 def _records(envelope: dict[str, Any]) -> list[dict[str, Any]] | None:

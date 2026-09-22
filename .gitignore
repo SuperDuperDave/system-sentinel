@@ -65,3 +65,6 @@ build/windows/version.txt
 _sessions/
 .claude/skills
 .agents/
+
+# Multithread's enrolled, machine-local ledger and identity
+.relay/

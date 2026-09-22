@@ -89,6 +89,10 @@
 }
 
 /* Record rows, the Record view's shape. */
+.levelLegend { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; margin: 4px 0 10px; color: var(--muted); font-size: 12px; }
+.levelLegend ul { display: flex; flex-wrap: wrap; gap: 4px 14px; list-style: none; margin: 0; padding: 0; }
+.levelLegend li { display: inline-flex; align-items: center; gap: 5px; color: var(--body); }
+.srOnly { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .recordRow {
   grid-template-columns: 62px 14px minmax(0, 1fr);
   grid-template-areas:

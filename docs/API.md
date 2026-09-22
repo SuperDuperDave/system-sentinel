@@ -203,11 +203,11 @@ An item:
 | --- | --- |
 | `GET /api/stack` | `{ "items": [...], "prompt_id": "...", "system_prompt": true }` |
 | `PATCH /api/stack` | Change `prompt_id` or `system_prompt` |
-| `POST /api/stack/items` | Add an item. Body: `kind`, optional `title`, `rank`, `verbosity`, `ids`, `note`, and either `take: { "name": "...", "params": {...} }` (the server takes the reading now) or `envelope: { ... }` (a reading the caller already holds, stored as given). A selection needs distinct IDs present in that reading: numeric `RecordId` values for records, string `id` values for signals. The composed signal selection keeps the signal section's basis and, at full verbosity, its rule evidence. Adding the same reading with the same parameters and the same `ids` twice is refused with `409`; a signal selected from a later reading is a new snapshot. |
+| `POST /api/stack/items` | Add an item. Body: `kind`, optional `title`, `rank`, `verbosity`, `ids`, `note`, and either `take: { "name": "...", "params": {...} }` (the server takes the reading now) or `envelope: { ... }` (a reading the caller already holds, stored as given). A selection needs distinct IDs present in that reading: numeric `RecordId` values for records, string `id` values for signals. The composed signal selection keeps the signal section's basis and, at full verbosity, its rule evidence. Adding the same reading with the same parameters and the same `ids` twice is refused with `409`; a later `signals` observation, whole or selected, is a new snapshot. |
 | `PATCH /api/stack/items/{id}` | Change `rank`, `verbosity` or `title` |
 | `DELETE /api/stack/items/{id}` | Remove one |
 | `DELETE /api/stack` | Clear |
-| `GET /api/stack/composed` | `{ "text": "...", "items": 4, "redacted": [...] }`: the handoff as Markdown, the chosen prompt first (when `system_prompt` is on), then the items by rank, each headed with its kind, its class, its provenance (reading, parameters, when, outcome, method kind) and rendered by its verbosity; redacted unless `unredacted=true` |
+| `GET /api/stack/composed` | `{ "text": "...", "items": 4, "redacted": [...] }`: the handoff as Markdown, the chosen prompt first (when `system_prompt` is on), then the items by rank, each headed with its kind, its class, its provenance (reading, parameters, when, outcome, method kind), the envelope's unit-neutral reading count when present, and rendered by its verbosity; redacted unless `unredacted=true` |
 | `GET /api/prompts` | The prompt library: `{ "prompts": [ { "id", "name", "description", "content", "builtin" }, ... ] }`; six presets to start |
 | `POST /api/prompts`, `PATCH /api/prompts/{id}`, `DELETE /api/prompts/{id}` | Yours to add, edit and delete, presets included; a deleted preset stays deleted |
 

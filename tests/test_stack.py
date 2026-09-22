@@ -104,7 +104,7 @@ def test_the_same_evidence_twice_is_refused(client: TestClient):
 
 def test_one_signal_can_be_handed_on_with_its_basis_and_evidence(client: TestClient):
     envelope = {
-        "reading": "signals", "params": {}, "asked_at": "2026-09-21T00:00:00Z", "outcome": "ok",
+        "reading": "signals", "params": {}, "asked_at": "2026-09-21T00:00:00Z", "outcome": "ok", "count": 2,
         "method": {"kind": "readings", "readings": [{"name": "events", "outcome": "ok"}, {"name": "whea", "outcome": "denied"}]},
         "sections": [{"name": "signals", "class": "inferred", "basis": "WHEA was not observed.", "data": [
             {"id": "pressure:events", "class": "pressure", "title": "The event log is busy", "summary": "A lead to inspect.", "readings": ["events"], "evidence": {"count": 12}},
@@ -115,6 +115,7 @@ def test_one_signal_can_be_handed_on_with_its_basis_and_evidence(client: TestCli
     assert item["title"] == "1 signal from signals" and item["ids"] == ["pressure:events"]
     text = client.get("/api/stack/composed", headers=AUTH).json()["text"]
     assert "- selected: 1 of the reading's signals, by signal id" in text
+    assert "- reading count: 2" in text and "2 records" not in text
     assert '"basis": "WHEA was not observed."' in text and '"count": 12' in text
     assert "gaps:whea" not in text and "denied" not in text.split("```json")[-1]
     assert client.post("/api/stack/items", headers=AUTH, json={"kind": "selection", "ids": ["pressure:events"], "envelope": envelope}).status_code == 409
@@ -126,6 +127,9 @@ def test_one_signal_can_be_handed_on_with_its_basis_and_evidence(client: TestCli
     assert '"basis": "WHEA was not observed."' in text
     later = {**envelope, "asked_at": "2026-09-21T00:05:00Z"}
     assert add(client, kind="selection", ids=["pressure:events"], envelope=later)["id"] != item["id"]
+    whole = add(client, kind="reading", envelope=envelope)
+    assert add(client, kind="reading", envelope=later)["id"] != whole["id"]
+    assert client.post("/api/stack/items", headers=AUTH, json={"kind": "reading", "envelope": later}).status_code == 409
 
 
 def test_a_selection_cannot_name_evidence_absent_from_its_reading(client: TestClient):
@@ -212,7 +216,7 @@ def test_the_composed_handoff(client: TestClient):
     assert text.startswith("# System Sentinel handoff")
     assert text.index("QUANTUM DIAGNOSTICIAN") < text.index(f"## 1. {summary['title']}") < text.index("## 2.") < text.index("## 3.")
     assert "- reading: `events` (log=System, levels=1,2, count=2)" in text
-    assert "- outcome: ok — the machine was observed, 2 records" in text
+    assert "- outcome: ok — the machine was observed" in text and "- reading count: 2" in text
     assert "- method: powershell" in text and "- class: raw" in text and "- kind: selection" in text
 
     assert "| Time | Level | Provider | Id | Message |" in text

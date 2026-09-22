@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { Unauthorized } from '../api';
 import { CopyButton } from '../Copy';
-import { Head, Segmented, ago, size } from '../Sections';
+import { clock } from '../Outcome';
+import { Head, Segmented, ago, day, size } from '../Sections';
 import { useApp } from '../store';
 import {
   Capture,
@@ -168,6 +169,8 @@ function Item({ item, onChange, onRemove }: { item: StackItem; onChange: (c: { r
   const lost = envelope ? envelope.outcome !== 'ok' && envelope.outcome !== 'empty' : false;
   const selectedCount = item.ids?.length ?? 0;
   const selectedNoun = envelope?.reading === 'signals' ? 'signal' : 'record';
+  const askedAt = envelope?.asked_at ? new Date(envelope.asked_at) : null;
+  const observedAt = askedAt && !Number.isNaN(askedAt.getTime()) ? `${day.format(askedAt)} ${clock.format(askedAt)}` : null;
   return (
     <li className={styles.item}>
       <p className={styles.itemTitle}>{item.title}</p>
@@ -176,6 +179,7 @@ function Item({ item, onChange, onRemove }: { item: StackItem; onChange: (c: { r
         {item.kind === 'selection' ? ` · ${selectedCount} ${selectedNoun}${selectedCount === 1 ? '' : 's'}` : ''}
         {envelope ? ` · ${envelope.reading}` : ''}
         {envelope ? <span className={lost ? styles.lost : styles.fine}> · {lost ? `not observed: ${envelope.outcome}` : envelope.outcome}</span> : null}
+        {observedAt ? ` · observed ${observedAt}` : ''}
         {` · added ${ago(item.added_at)}`}
       </p>
       <div className={styles.itemControls}>

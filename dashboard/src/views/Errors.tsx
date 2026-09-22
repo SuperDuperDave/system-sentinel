@@ -109,6 +109,7 @@ export function Errors() {
 
   const records = part<EventRecord[]>(whea.reading, 'records') ?? [];
   const decoded = part<Decoded[]>(whea.reading, 'decoded') ?? [];
+  const shownLevels = [...new Map(records.map((r) => [r.Level, r.LevelDisplayName] as const)).entries()].sort(([a], [b]) => a - b);
 
   return (
     <section>
@@ -190,6 +191,14 @@ export function Errors() {
       >
         <OutcomeLine taken={whea} noun="WHEA-Logger records" singular="WHEA-Logger record" emptyText="No WHEA-Logger records in the System log" />
         {observed(whea.reading) && records.length > 0 ? (
+          <div className={`${styles.levelLegend} readout`}>
+            <span>Windows event levels</span>
+            <ul>
+              {shownLevels.map(([level, label]) => <li key={level}><Glyph kind={levelKind(level)} />{label || `Level ${level}`}</li>)}
+            </ul>
+          </div>
+        ) : null}
+        {observed(whea.reading) && records.length > 0 ? (
           <RowList
             items={records}
             layout={styles.recordRow}
@@ -198,6 +207,7 @@ export function Errors() {
                 <span className={`${styles.time} readout`}>{clock.format(new Date(r.TimeCreated))}</span>
                 <span className={styles.level} title={r.LevelDisplayName}>
                   <Glyph kind={levelKind(r.Level)} />
+                  <span className={styles.srOnly}>{r.LevelDisplayName || `Level ${r.Level}`}</span>
                 </span>
                 <span className={`${styles.eventId} readout`}>{r.Id}</span>
                 <span className={styles.message}>{r.Message ? firstLine(r.Message) : <span className={styles.quiet}>no message text</span>}</span>
