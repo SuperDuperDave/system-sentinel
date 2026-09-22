@@ -5,6 +5,13 @@ export type ViewId = 'record' | 'errors' | 'crashes' | 'machine' | 'performance'
 /** The views, in the order the nav shows them. The studio page copies these names; change them there too. */
 export type ViewGroup = 'Evidence' | 'Interpret' | 'Carry';
 
+interface PerformanceViewState {
+  hours: number;
+  endChoice: 'now' | 'held';
+  /** An exact numeric sample timestamp, never a process name or retained row. */
+  selectedAt: string | null;
+}
+
 export const VIEWS: { id: ViewId; label: string; group: ViewGroup }[] = [
   { id: 'record', label: 'Record', group: 'Evidence' },
   { id: 'errors', label: 'Hardware errors', group: 'Evidence' },
@@ -54,6 +61,9 @@ interface AppState {
    * place it belongs to can never disagree. Clearing it leaves the view where it is.
    */
   setMoment: (at: string | null) => void;
+  /** Keep the Performance window and selected sample while its view is unmounted for a record jump. */
+  performanceView: PerformanceViewState;
+  setPerformanceView: (change: Partial<PerformanceViewState>) => void;
   /** Restore a browser history entry without writing another entry. */
   restoreAddress: () => void;
 }
@@ -75,5 +85,7 @@ export const useApp = create<AppState>((set, get) => ({
     set(at ? { moment: at, view: 'record' } : { moment: null });
     writeAddress(get().view, at);
   },
+  performanceView: { hours: 6, endChoice: 'now', selectedAt: null },
+  setPerformanceView: (change) => set((state) => ({ performanceView: { ...state.performanceView, ...change } })),
   restoreAddress: () => set(navigationFromAddress()),
 }));

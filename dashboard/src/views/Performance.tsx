@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { AddToStack } from '../AddToStack';
 import { PerformanceCollection, Unauthorized, clearPerformanceHistory, observed, performanceCollection, setPerformanceCollection } from '../api';
 import { OutcomeLine } from '../Outcome';
-import { Facts, Head, Section, Segmented, Tree, part, size } from '../Sections';
+import { Facts, Head, MomentLink, Section, Segmented, Tree, part, size } from '../Sections';
 import { useApp } from '../store';
 import { useReading } from '../useReading';
 import { ProcessPressure } from './ProcessPressure';
@@ -33,19 +33,19 @@ interface Shape {
 const HOURS = [1, 6, 24, 48];
 const INTERVALS = [60, 120, 300, 600];
 const STAMP = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+const EXACT_STAMP = new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
 /** A local numeric witness, continuous while enabled and preserved across a stop. */
 export function Performance() {
   const moment = useApp((s) => s.moment);
   const setSession = useApp((s) => s.setSession);
-  const [hours, setHours] = useState(6);
-  const [endChoice, setEndChoice] = useState<'now' | 'held'>('now');
+  const { hours, endChoice, selectedAt } = useApp((s) => s.performanceView);
+  const setPerformanceView = useApp((s) => s.setPerformanceView);
   const [collection, setCollection] = useState<PerformanceCollection | null>(null);
   const [controlProblem, setControlProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
   const [clearNote, setClearNote] = useState('');
-  const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [rawOpen, setRawOpen] = useState(false);
   const [takeNow, setTakeNow] = useState(false);
   const [checkedAt, setCheckedAt] = useState<number | null>(null);
@@ -53,8 +53,11 @@ export function Performance() {
   const live = useReading<Sample>('load', {}, takeNow);
   const samples = observed(history.reading) ? part<Sample[]>(history.reading, 'samples') ?? [] : [];
   const shape = observed(history.reading) ? part<Shape>(history.reading, 'shape') : null;
-  const selected = samples.length ? samples[Math.min(selectedIndex ?? samples.length - 1, samples.length - 1)] : null;
-  const selectedPosition = samples.length ? Math.min(selectedIndex ?? samples.length - 1, samples.length - 1) : 0;
+  const matchingPosition = selectedAt === null ? samples.length - 1 : samples.findIndex((sample) => sample.at === selectedAt);
+  const selectionMissing = selectedAt !== null && matchingPosition < 0 && samples.length > 0;
+  const selectedPosition = samples.length ? selectionMissing ? samples.length - 1 : matchingPosition : 0;
+  const selected = samples.length ? samples[selectedPosition] : null;
+  const heldAt = moment && Number.isFinite(Date.parse(moment)) ? EXACT_STAMP.format(new Date(moment)) : null;
 
   useEffect(() => {
     let active = true;
@@ -93,7 +96,7 @@ export function Performance() {
       const result = await clearPerformanceHistory();
       setConfirmClear(false);
       setClearNote(`${result.cleared_files} ${result.cleared_files === 1 ? 'day file' : 'day files'} cleared. Collection ${collection?.settings.enabled ? 'continues' : 'stays paused'}.`);
-      setSelectedIndex(null);
+      setPerformanceView({ selectedAt: null });
       history.retake();
       setCollection(await performanceCollection());
     } catch (err) {
@@ -131,8 +134,11 @@ export function Performance() {
 
       <h2 className={styles.historyTitle}>Stored history</h2>
       <div className={styles.windowControls}>
-        <Segmented value={hours} onChange={(value) => { setHours(value); setSelectedIndex(null); }} options={HOURS.map((value) => ({ value, label: `${value} h` }))} label="History window" />
-        {moment ? <Segmented value={endChoice} onChange={(value) => { setEndChoice(value); setSelectedIndex(null); }} options={[{ value: 'now', label: 'Until now' }, { value: 'held', label: 'Before held moment' }]} label="Window end" /> : null}
+        <Segmented value={hours} onChange={(value) => setPerformanceView({ hours: value, selectedAt: null })} options={HOURS.map((value) => ({ value, label: `${value} h` }))} label="History window" />
+        {heldAt ? <div className={styles.heldControl}>
+          <Segmented value={endChoice} onChange={(value) => setPerformanceView({ endChoice: value, selectedAt: null })} options={[{ value: 'now', label: 'Until now' }, { value: 'held', label: 'Before held moment' }]} label="Window end" />
+          <p className="readout">Held moment · {heldAt} local</p>
+        </div> : null}
       </div>
       <OutcomeLine taken={history} noun="stored samples" emptyText="No stored samples in this window" />
       {samples.length && shape ? (
@@ -148,11 +154,12 @@ export function Performance() {
           </div>
           <div className={styles.scrub}>
             <label className="readout" htmlFor="performance-sample">Inspect sample · {selected ? STAMP.format(new Date(selected.at)) : ''}</label>
-            <input id="performance-sample" type="range" min={0} max={samples.length - 1} value={selectedPosition} onChange={(event) => setSelectedIndex(Number(event.target.value))} aria-valuetext={selected ? `Sample ${selectedPosition + 1} of ${samples.length}, ${STAMP.format(new Date(selected.at))}` : undefined} />
-            <button onClick={() => setSelectedIndex(null)} disabled={selectedIndex === null}>Latest</button>
+            <input id="performance-sample" type="range" min={0} max={samples.length - 1} value={selectedPosition} onChange={(event) => setPerformanceView({ selectedAt: samples[Number(event.target.value)]?.at ?? null })} aria-valuetext={selected ? `Sample ${selectedPosition + 1} of ${samples.length}, ${EXACT_STAMP.format(new Date(selected.at))}` : undefined} />
+            <button onClick={() => setPerformanceView({ selectedAt: null })} disabled={selectedAt === null}>Latest</button>
           </div>
-          {selected ? <Section title="Selected sample" cls="raw" note="exact stored numbers"><Facts rows={[
-            ['Taken', STAMP.format(new Date(selected.at))],
+          {selectionMissing ? <p className={`${styles.selectionMissing} readout`} role="status">The selected sample is no longer in this returned window. Showing the latest returned sample.</p> : null}
+          {selected ? <Section title="Selected sample" cls="raw" note="readable units · full precision in raw series"><Facts rows={[
+            ['Taken', EXACT_STAMP.format(new Date(selected.at))],
             ['Processor time', metric(selected.cpu_percent, '%')],
             ['Memory available', metric(selected.memory_available_mb, ' MB')],
             ['Committed / limit', selected.committed_bytes != null && selected.commit_limit_bytes != null ? `${size(selected.committed_bytes)} / ${size(selected.commit_limit_bytes)}` : 'Not reported'],
@@ -161,7 +168,13 @@ export function Performance() {
             ['Disk read', selected.disk_read_bytes_per_sec == null ? 'Not reported' : `${size(selected.disk_read_bytes_per_sec)}/s`],
             ['Disk write', selected.disk_write_bytes_per_sec == null ? 'Not reported' : `${size(selected.disk_write_bytes_per_sec)}/s`],
             ['Planned interval', selected.cadence_seconds == null ? 'Not reported' : `${selected.cadence_seconds} s`],
-          ]} /></Section> : null}
+          ]} />
+            <div className={styles.sampleRecord}>
+              <p>See what the System log returned before this sample. Those records do not establish what drove the counters.</p>
+              <MomentLink at={selected.at} label="System record before this sample" />
+            </div>
+            <details className={styles.raw}><summary>Raw selected sample</summary><pre className="readout">{JSON.stringify(selected, null, 2)}</pre></details>
+          </Section> : null}
           <details className={styles.raw} onToggle={(event) => setRawOpen(event.currentTarget.open)}><summary>Raw sample series · {samples.length} rows</summary>{rawOpen ? <pre className="readout">{JSON.stringify(samples, null, 2)}</pre> : null}</details>
           <details className={styles.raw}><summary>How the window was summarized</summary><Tree value={shape} /></details>
         </>
