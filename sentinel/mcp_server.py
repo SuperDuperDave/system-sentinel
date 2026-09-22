@@ -184,14 +184,14 @@ async def _stack_prompt(state: State, arguments: dict[str, Any], redactor: Redac
     return _redacted(chosen, redactor)
 
 
-async def _capture_create(state: State, _arguments: dict[str, Any], redactor: Redactor | None) -> Any:
+async def _capture_create(state: State, arguments: dict[str, Any], redactor: Redactor | None) -> Any:
     """Take the whole catalog into one ZIP on this machine and say where it landed.
 
     The route hands back the file itself; a tool cannot, so it answers with the capture's name and
     its manifest — which already says whether it was written unredacted and what was removed — and
     the file stays on the machine for a person to send.
     """
-    made = await capture.create(state.bridge, state.stack, state.prompts, redactor)
+    made = await capture.create(state.bridge, state.stack, state.prompts, redactor, reason=arguments.get("reason"))
     return {"capture": made.name, "manifest": made.manifest}
 
 
@@ -468,6 +468,9 @@ class Surface:
 
         tool = ROUTE_TOOLS.get(params.name)
         if tool is not None:
+            if params.name == "capture_create" and reason:
+                # The capture outlives this tool result; keep the stated reason inside its ZIP.
+                arguments["reason"] = reason
             try:
                 payload = await tool.call(self.state, arguments, redactor)
             except Duplicate:

@@ -278,4 +278,7 @@ def test_an_unredacted_capture_still_needs_a_reason(surface: Surface):
     assert (call(surface, "capture_create", unredacted=True)).is_error is True
     made = payload(call(surface, "capture_create", unredacted=True, reason="sending it to the board vendor"))
     assert made["manifest"]["unredacted"] is True
+    assert made["manifest"]["reason"] == "sending it to the board vendor"
     assert made["warnings"] == ["unredacted, because: sending it to the board vendor"]
+    with zipfile.ZipFile(captures_dir() / made["capture"]) as archive:
+        assert json.loads(archive.read("manifest.json"))["reason"] == "sending it to the board vendor"

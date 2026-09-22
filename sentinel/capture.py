@@ -46,7 +46,7 @@ class Capture:
         return self.path.name
 
 
-async def create(bridge: Bridge, stack: Stack, prompts: Prompts, redactor: Redactor | None = None) -> Capture:
+async def create(bridge: Bridge, stack: Stack, prompts: Prompts, redactor: Redactor | None = None, *, reason: str | None = None) -> Capture:
     """Take every reading in the catalog now and write the ZIP. Returns where it landed and its manifest."""
     started = datetime.now(UTC)
     path = _free_path(started)
@@ -83,6 +83,8 @@ async def create(bridge: Bridge, stack: Stack, prompts: Prompts, redactor: Redac
             "readings": len(REGISTRY),
             "members": members,
         }
+        if reason and redactor is None:
+            manifest["reason"] = reason
         _write(archive, MANIFEST_MEMBER, json.dumps(manifest, ensure_ascii=False, indent=1))
 
     return Capture(path=path, manifest=manifest)
