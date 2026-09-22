@@ -2,11 +2,29 @@
 
 **Status: direction A, Instrument, selected by David on 2026-09-20 as the current implementation. On 2026-09-22 he reopened the visual identity: the page can be overhauled, with the green instrument character welcome but not binding.** Values below describe what ships today, not a constraint on a better design. Board: https://claude.ai/artifact/4RZbu4qwZ12Kr2d3ARxKvg (private). Source of the board: [identity-board/build-board.py](identity-board/build-board.py); everything on it is drawn in code.
 
-This note is for the presentation of System Sentinel on mainthread.ai, built in `mainthread-studio`. Once a direction is chosen, this folder owns the identity's values, as Bendr's and Zoning Signal's repositories own theirs. Nothing in the application source was changed for this note.
+This note owns System Sentinel's visual identity, including its presentation on mainthread.ai in `mainthread-studio`. The original direction board changed no application source; the dated refinement below is now being applied in the tool.
+
+## Field Instrument refinement, 2026-09-22
+
+The application is moving toward a more legible instrument while retaining the recognizable dark green field, continuous S mark, graticule and restrained phosphor light. This is a refinement of the selected Instrument identity, not a second source of token values. The studio source is read-only in the current System Sentinel task; application-only refinements remain explicit until a later studio pass can bring the two surfaces together.
+
+The reading order is **question or state → bounded visual summary → exact evidence → method and raw readout**. A new user should understand what was observed in an ordinary sentence before reading a chart; an experienced user can inspect the exact row without losing that context. Every chart names its returned sample or stored window. Blank space means only that the sampled data has no point there; colors and shapes never imply cause or completeness beyond the source.
+
+| App presentation value | Value | Use |
+| --- | --- | --- |
+| Body text | DM Sans, 16 px / 1.5 | explanation, actions, evidence summaries |
+| Readout | JetBrains Mono, 13 px | times, counts, providers, exact values |
+| Group label | JetBrains Mono, 12 px | labels above groups, with restraint on all caps |
+| Keyboard focus | 2 px phosphor outline, 2 px offset | visible navigation light, not body text |
+| Muted | `#A7C0B4` | secondary labels with clearer contrast on the dark field |
+| Raised surface | `#142720` | summary panel separated from the field |
+| Inspection well | `#07130F` | exact data inset within a panel |
+
+These sizes and surfaces first apply inside the tool; the existing studio page has not been edited or visually verified for this refinement. The shared field, ink, mark and light remain as recorded below. Keep phosphor on selected, live and focus states rather than using it as paragraph text. Any warning color must carry a source-backed word or icon as well as hue.
 
 ## Selected identity (owns the values)
 
-Direction A, Instrument. The page on mainthread.ai is the reference implementation (`mainthread-studio/site`: `lib/system-sentinel-mark.ts`, `lib/system-sentinel-record.ts`, `components/SystemSentinel*.tsx`, the `instrument` surface in `styles/globals.css`). Change values here first, then there.
+Direction A, Instrument, now being refined as Field Instrument in the tool. The page on mainthread.ai was the first implementation (`mainthread-studio/site`: `lib/system-sentinel-mark.ts`, `lib/system-sentinel-record.ts`, `components/SystemSentinel*.tsx`, the `instrument` surface in `styles/globals.css`). Change values here first. The studio implementation remains read-only in this task, so the application refinement is temporarily ahead of it.
 
 | Token | Value | Use |
 | --- | --- | --- |
@@ -15,27 +33,29 @@ Direction A, Instrument. The page on mainthread.ai is the reference implementati
 | Deep | `#06100D` | lower right, footer |
 | Ink | `#EAF3EE` | text |
 | Body | `#C3D6CD` | running text |
-| Muted | `#8FB0A3` | labels, captions |
+| Muted | `#A7C0B4` in the app; `#8FB0A3` on the studio page pending a later pass | labels, captions |
 | Rule | `rgba(234,243,238,.14)` | hairlines |
 | Phosphor core | `#C9FFE1` | the trace's core, the one lit word; light only |
 | Phosphor | `#6FF0A8` | the glow; light only |
 | Phosphor deep | `#1E8F5E` | links on paper |
 | Graticule | `#9CFFC4` at 13% | 40 px hairline squares, one zone |
 
-**In the tool since 2026-09-20:** `dashboard/src/identity.css` carries these tokens and the three faces (self-hosted under the OFL in `dashboard/public/fonts/`); `dashboard/src/Mark.tsx` draws the mark from the same path; the graticule sits in the header zone only; the phosphor is the trace under the header and the one lit word, *live*, when the stream is connected; level markers in the record are monochrome glyphs. Change a value here first, then there and on the site.
+**In the tool since 2026-09-20:** `dashboard/src/identity.css` carries these tokens and the three faces (self-hosted under the OFL in `dashboard/public/fonts/`); `dashboard/src/Mark.tsx` draws the mark from the same path; the graticule sits in the header zone only; the phosphor is the trace under the header and the one lit word, *live*, when the stream is connected; level markers in the record are monochrome glyphs. Change a value here first, then update the application. A later studio task can bring the page into alignment.
 
 Type: Azeret Mono 300 for headlines and section titles, 400 tracked capitals for the wordmark (OFL; the Latin subset is self-hosted on the site); JetBrains Mono for readouts and labels; DM Sans for text. Mark: `S_PATH` on a 64-unit grid (`M45 19C42 12 22 11 21 20C20 29 44 30 44 41C44 50 23 53 18 45`), the beam's dot at (18, 45), on a tile of radius 14 carrying an 8-unit graticule; the tab icon drops the graticule and the glow. The trace: flat, one pulse at the right, drawn once on load. The headline on the page: *Inspect, select, compose.*, David's choice on 2026-09-20, the last word lit; the lede opens with his line *A stethoscope for your computer.* The figure is his own machine's System-log record around one evening's two freezes, published as relative minutes with provider, ID and level only and no date, so it never ages. Amber (`#FFE4B0`, `#FFB454`, `#A8651A`) is recorded as the accent he did not choose.
 
 David's five ChatGPT renders from the prompts (backdrop, graticule, trace, share-card ground, app icon) are references only, kept outside this repository. The application takes these values back when it is next worked on: its `globals.css` tokens, the mark, the display face.
 
-## What is decided (from the studio's records)
+## Original studio decisions (historical, 2026-09-20)
+
+The sections below preserve the design board's source material and alternatives. Product capabilities and current screen names are owned by the live source and `docs/CLAIMS.md`; this older studio record is not a current feature list.
 
 - The name, and the public label **Windows application**.
 - The copy: present tense, source-backed, arguing from capability. No live telemetry, prediction, diagnosed machine or product release claimed (`mainthread-studio/docs/mainthread/evidence/SYSTEM-SENTINEL.md`).
 - The four sources it reads (hardware, system events, driver history, crash records) and the verbs (inspect, select, compose).
 - The page's four story sections, its date (2026-09-09) and its place after Zoning Signal.
 
-## What is open
+## Original board questions (historical, 2026-09-20)
 
 1. **The character.** Three directions below; A is recommended.
 2. **The headline.** The current line, *Bring the evidence together.*, is plain and positive and every panel carries it. Offered, not recommended: *Inspect, select, compose.* and *The record, read back.*

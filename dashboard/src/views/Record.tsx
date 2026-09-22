@@ -77,6 +77,7 @@ function Log() {
         </div>
         {taken.reading ? <AddToStack item={{ kind: 'reading', envelope: taken.reading }} label="Stack this reading" /> : null}
       </div>
+      <p className={styles.intro}>What did Windows record? Browse System log entries by time and source. Open a row for its full message, raw fields and the records before it. An entry alone does not establish a cause.</p>
       <OutcomeLine
         taken={taken}
         noun={boot ? 'records since boot' : 'records'}
@@ -158,7 +159,7 @@ function Rows({ records, reading, listRef, overview = false }: { records: EventR
   );
 }
 
-const DENSITY_BINS = 12;
+const DENSITY_BINS = 6;
 const LOCAL_STAMP = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 const newestRecord = (rows: EventRecord[]) => rows.reduce((newest, row) => Date.parse(row.TimeCreated) > Date.parse(newest.TimeCreated) ? row : newest);
 
@@ -186,12 +187,12 @@ function RecordOverview({ records, selected, onOpen }: { records: EventRecord[];
   return (
     <section className={styles.overview} aria-labelledby="record-overview-title">
       <div className={styles.overviewHead}>
-        <div><p className="label">Returned sample</p><h2 id="record-overview-title" className="display">The shape of these records</h2></div>
-        <p>These bars describe the {records.length} rows below. A blank interval means no returned row falls there; earlier records may exist.</p>
+        <div><p className="label">Returned sample · {records.length} rows</p><h2 id="record-overview-title" className="display">Where these entries fall</h2></div>
+        <p>Each bar counts only the rows below. An empty interval has no returned row; other System log entries may exist. Select a bar or source to inspect a matching row.</p>
       </div>
       <div className={styles.overviewBody}>
         <div className={styles.density}>
-          <div className={`${styles.plotTitle} readout`}><span>When Windows logged them</span><span>Peak {peak} in one interval</span></div>
+          <div className={`${styles.plotTitle} readout`}><span>Logged time · returned rows</span><span>Most in one interval: {peak}</span></div>
           {timed.length ? (
             <>
               <div className={styles.bins} role="group" aria-label="Returned record density by time">
@@ -205,7 +206,7 @@ function RecordOverview({ records, selected, onOpen }: { records: EventRecord[];
                       className={`${styles.bin} ${bin.some((r) => r.RecordId === selected) ? styles.binSelected : ''}`}
                       onClick={() => onOpen(latest.RecordId)}
                       aria-label={`${bin.length} returned ${bin.length === 1 ? 'record' : 'records'} from ${LOCAL_STAMP.format(binStart)} to ${LOCAL_STAMP.format(binEnd)}; open the newest one below`}
-                    ><span style={{ height: `${Math.max(4, (bin.length / peak) * 68)}px` }} /></button>
+                    ><span className={`${styles.binCount} readout`}>{bin.length}</span><span className={styles.binBar} style={{ height: `${Math.max(4, (bin.length / peak) * 68)}px` }} /></button>
                   ) : <span className={styles.binEmpty} key={index} aria-hidden="true" />;
                 })}
               </div>
@@ -215,11 +216,12 @@ function RecordOverview({ records, selected, onOpen }: { records: EventRecord[];
           {timed.length < records.length ? <p className={`${styles.unplaced} readout`}>{records.length - timed.length} returned records had no usable time.</p> : null}
         </div>
         <div className={styles.sources}>
-          <p className={`${styles.plotTitle} readout`}>Top sources · {providers.size} in the sample</p>
+          <p className={`${styles.plotTitle} readout`}>Sources · top 3 of {providers.size} returned</p>
           {leading.map(([name, entries]) => (
             <button key={name} className={styles.source} onClick={() => onOpen(newestRecord(entries).RecordId)} aria-label={`${name}: ${entries.length} of ${records.length} returned records; open a matching row below`}>
-              <span className={styles.sourceLine}><span title={name}>{shortProvider(name)}</span><strong className="readout">{entries.length} / {records.length}</strong></span>
+              <span className={styles.sourceLine}><span title={name}>{shortProvider(name) || 'Unnamed source'}</span><strong className="readout">{entries.length} / {records.length}</strong></span>
               <span className={styles.sourceTrack}><span style={{ width: `${(entries.length / records.length) * 100}%` }} /></span>
+              <span className={`${styles.sourceAction} readout`}>Open a matching row ↓</span>
             </button>
           ))}
         </div>
@@ -234,10 +236,10 @@ function Row({ record, reading, open, onToggle }: { record: EventRecord; reading
   return (
     <li className={`${styles.row} ${open ? styles.rowOpen : ''}`} data-record={record.RecordId}>
       <button className={styles.rowButton} onClick={onToggle} aria-expanded={open}>
-        <span className={`${styles.time} readout`}>{clock.format(t)}</span>
-        <span className={styles.level} title={record.LevelDisplayName}><Glyph kind={level} /></span>
+        <span className={`${styles.time} readout`}><span className={styles.srOnly}>{day.format(t)} </span>{clock.format(t)}</span>
+        <span className={styles.level}><Glyph kind={level} /><span className={`${styles.levelText} readout`}>{record.LevelDisplayName}</span></span>
         <span className={`${styles.provider} readout`}>{shortProvider(record.ProviderName)}</span>
-        <span className={`${styles.id} readout`}>{record.Id}</span>
+        <span className={`${styles.id} readout`}>event {record.Id}</span>
         <span className={styles.message}>{record.Message ? firstLine(record.Message) : <em className={styles.noMessage}>no message text</em>}</span>
       </button>
       {open ? <Inspect record={record} reading={reading} /> : null}
@@ -264,6 +266,10 @@ function Inspect({ record, reading }: { record: EventRecord; reading: Reading<Ev
           <pre className={`${styles.propsBody} readout`}>{record.Properties.map((p) => (typeof p === 'string' ? p : JSON.stringify(p))).join('\n')}</pre>
         </details>
       ) : null}
+      <details className={styles.rawRecord}>
+        <summary className="readout">Raw record · exact returned fields</summary>
+        <pre className="readout">{JSON.stringify(record, null, 2)}</pre>
+      </details>
       <div className={styles.actions}>
         <button className={styles.action} onClick={() => setBefore((v) => !v)} aria-expanded={before}>{before ? 'Hide the record before this' : 'The record before this'}</button>
         <AddToStack item={{ kind: 'selection', envelope: reading, ids: [record.RecordId] }} label="Stack this record" />
@@ -286,10 +292,10 @@ function Before({ moment }: { moment: string }) {
           <ol className={styles.beforeRows} ref={before.list}>
             {before.rows.map((r) => (
               <li key={r.RecordId} className={styles.beforeRow} data-record={r.RecordId}>
-                <span className={`${styles.time} readout`}>{clock.format(new Date(r.TimeCreated))}</span>
-                <span className={styles.level} title={r.LevelDisplayName}><Glyph kind={levelKind(r.Level)} /></span>
+                <span className={`${styles.time} readout`}><span className={styles.srOnly}>{day.format(new Date(r.TimeCreated))} </span>{clock.format(new Date(r.TimeCreated))}</span>
+                <span className={styles.level}><Glyph kind={levelKind(r.Level)} /><span className={`${styles.levelText} readout`}>{r.LevelDisplayName}</span></span>
                 <span className={`${styles.provider} readout`}>{shortProvider(r.ProviderName)}</span>
-                <span className={`${styles.id} readout`}>{r.Id}</span>
+                <span className={`${styles.id} readout`}>event {r.Id}</span>
                 <span className={styles.message}>{r.Message ? firstLine(r.Message) : ''}</span>
               </li>
             ))}

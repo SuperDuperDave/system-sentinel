@@ -15,6 +15,7 @@
 - On phones, Record keeps the selected level and window visible in one disclosure. Its full filter controls remain one tap away, letting the returned evidence appear sooner in the first viewport.
 
 ### Changed
+- Record now leads with a plain-language question and a clearer sampled time-and-source panel, then opens a more legible exact row with its complete returned JSON. The tool's Field Instrument refinement increases the base reading sizes and keyboard focus visibility while keeping the same source and raw evidence paths.
 - Crash descriptions now say precisely that the last System record is the last one before the next start. Its timestamp may be later than Windows' estimated stop and does not by itself establish cause.
 - Network adapter inventory stays available when Windows cannot assemble IP configuration; affected `ip` fields are null with a reading warning instead of empty lists that suggest no addresses.
 - The memory reading leaves installed capacity unknown if any module lacks a reported capacity, and leaves free slot count unknown when the array's total is missing, contradictory or unsupported by returned modules. Missing data no longer becomes zero capacity or zero free slots.
