@@ -92,6 +92,7 @@ interface DumpInspection {
   module_count?: number | null;
   exception?: { thread_id: number; code: string; name: string | null; address: string; access?: { operation: string | null; address: string }; module_at_address?: { name: string | null; version: string | null; base_address: string; basis: string } } | null;
   system?: { architecture: string | null; windows_version: string; processors: number } | null;
+  process?: { id: number | null; created_at: string | null; creation_precision_seconds: number | null } | null;
   modules_read?: number | null;
   limit: string;
 }
@@ -574,6 +575,12 @@ function DumpHeaderDetail({ path, fileRef, refreshInventory }: { path: string; f
     rows.push(['In file: parameters', <Value value={info.bugcheck.parameters} />]);
   }
   if (info?.directory_status) rows.push(['Stream directory', `${info.directory_status} · ${info.streams ?? 0} listed`]);
+  if (info?.process?.id != null) rows.push(['In file: process ID', info.process.id]);
+  if (info?.process?.created_at) {
+    const createdAt = info.process.created_at;
+    const afterReading = Date.parse(createdAt) > Date.parse(taken.reading?.asked_at ?? '');
+    rows.push(['Process started', <span><time dateTime={createdAt} title={createdAt}>{afterReading ? 'Recorded after this reading' : ago(createdAt)}</time> · recorded to the second</span>]);
+  }
   if (info?.exception) {
     rows.push(['In file: exception', [info.exception.code, info.exception.name].filter(Boolean).join(' · ')]);
     rows.push(['Thread · address', `${info.exception.thread_id} · ${info.exception.address}`]);

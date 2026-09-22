@@ -12,7 +12,7 @@ import binascii
 import ntpath
 import struct
 import textwrap
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from ..bridge import Bridge, Outcome
@@ -31,7 +31,7 @@ STREAM_NAMES = {
     9: "memory 64", 14: "unloaded modules", 15: "miscellaneous", 16: "memory information",
     17: "thread information", 21: "system memory information", 24: "thread names",
 }
-SAMPLE_BYTES = {3: 4, 4: 4 + MAX_MODULES * MODULE_RECORD_BYTES, 6: 168, 7: 32}
+SAMPLE_BYTES = {3: 4, 4: 4 + MAX_MODULES * MODULE_RECORD_BYTES, 6: 168, 7: 32, 15: 24}
 
 
 def dump_header_script(path: str) -> str:
@@ -88,7 +88,7 @@ if ($file) {{
                             $kind = [BitConverter]::ToUInt32($entries, $at)
                             $bytes = [BitConverter]::ToUInt32($entries, $at + 4)
                             $where = [BitConverter]::ToUInt32($entries, $at + 8)
-                            $sampleLength = switch ($kind) {{ 3 {{ 4 }} 4 {{ 4 }} 6 {{ 168 }} 7 {{ 32 }} default {{ 0 }} }}
+                            $sampleLength = switch ($kind) {{ 3 {{ 4 }} 4 {{ 4 }} 6 {{ 168 }} 7 {{ 32 }} 15 {{ 24 }} default {{ 0 }} }}
                             if ($sampleLength -gt 0 -and $bytes -gt 0 -and -not $seen.ContainsKey($kind)) {{
                                 $seen[$kind] = $true
                                 $sample = Read-At $where ([int][Math]::Min($bytes, $sampleLength))
@@ -191,7 +191,7 @@ def decode_directory(prefix: bytes, directory: bytes | None, status: str, file_s
     """Expose every directory entry and the exact bounded metadata bytes behind the useful ones."""
     count, rva = struct.unpack_from("<II", prefix, 8)
     raw: dict[str, Any] = {"offset": rva, "bytes_hex": directory.hex(" ") if directory is not None else None, "entries": []}
-    summary: dict[str, Any] = {"directory_status": status, "streams": count, "thread_count": None, "module_count": None, "modules_read": None, "exception": None, "system": None}
+    summary: dict[str, Any] = {"directory_status": status, "streams": count, "thread_count": None, "module_count": None, "modules_read": None, "exception": None, "system": None, "process": None}
     warnings: list[str] = []
     if count > MAX_STREAMS:
         summary["directory_status"] = "limit"
@@ -212,6 +212,12 @@ def decode_directory(prefix: bytes, directory: bytes | None, status: str, file_s
         if kind in SAMPLE_BYTES and size > 0:
             sampled_kinds.add(kind)
         bundle = samples.get(index)
+        if kind == 15 and duplicate_sample_kind:
+            # The collector samples the first nonempty stream of each kind. Never
+            # assemble a process identity from multiple miscellaneous records.
+            if bundle is not None:
+                warnings.append(f"Stream {index} repeats miscellaneous metadata; its supplied sample was ignored.")
+            bundle = None
         if bundle is not None and kind in SAMPLE_BYTES and range_status == "within_file":
             sample, names = bundle
             minimum_sample = min(size, 4 if kind == 4 else SAMPLE_BYTES[kind])
@@ -246,6 +252,14 @@ def decode_directory(prefix: bytes, directory: bytes | None, status: str, file_s
                         summary["system"] = _system_summary(entry["system_info"])
                     else:
                         warnings.append(f"Stream {index} has no complete system record in its bounded prefix.")
+                elif kind == 15:
+                    entry["misc_info"] = _misc_fields(sample, offset)
+                    if entry["misc_info"] is None:
+                        warnings.append(f"Stream {index} has no complete 24-byte miscellaneous record in its bounded prefix.")
+                    elif not 24 <= entry["misc_info"]["size_of_info"] <= size:
+                        warnings.append(f"Stream {index} has a miscellaneous SizeOfInfo outside its declared stream bounds.")
+                    else:
+                        summary["process"] = _process_summary(entry["misc_info"])
             else:
                 entry["sample_status"] = "incomplete"
                 warnings.append(f"Stream {index} changed or was truncated while its metadata was read.")
@@ -341,6 +355,33 @@ def _system_summary(raw: dict[str, Any]) -> dict[str, Any]:
         "architecture": {0: "x86", 5: "ARM", 6: "IA-64", 9: "x64", 12: "ARM64"}.get(raw["processor_architecture"]),
         "windows_version": f"{raw['major_version']}.{raw['minor_version']}.{raw['build_number']}",
         "processors": raw["number_of_processors"],
+    }
+
+
+def _misc_fields(sample: bytes, stream_offset: int) -> dict[str, Any] | None:
+    """The common MINIDUMP_MISC_INFO prefix, including unused fields as recorded.
+
+    SizeOfInfo bounds the structure; Flags1 separately says which fields its writer used.
+    Newer structure versions extend this prefix and require no larger sample here.
+    """
+    if len(sample) != 24:
+        return None
+    fields = ("size_of_info", "flags1", "process_id", "process_create_time", "process_user_time", "process_kernel_time")
+    raw: dict[str, Any] = dict(zip(fields, struct.unpack("<6I", sample), strict=True))
+    raw["field_offsets"] = {field: stream_offset + index * 4 for index, field in enumerate(fields)}
+    raw["fields_used"] = {"process_id": bool(raw["flags1"] & 1), "process_times": bool(raw["flags1"] & 2)}
+    return raw
+
+
+def _process_summary(raw: dict[str, Any]) -> dict[str, Any]:
+    used = raw["fields_used"]
+    # The wire field is an unsigned 32-bit count of UTC seconds. Integer arithmetic
+    # preserves both zero and its maximum without platform time_t range assumptions.
+    created_at = datetime(1970, 1, 1, tzinfo=UTC) + timedelta(seconds=raw["process_create_time"]) if used["process_times"] else None
+    return {
+        "id": raw["process_id"] if used["process_id"] else None,
+        "created_at": created_at.isoformat().replace("+00:00", "Z") if created_at is not None else None,
+        "creation_precision_seconds": 1 if created_at is not None else None,
     }
 
 
@@ -455,7 +496,7 @@ def take_dump_header(bridge: Bridge, params: dict[str, Any]) -> Reading:
 
 register(Spec(
     name="dump_header",
-    description="Inspect one inventoried dump's bounded structural metadata: exact header bytes, a kernel bug check or a user-mode minidump's streams and exception, with offsets and raw bytes. No memory payload, debugger, symbol download or whole-file validation.",
+    description="Inspect one inventoried dump's bounded structural metadata: exact header bytes, a kernel bug check or a user-mode minidump's streams, exception and recorded process identity, with offsets and raw bytes. No memory payload, debugger, symbol download or whole-file validation.",
     classes=("raw", "derived"),
     take=take_dump_header,
     params=(

@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import base64
+import json
 import struct
+from copy import deepcopy
 
 import pytest
 
+import sentinel.bridge
 from sentinel.bridge import BridgeResult
+from sentinel.readings import dump_header
 from sentinel.readings.dump_header import MAX_STREAMS, PREFIX_BYTES, decode_prefix, dump_header_script, take_dump_header
 from sentinel.redact import Redactor
-from tests.conftest import FakeBridge
+from tests.conftest import FakeBridge, real_bridge_or_skip
 from tests.test_dump_inventory import dump_inventory
 
 PATH = r"C:\Windows\Minidump\example.dmp"
@@ -157,6 +161,7 @@ def test_minidump_exposes_bounded_raw_streams_and_a_useful_summary():
     assert summary["exception"]["access"] == {"operation": "write", "address": "0x00000000BADF00D0"}
     assert summary["system"]["architecture"] == "x64"
     assert summary["thread_count"] == 12 and summary["module_count"] == 0
+    assert summary["process"] is None
 
 
 def test_a_later_stream_of_the_same_type_is_intentionally_not_sampled():
@@ -232,3 +237,178 @@ def test_incomplete_exception_and_directory_inside_header_do_not_yield_crash_fac
     reading = take_dump_header(FakeBridge(BridgeResult("ok", items=[item])), {"path": PATH})
     assert reading.section("inspection").data["directory_status"] == "invalid_offset"
     assert reading.section("streams").data["entries"] == []
+
+
+def add_misc_stream(item, sample=None, *, declared=24, offset=700):
+    """Append one directory entry, optionally carrying its bounded reader response."""
+    prefix = bytearray(base64.b64decode(item["prefix"]))
+    count = struct.unpack_from("<I", prefix, 8)[0]
+    struct.pack_into("<I", prefix, 8, count + 1)
+    item["prefix"] = base64.b64encode(prefix).decode()
+    directory = base64.b64decode(item["directory"]) + struct.pack("<III", 15, declared, offset)
+    item["directory"] = base64.b64encode(directory).decode()
+    if sample is not None:
+        item["samples"].append({"index": count, "data": base64.b64encode(sample).decode()})
+    return count
+
+
+@pytest.mark.parametrize("structure_size", [24, 44, 160])
+def test_miscellaneous_base_and_extended_records_preserve_raw_prefix_and_process(structure_size):
+    item = mdmp_item()
+    sample = struct.pack("<6I", structure_size, 0x80000003, 4321, 1700000000, 17, 19)
+    add_misc_stream(item, sample, declared=structure_size)
+    original = deepcopy(item)
+    reading = take_dump_header(FakeBridge(BridgeResult("ok", items=[item])), {"path": PATH})
+    assert reading.outcome == "ok" and not reading.warnings
+    entry = reading.section("streams").data["entries"][4]
+    assert entry["sample"] == {"offset": 700, "bytes_hex": sample.hex(" "), "bytes_read": 24}
+    assert entry["misc_info"] == {
+        "size_of_info": structure_size, "flags1": 0x80000003, "process_id": 4321,
+        "process_create_time": 1700000000, "process_user_time": 17, "process_kernel_time": 19,
+        "field_offsets": {
+            "size_of_info": 700, "flags1": 704, "process_id": 708,
+            "process_create_time": 712, "process_user_time": 716, "process_kernel_time": 720,
+        },
+        "fields_used": {"process_id": True, "process_times": True},
+    }
+    assert reading.section("inspection").data["process"] == {
+        "id": 4321, "created_at": "2023-11-14T22:13:20Z", "creation_precision_seconds": 1,
+    }
+    assert item == original
+
+
+@pytest.mark.parametrize("flags", [0, 1, 2, 3, 0x80000000])
+def test_miscellaneous_flags_independently_control_process_identity_and_times(flags):
+    item = mdmp_item()
+    add_misc_stream(item, struct.pack("<6I", 24, flags, 4321, 1700000000, 17, 19))
+    reading = take_dump_header(FakeBridge(BridgeResult("ok", items=[item])), {"path": PATH})
+    assert reading.outcome == "ok" and not reading.warnings
+    raw = reading.section("streams").data["entries"][4]["misc_info"]
+    assert raw["process_id"] == 4321 and raw["process_create_time"] == 1700000000
+    assert raw["process_user_time"] == 17 and raw["process_kernel_time"] == 19
+    assert raw["fields_used"] == {"process_id": bool(flags & 1), "process_times": bool(flags & 2)}
+    assert reading.section("inspection").data["process"] == {
+        "id": 4321 if flags & 1 else None,
+        "created_at": "2023-11-14T22:13:20Z" if flags & 2 else None,
+        "creation_precision_seconds": 1 if flags & 2 else None,
+    }
+
+
+@pytest.mark.parametrize(("value", "created_at"), [
+    (0, "1970-01-01T00:00:00Z"),
+    (0x80000000, "2038-01-19T03:14:08Z"),
+    (0xFFFFFFFF, "2106-02-07T06:28:15Z"),
+])
+def test_miscellaneous_unsigned_fields_keep_zero_and_large_values_exactly(value, created_at):
+    item = mdmp_item()
+    add_misc_stream(item, struct.pack("<6I", 24, 3, value, value, value, value))
+    reading = take_dump_header(FakeBridge(BridgeResult("ok", items=[item])), {"path": PATH})
+    assert reading.outcome == "ok" and not reading.warnings
+    raw = reading.section("streams").data["entries"][4]["misc_info"]
+    assert all(raw[field] == value for field in ("process_id", "process_create_time", "process_user_time", "process_kernel_time"))
+    assert reading.section("inspection").data["process"] == {
+        "id": value, "created_at": created_at, "creation_precision_seconds": 1,
+    }
+
+
+@pytest.mark.parametrize(("size_of_info", "declared", "sample_bytes", "offset"), [
+    (24, 23, 23, 700),  # A genuinely short record, even though its fields begin plausibly.
+    (24, 24, 23, 700),  # Truncated between the directory observation and the sample.
+    (24, 25, 25, 700),  # A reader response that exceeded the requested 24-byte prefix.
+    (0, 24, 24, 700),
+    (23, 24, 24, 700),
+    (25, 24, 24, 700),
+    (0xFFFFFFFF, 24, 24, 700),
+    (44, 44, 24, 1000),  # Prefix fits but the declared structure extends beyond the file.
+])
+def test_invalid_miscellaneous_metadata_retains_the_exception_without_process_facts(size_of_info, declared, sample_bytes, offset):
+    item = mdmp_item()
+    prefix = struct.pack("<6I", size_of_info, 3, 4321, 1700000000, 17, 19)
+    sample = (prefix + b"\xff")[:sample_bytes]
+    add_misc_stream(item, sample, declared=declared, offset=offset)
+    reading = take_dump_header(FakeBridge(BridgeResult("ok", items=[item])), {"path": PATH})
+    assert reading.outcome == "ok" and reading.warnings
+    summary = reading.section("inspection").data
+    assert summary["process"] is None and summary["exception"]["name"] == "access violation"
+    entry = reading.section("streams").data["entries"][4]
+    if sample_bytes == 24 and offset == 700:
+        assert entry["sample"]["bytes_hex"] == sample.hex(" ")
+        assert entry["misc_info"]["size_of_info"] == size_of_info
+        assert entry["misc_info"]["flags1"] == 3
+        assert any("SizeOfInfo" in warning for warning in reading.warnings)
+
+
+@pytest.mark.parametrize(("first_size", "supply_duplicate"), [(24, False), (24, True), (23, True)])
+def test_miscellaneous_duplicate_cannot_supply_or_replace_process_identity(first_size, supply_duplicate):
+    item = mdmp_item()
+    # Leave room under the bridge's sample-count bound for an unexpected duplicate.
+    # The actual PowerShell collector never returns its sample.
+    item["samples"] = [row for row in item["samples"] if row["index"] != 3]
+    add_misc_stream(item, struct.pack("<6I", first_size, 1, 4321, 0, 0, 0))
+    later_sample = struct.pack("<6I", 24, 3, 8765, 1700000000, 17, 19) if supply_duplicate else None
+    add_misc_stream(item, later_sample, offset=900)
+    reading = take_dump_header(FakeBridge(BridgeResult("ok", items=[item])), {"path": PATH})
+    assert reading.outcome == "ok"
+    summary = reading.section("inspection").data
+    assert summary["exception"]["name"] == "access violation"
+    assert summary["process"] == ({"id": 4321, "created_at": None, "creation_precision_seconds": None} if first_size == 24 else None)
+    later = reading.section("streams").data["entries"][5]
+    assert later["sample_status"] == "skipped_duplicate" and "misc_info" not in later
+    assert any("supplied sample was ignored" in warning for warning in reading.warnings) is supply_duplicate
+
+
+@pytest.mark.host
+@pytest.mark.parametrize("structure_size", [24, 160])
+def test_windows_miscellaneous_sampling_is_bounded_and_skips_duplicate_streams(monkeypatch, structure_size):
+    """Execute the real file sampler against only a disposable synthetic Windows file."""
+    monkeypatch.setattr(sentinel.bridge, "POOL_SIZE", 0)
+    bridge = real_bridge_or_skip()
+    item = mdmp_item()
+    sample = struct.pack("<6I", structure_size, 3, 4321, 1700000000, 17, 19)
+    add_misc_stream(item, sample, declared=structure_size)
+    add_misc_stream(item, offset=900)
+    data = bytearray(item["bytes"])
+    prefix = base64.b64decode(item["prefix"])
+    directory = base64.b64decode(item["directory"])
+    data[:len(prefix)] = prefix
+    data[128:128 + len(directory)] = directory
+    data[700:700 + structure_size] = b"\xa5" * structure_size
+    data[900:924] = struct.pack("<6I", 24, 3, 8765, 0xFFFFFFFF, 0, 0)
+    for row in item["samples"]:
+        offset = struct.unpack_from("<I", directory, row["index"] * 12 + 8)[0]
+        contents = base64.b64decode(row["data"])
+        data[offset:offset + len(contents)] = contents
+
+    synthetic_inventory = json.dumps(dump_inventory([item], application=True)).replace("'", "''")
+    inventory_script = f"""
+$syntheticInventory = '{synthetic_inventory}' | ConvertFrom-Json
+$syntheticInventory.locations[0].path = [IO.Path]::GetDirectoryName($syntheticDumpPath)
+$syntheticInventory.locations[0].files[0].path = $syntheticDumpPath
+$syntheticInventory
+"""
+    monkeypatch.setattr(dump_header, "ALL_DUMPS_SCRIPT", inventory_script)
+    inspected = dump_header_script(PATH).replace(f"$selected = '{PATH}'", "$selected = $syntheticDumpPath", 1)
+    encoded = base64.b64encode(data).decode()
+    script = f"""
+& {{
+    $syntheticDumpPath = [IO.Path]::GetTempFileName()
+    try {{
+        [IO.File]::WriteAllBytes($syntheticDumpPath, [Convert]::FromBase64String('{encoded}'))
+        {inspected}
+    }} finally {{ [IO.File]::Delete($syntheticDumpPath) }}
+}}
+"""
+    result = bridge.run(script, depth=8)
+    assert result.outcome == "ok" and len(result.items) == 1, result.error
+    returned = result.items[0]
+    assert returned["status"] == "ok"
+    assert len(returned["samples"]) == 5
+    sampled = next(row for row in returned["samples"] if row["index"] == 4)
+    assert base64.b64decode(sampled["data"]) == sample and sampled["names"] == []
+    assert all(row["index"] != 5 for row in returned["samples"])
+    reading = take_dump_header(FakeBridge(result), {"path": returned["path"]})
+    assert reading.outcome == "ok" and not reading.warnings
+    assert reading.section("inspection").data["process"] == {
+        "id": 4321, "created_at": "2023-11-14T22:13:20Z", "creation_precision_seconds": 1,
+    }
+    assert reading.section("inspection").data["exception"]["name"] == "access violation"

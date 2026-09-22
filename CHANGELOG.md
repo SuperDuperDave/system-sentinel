@@ -3,6 +3,7 @@
 ## [Unreleased] - 2026-09-22
 
 ### Added
+- Recorded process identity in minidump inspection: process ID and creation time when their validity flags permit, with one-second time precision and the exact 24-byte metadata prefix retained for review. CPU times and unused fields remain in the raw evidence; PID reuse and timestamp precision still limit cross-record matching.
 - Application dumps from the current Windows user's default CrashDumps directory, with explicit location coverage, bounded MDMP interpretation and raw structural evidence. Custom destinations and other accounts remain outside the discovery scope; application files cannot become reboot dump matches.
 - Opaque dump inspection references shared by the dashboard and agents, so private paths stay redacted while files remain selectable. References resolve against fresh inventories and explain when a restart requires refreshing the list.
 - An individual Signal lead can be added to the shared Stack by its string ID. Its composed handoff keeps the input basis and, in full detail, the rule evidence; a later observation of the same lead is a separate snapshot. Invalid or missing selection IDs are refused instead of producing an empty or misleading handoff.
