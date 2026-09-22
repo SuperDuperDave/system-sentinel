@@ -45,7 +45,7 @@ export function Signals() {
         Patterns the tool noticed across several readings at once. Each one is a lead to follow, never a finding about what is wrong; the rule that
         produced it and the evidence under it are both here.
       </p>
-      <OutcomeLine taken={taken} noun="signals" emptyText="No signal fired: every rule ran and none of them matched" />
+      <OutcomeLine taken={taken} noun="signals" singular="signal" emptyText="No signal fired: every rule ran and none of them matched" />
       {taken.reading && !observed(taken.reading) ? (
         <p className={styles.unobserved}>No input could be observed, so no rule could run. Signals are read from other readings, not from the machine directly.</p>
       ) : null}

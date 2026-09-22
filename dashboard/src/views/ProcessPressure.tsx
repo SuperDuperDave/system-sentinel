@@ -82,7 +82,7 @@ export function ProcessPressure() {
         <div><p className="label">Current use</p><h2>Who is using the machine?</h2><p>Windows' current process counters. Names and IDs are shown here and never kept in history.</p></div>
         {taken.reading ? <AddToStack item={{ kind: 'reading', envelope: taken.reading }} label="Stack this process snapshot" /> : null}
       </div>
-      <OutcomeLine taken={taken} noun="process instances" emptyText="Windows returned no process instances" />
+      <OutcomeLine taken={taken} noun="process instances" singular="process instance" emptyText="Windows returned no process instances" />
       {snapshot?.at ? <p className={`${styles.asOf} readout`}>Counter snapshot {CLOCK.format(new Date(snapshot.at))} · {snapshot.returned_processes} of {snapshot.total_processes} process instances returned{snapshot.omitted_processes ? ` · ${snapshot.omitted_processes} omitted by the response limit` : ''}</p> : null}
       {leaders && rows.length ? (
         <Section title="Largest in this snapshot" cls="derived" basis={basis} note="Each bar is relative to the largest returned value in its own column; it is not a health grade.">

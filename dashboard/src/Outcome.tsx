@@ -20,7 +20,7 @@ function seconds(ms: number): string {
  * The line under a view's title: what was asked, what came back, and whether the machine was observed.
  * A failure reads as a failure; an empty result reads as a finding; both name the method on request.
  */
-export function OutcomeLine<T>({ taken, noun = 'records', emptyText }: { taken: Taken<T>; noun?: string; emptyText?: string }) {
+export function OutcomeLine<T>({ taken, noun = 'records', singular, emptyText }: { taken: Taken<T>; noun?: string; singular?: string; emptyText?: string }) {
   const [showMethod, setShowMethod] = useState(false);
   const r = taken.reading;
 
@@ -35,7 +35,8 @@ export function OutcomeLine<T>({ taken, noun = 'records', emptyText }: { taken: 
   const cost = seconds(r.took_ms);
   let body: React.ReactNode;
   if (r.outcome === 'ok') {
-    body = <>{r.count ?? ''} {noun} · taken {when} · {cost}</>;
+    const countedNoun = r.count === 1 ? singular ?? noun : noun;
+    body = <>{r.count == null ? noun : `${r.count} ${countedNoun}`} · taken {when} · {cost}</>;
   } else if (r.outcome === 'empty') {
     body = <>{emptyText ?? `No ${noun}`} · taken {when} · {cost}</>;
   } else {

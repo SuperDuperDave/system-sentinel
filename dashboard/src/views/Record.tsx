@@ -81,6 +81,7 @@ function Log() {
       <OutcomeLine
         taken={taken}
         noun={boot ? 'records since boot' : 'records'}
+        singular={boot ? 'record since boot' : 'record'}
         emptyText={
           boot
             ? levels === 'errors'
@@ -120,7 +121,7 @@ function Frame({ moment }: { moment: string }) {
         </div>
       </div>
       <p className={`${styles.frameLine} readout`}>{day.format(when)} · the System log, every level, oldest first and ending at this moment</p>
-      <OutcomeLine taken={before.taken} noun="records" emptyText="Nothing in the log before this moment" />
+      <OutcomeLine taken={before.taken} noun="records" singular="record" emptyText="Nothing in the log before this moment" />
       {before.rows.length && before.held ? (
         <>
           <More before={before} />
@@ -285,7 +286,7 @@ function Before({ moment }: { moment: string }) {
   return (
     <div className={styles.before}>
       <p className="label">The records before {clock.format(new Date(moment))}</p>
-      <OutcomeLine taken={before.taken} noun="records" emptyText="Nothing in the log before this moment" />
+      <OutcomeLine taken={before.taken} noun="records" singular="record" emptyText="Nothing in the log before this moment" />
       {before.rows.length ? (
         <>
           <More before={before} />

@@ -130,7 +130,7 @@ export function Errors() {
           )}
         </p>
       ) : (
-        <OutcomeLine taken={storms} noun="WHEA-Logger records" emptyText={`No WHEA-Logger records ${inWindow}`} />
+        <OutcomeLine taken={storms} noun="WHEA-Logger records" singular="WHEA-Logger record" emptyText={`No WHEA-Logger records ${inWindow}`} />
       )}
 
       {hours !== null && observed(storms.reading) && status ? (
@@ -188,7 +188,7 @@ export function Errors() {
           </>
         }
       >
-        <OutcomeLine taken={whea} noun="WHEA-Logger records" emptyText="No WHEA-Logger records in the System log" />
+        <OutcomeLine taken={whea} noun="WHEA-Logger records" singular="WHEA-Logger record" emptyText="No WHEA-Logger records in the System log" />
         {observed(whea.reading) && records.length > 0 ? (
           <RowList
             items={records}

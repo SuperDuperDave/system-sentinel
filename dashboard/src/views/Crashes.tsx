@@ -180,7 +180,7 @@ export function Crashes() {
         <Segmented value={stopCount} onChange={setStopCount} options={STOP_COUNTS.map((c) => ({ value: c, label: `last ${c}` }))} label="How many stops" />
         {crash.reading ? <AddToStack item={{ kind: 'reading', envelope: crash.reading, title: `Unplanned stops, last ${stopCount}` }} label="Stack this reading" /> : null}
       </Head>
-      <OutcomeLine taken={crash} noun="stops" emptyText="No unplanned stop among the starts read" />
+      <OutcomeLine taken={crash} noun="stops" singular="stop" emptyText="No unplanned stop among the starts read" />
 
       {observed(crash.reading) && stops.length > 0 ? (
         <Section title="Stops" cls="derived" basis={basisOf(crash.reading, 'stops')} note="newest first">
@@ -228,7 +228,7 @@ export function Crashes() {
           </>
         }
       >
-        <OutcomeLine taken={faults} noun="records" emptyText="No application crash, hang or live kernel report in the Application log" />
+        <OutcomeLine taken={faults} noun="records" singular="record" emptyText="No application crash, hang or live kernel report in the Application log" />
         {observed(faults.reading) && decoded.length > 0 ? faultSummary ? (
           <FaultOverview summary={faultSummary} rawCount={faultRecords.length} decodedCount={decoded.length} basis={basisOf(faults.reading, 'summary')} selected={selectedFaultKind} onChoose={chooseFaultKind} />
         ) : <p className={`${styles.faultSummaryMissing} readout`}>The derived fault summary was not returned; the decoded entries remain below.</p> : null}
@@ -261,7 +261,7 @@ export function Crashes() {
         note={files.length ? `newest first · ${size(files.reduce((n, f) => n + f.bytes, 0))} on disk` : undefined}
         controls={dumps.reading ? <AddToStack item={{ kind: 'reading', envelope: dumps.reading, title: 'Crash dump inventory' }} /> : null}
       >
-        <OutcomeLine taken={dumps} noun="dump files" emptyText="No dump files under the Windows dump locations" />
+        <OutcomeLine taken={dumps} noun="dump files" singular="dump file" emptyText="No dump files under the Windows dump locations" />
         {observed(dumps.reading) && files.length > 0
           ? byDay(files, (f) => f.modified).map(([label, rows]) => (
               <div key={label}>

@@ -164,7 +164,7 @@ export function Machine() {
       <h2 className={`${styles.part} display`} id="drivers">
         Driver changes
       </h2>
-      <OutcomeLine taken={drivers} noun="drivers" emptyText="Windows listed no signed drivers" />
+      <OutcomeLine taken={drivers} noun="drivers" singular="driver" emptyText="Windows listed no signed drivers" />
       {observed(drivers.reading) && driverRows.length ? (
         <>
           <Section

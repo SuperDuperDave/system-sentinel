@@ -140,7 +140,7 @@ export function Performance() {
           <p className="readout">Held moment · {heldAt} local</p>
         </div> : null}
       </div>
-      <OutcomeLine taken={history} noun="stored samples" emptyText="No stored samples in this window" />
+      <OutcomeLine taken={history} noun="stored samples" singular="stored sample" emptyText="No stored samples in this window" />
       {samples.length && shape ? (
         <>
           <div className={styles.rangeLine}>
@@ -188,7 +188,7 @@ export function Performance() {
       <section className={styles.now}>
         <div><h2>Fresh snapshot</h2><p>Ask Windows for aggregate counters right now, without waiting for the next stored sample.</p></div>
         {!takeNow ? <button onClick={() => setTakeNow(true)}>Take a fresh snapshot</button> : null}
-        {takeNow ? <><OutcomeLine taken={live} noun="snapshots" emptyText="No numeric counter answered" />{observed(live.reading) && part<Sample>(live.reading, 'snapshot') ? <Tree value={part<Sample>(live.reading, 'snapshot')} /> : null}{live.reading ? <AddToStack item={{ kind: 'reading', envelope: live.reading }} label="Stack this snapshot" /> : null}</> : null}
+        {takeNow ? <><OutcomeLine taken={live} noun="snapshots" singular="snapshot" emptyText="No numeric counter answered" />{observed(live.reading) && part<Sample>(live.reading, 'snapshot') ? <Tree value={part<Sample>(live.reading, 'snapshot')} /> : null}{live.reading ? <AddToStack item={{ kind: 'reading', envelope: live.reading }} label="Stack this snapshot" /> : null}</> : null}
       </section>
     </section>
   );

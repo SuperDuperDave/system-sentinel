@@ -99,7 +99,7 @@ export function ReliabilityHistory() {
       controls={taken.reading ? <AddToStack item={{ kind: 'reading', envelope: taken.reading, title: 'Windows reliability record, last 30 days' }} /> : null}
     >
       <p className={styles.intro}>Windows keeps both fault reports and informational events here, including successful updates. The bars count all returned events; the selected day names each type. Its index is Windows' measure, not a cause finding.</p>
-      <OutcomeLine taken={taken} noun="reliability events" emptyText="Windows returned no reliability history for this window" />
+      <OutcomeLine taken={taken} noun="reliability events" singular="reliability event" emptyText="Windows returned no reliability history for this window" />
       {observed(taken.reading) && days.length > 0 ? (
         <>
           <figure className={styles.figure}>
