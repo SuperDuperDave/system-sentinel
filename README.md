@@ -22,6 +22,8 @@ The screens show the tool rendering a synthetic record built from Windows' own p
 
 The dashboard address remembers the view you opened (`?view=machine`, for example) and a moment you opened in Record. You can copy it to revisit that screen, use browser back and forward, or link to a section. The recipient still needs their own signed-in session.
 
+Record shows when the returned System log rows cluster and which sources appear most often. Select a bar or source to open its exact row. The overview describes the returned sample; the detailed rows and their raw properties remain below it.
+
 ## What it reads
 
 | Reading | What it is |

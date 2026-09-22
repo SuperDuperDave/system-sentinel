@@ -84,7 +84,7 @@ function Log() {
               : 'The log is empty'
         }
       />
-      {observed(taken.reading) && records.length > 0 && taken.reading ? <Rows records={records} reading={taken.reading} /> : null}
+      {observed(taken.reading) && records.length > 0 && taken.reading ? <Rows records={records} reading={taken.reading} overview /> : null}
     </section>
   );
 }
@@ -124,20 +124,101 @@ function Frame({ moment }: { moment: string }) {
   );
 }
 
-function Rows({ records, reading, listRef }: { records: EventRecord[]; reading: Reading<EventRecord[]>; listRef?: Ref<HTMLOListElement> }) {
+function Rows({ records, reading, listRef, overview = false }: { records: EventRecord[]; reading: Reading<EventRecord[]>; listRef?: Ref<HTMLOListElement>; overview?: boolean }) {
   const [open, setOpen] = useState<number | null>(null);
   const grouped = useMemo(() => byDay(records, (r) => r.TimeCreated), [records]);
+  const openRecord = (id: number) => {
+    setOpen(id);
+    requestAnimationFrame(() => {
+      const target = document.querySelector<HTMLButtonElement>(`li[data-record="${id}"] > button`);
+      target?.scrollIntoView({ block: 'center' });
+      target?.focus({ preventScroll: true });
+    });
+  };
   return (
-    <ol className={styles.rows} ref={listRef}>
-      {grouped.map(([label, rows]) => (
-        <Fragment key={label}>
-          <li className={`${styles.day} label`} aria-hidden="true">{label}</li>
-          {rows.map((r) => (
-            <Row key={r.RecordId} record={r} reading={reading} open={open === r.RecordId} onToggle={() => setOpen(open === r.RecordId ? null : r.RecordId)} />
+    <>
+      {overview ? <RecordOverview records={records} selected={open} onOpen={openRecord} /> : null}
+      <ol className={styles.rows} ref={listRef}>
+        {grouped.map(([label, rows]) => (
+          <Fragment key={label}>
+            <li className={`${styles.day} label`} aria-hidden="true">{label}</li>
+            {rows.map((r) => (
+              <Row key={r.RecordId} record={r} reading={reading} open={open === r.RecordId} onToggle={() => setOpen(open === r.RecordId ? null : r.RecordId)} />
+            ))}
+          </Fragment>
+        ))}
+      </ol>
+    </>
+  );
+}
+
+const DENSITY_BINS = 12;
+const LOCAL_STAMP = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+const newestRecord = (rows: EventRecord[]) => rows.reduce((newest, row) => Date.parse(row.TimeCreated) > Date.parse(newest.TimeCreated) ? row : newest);
+
+/** A map of the returned rows only. An empty bin is never a claim about the rest of the log. */
+function RecordOverview({ records, selected, onOpen }: { records: EventRecord[]; selected: number | null; onOpen: (id: number) => void }) {
+  const timed = records.map((record) => ({ record, at: Date.parse(record.TimeCreated) })).filter((item) => Number.isFinite(item.at));
+  const oldest = timed.length ? Math.min(...timed.map((item) => item.at)) : 0;
+  const newest = timed.length ? Math.max(...timed.map((item) => item.at)) : 0;
+  const start = oldest === newest ? oldest - 30 * 60_000 : oldest;
+  const span = oldest === newest ? 60 * 60_000 : newest - oldest;
+  const bins: EventRecord[][] = Array.from({ length: DENSITY_BINS }, () => []);
+  for (const item of timed) {
+    const index = Math.min(DENSITY_BINS - 1, Math.floor(((item.at - start) / span) * DENSITY_BINS));
+    bins[index].push(item.record);
+  }
+  const peak = Math.max(1, ...bins.map((bin) => bin.length));
+  const providers = new Map<string, EventRecord[]>();
+  for (const record of records) {
+    const group = providers.get(record.ProviderName) ?? [];
+    group.push(record);
+    providers.set(record.ProviderName, group);
+  }
+  const leading = [...providers].sort((a, b) => b[1].length - a[1].length).slice(0, 3);
+
+  return (
+    <section className={styles.overview} aria-labelledby="record-overview-title">
+      <div className={styles.overviewHead}>
+        <div><p className="label">Returned sample</p><h2 id="record-overview-title" className="display">The shape of these records</h2></div>
+        <p>These bars describe the {records.length} rows below. A blank interval means no returned row falls there; earlier records may exist.</p>
+      </div>
+      <div className={styles.overviewBody}>
+        <div className={styles.density}>
+          <div className={`${styles.plotTitle} readout`}><span>When Windows logged them</span><span>Peak {peak} in one interval</span></div>
+          {timed.length ? (
+            <>
+              <div className={styles.bins} role="group" aria-label="Returned record density by time">
+                {bins.map((bin, index) => {
+                  const binStart = start + (span * index) / DENSITY_BINS;
+                  const binEnd = start + (span * (index + 1)) / DENSITY_BINS;
+                  const latest = bin.length ? newestRecord(bin) : null;
+                  return latest ? (
+                    <button
+                      key={index}
+                      className={`${styles.bin} ${bin.some((r) => r.RecordId === selected) ? styles.binSelected : ''}`}
+                      onClick={() => onOpen(latest.RecordId)}
+                      aria-label={`${bin.length} returned ${bin.length === 1 ? 'record' : 'records'} from ${LOCAL_STAMP.format(binStart)} to ${LOCAL_STAMP.format(binEnd)}; open the newest one below`}
+                    ><span style={{ height: `${Math.max(4, (bin.length / peak) * 68)}px` }} /></button>
+                  ) : <span className={styles.binEmpty} key={index} aria-hidden="true" />;
+                })}
+              </div>
+              <div className={`${styles.plotAxis} readout`}><span>{LOCAL_STAMP.format(oldest)}</span><span>{LOCAL_STAMP.format(newest)}</span></div>
+            </>
+          ) : <p className={`${styles.noTime} readout`}>No returned record had a time to plot.</p>}
+          {timed.length < records.length ? <p className={`${styles.unplaced} readout`}>{records.length - timed.length} returned records had no usable time.</p> : null}
+        </div>
+        <div className={styles.sources}>
+          <p className={`${styles.plotTitle} readout`}>Top sources · {providers.size} in the sample</p>
+          {leading.map(([name, entries]) => (
+            <button key={name} className={styles.source} onClick={() => onOpen(newestRecord(entries).RecordId)} aria-label={`${name}: ${entries.length} of ${records.length} returned records; open a matching row below`}>
+              <span className={styles.sourceLine}><span title={name}>{shortProvider(name)}</span><strong className="readout">{entries.length} / {records.length}</strong></span>
+              <span className={styles.sourceTrack}><span style={{ width: `${(entries.length / records.length) * 100}%` }} /></span>
+            </button>
           ))}
-        </Fragment>
-      ))}
-    </ol>
+        </div>
+      </div>
+    </section>
   );
 }
 

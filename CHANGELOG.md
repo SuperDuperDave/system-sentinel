@@ -6,6 +6,7 @@
 - A grouped, left-aligned navigation rail with distinct line icons and a phone-sized strip that keeps each view's name visible.
 - A day-by-day visual history in Crashes: Windows' stability index and returned reliability events share a UTC timeline. Selecting a day shows exact event types, the reported index, and the raw records; the same reading can be stacked for an agent.
 - Dashboard addresses now remember the selected view and an investigation moment. Refresh, copied links and browser back/forward return to the right screen; links to sections that load after a reading answer land at the section, and view changes focus the new title.
+- Record opens with a time-density view and leading sources for the returned System log rows. A bar or source opens and focuses one exact row below; the chart names its sample boundary instead of implying it covers the whole log.
 
 ### Changed
 - Network adapter inventory stays available when Windows cannot assemble IP configuration; affected `ip` fields are null with a reading warning instead of empty lists that suggest no addresses.

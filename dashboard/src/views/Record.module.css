@@ -10,6 +10,41 @@
 
 .controls { display: flex; flex-wrap: wrap; gap: 8px; }
 
+.overview { margin: 22px 0 12px; border: 1px solid var(--rule); background: var(--deep); }
+.overviewHead { display: flex; align-items: end; justify-content: space-between; gap: 12px 24px; padding: 15px 18px; border-bottom: 1px solid var(--rule-soft); }
+.overviewHead p:first-child { margin: 0 0 4px; }
+.overviewHead h2 { margin: 0; font-size: clamp(19px, 2.5vw, 25px); }
+.overviewHead > p { margin: 0; max-width: 47ch; color: var(--muted); font-size: 13px; }
+.overviewBody { display: grid; grid-template-columns: minmax(0, 3fr) minmax(230px, 2fr); }
+.density { min-width: 0; padding: 14px 18px 16px; }
+.plotTitle { display: flex; justify-content: space-between; gap: 8px; margin: 0 0 10px; color: var(--muted); }
+.plotTitle span:last-child { text-align: right; }
+.bins { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 2px; align-items: end; border-bottom: 1px solid var(--rule); }
+.bin, .binEmpty { min-width: 0; height: 82px; display: flex; align-items: end; justify-content: center; padding: 0 2px 0; }
+.bin:hover, .bin:focus-visible, .binSelected { background: var(--lit); }
+.bin > span { width: 100%; max-width: 30px; min-height: 4px; background: var(--body); border-radius: 2px 2px 0 0; }
+.binSelected > span { background: var(--ink); }
+.plotAxis { display: flex; justify-content: space-between; gap: 10px; margin-top: 7px; color: var(--muted); }
+.plotAxis span:last-child { text-align: right; }
+.noTime, .unplaced { margin: 8px 0 0; color: var(--muted); }
+.sources { min-width: 0; padding: 14px 18px 16px; border-left: 1px solid var(--rule-soft); }
+.source { display: block; width: 100%; text-align: left; padding: 7px 0; border-top: 1px solid var(--rule-soft); }
+.source:first-of-type { border-top: 0; }
+.sourceLine { display: flex; justify-content: space-between; gap: 8px; color: var(--body); font-size: 13px; }
+.sourceLine span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sourceLine strong { flex: none; font-weight: 400; color: var(--muted); }
+.sourceTrack { display: block; height: 4px; margin-top: 7px; background: var(--rule); }
+.sourceTrack span { display: block; height: 100%; background: var(--body); }
+.source:hover .sourceLine, .source:focus-visible .sourceLine { color: var(--ink); }
+
+@media (max-width: 680px) {
+  .overviewHead { display: block; }
+  .overviewHead > p { margin-top: 8px; }
+  .overviewBody { grid-template-columns: minmax(0, 1fr); }
+  .sources { border-left: 0; border-top: 1px solid var(--rule-soft); }
+  .bin, .binEmpty { height: 76px; }
+}
+
 .rows { list-style: none; margin: 0; padding: 0; }
 .day { padding: 18px 0 6px; }
 .day:first-child { padding-top: 4px; }
