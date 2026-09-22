@@ -1,6 +1,6 @@
 # System Sentinel — identity directions, 2026-09-20
 
-**Status: direction A, Instrument, selected by David on 2026-09-20 ("I absolutely LOVE option A"). Values below under Selected identity.** Board: https://claude.ai/artifact/4RZbu4qwZ12Kr2d3ARxKvg (private). Source of the board: [identity-board/build-board.py](identity-board/build-board.py); everything on it is drawn in code.
+**Status: direction A, Instrument, selected by David on 2026-09-20 as the current implementation. On 2026-09-22 he reopened the visual identity: the page can be overhauled, with the green instrument character welcome but not binding.** Values below describe what ships today, not a constraint on a better design. Board: https://claude.ai/artifact/4RZbu4qwZ12Kr2d3ARxKvg (private). Source of the board: [identity-board/build-board.py](identity-board/build-board.py); everything on it is drawn in code.
 
 This note is for the presentation of System Sentinel on mainthread.ai, built in `mainthread-studio`. Once a direction is chosen, this folder owns the identity's values, as Bendr's and Zoning Signal's repositories own theirs. Nothing in the application source was changed for this note.
 

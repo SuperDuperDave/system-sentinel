@@ -96,7 +96,7 @@ Only `ok` and `empty` say anything about the machine. Treat the other four as "n
 | --- | --- |
 | `raw` | What Windows returned, field for field, minus redaction. |
 | `derived` | Computed from raw by a stated rule (a count, a bucket, a signature, a decoded structure). The section names its inputs and rule in `basis`. |
-| `invariant` | A fact about the machine that does not change between readings (the fingerprint). |
+| `invariant` | A fact established as stable across readings; do not use for a current inventory that can change. |
 | `inferred` | A lead: a pattern the tool noticed that a person or an agent should investigate. Never a diagnosis. `basis` names the rule. |
 
 **`method`** is how the reading was taken: the kind of bridge and the query text, so the evidence can be reproduced by hand. A reading built from several queries lists them.
@@ -121,7 +121,7 @@ Only `ok` and `empty` say anything about the machine. Treat the other four as "n
 | `dumps` | The crash-dump inventory under the Windows dump locations | `files` (raw: name, path, bytes, modified) | |
 | `dump_header` | A bounded structural read of one inventoried dump: its exact header bytes and, according to format, a kernel bug check or a stream minidump's directory and fixed exception and system metadata | `file` (raw metadata), `header` (raw bytes, values and offsets), `streams` (raw MDMP directory entries and sampled metadata bytes, when present), `inspection` (derived: format, bug check or exception, stream counts, and limits) | `path` (required; exact path from `dumps` or `crash`) |
 | `system` | The snapshot: OS, build, boot time, uptime, processor load, memory | `snapshot` (raw) | |
-| `hardware` | The fingerprint and configuration | `fingerprint` (invariant), `config` (raw), `risks` (inferred: observations such as Secure Boot off, never advice) | |
+| `hardware` | The selected current hardware inventory and configuration | `fingerprint` (derived: first processor and board, selected display adapter, BIOS, and disk index 0; `disk0_model` does not establish the Windows boot disk), `config` (raw), `risks` (inferred: observations such as Secure Boot off, never advice) | |
 | `hardware.cpu` | Processor and platform detail | `raw`, `derived` | |
 | `hardware.gpu` | Display adapters and driver | `raw`, `derived` | |
 | `hardware.board` | Board and firmware | `raw`, `derived` | |

@@ -4,26 +4,8 @@ import { AddToStack } from '../AddToStack';
 import { OutcomeLine } from '../Outcome';
 import { Facts, Head, RowList, Section, Tree, Value, basisOf, byDay, duration, part } from '../Sections';
 import { useReading } from '../useReading';
+import { Fingerprint, MachineOverview, Snapshot } from './MachineOverview';
 import styles from './Machine.module.css';
-
-interface Snapshot {
-  os_caption: string | null;
-  os_version: string | null;
-  os_build: string | null;
-  architecture: string | null;
-  boot_time: string | null;
-  uptime_seconds: number | null;
-  processor_load_percent: number | null;
-  memory_total_kb: number | null;
-  memory_free_kb: number | null;
-}
-
-interface Fingerprint {
-  cpu: { name?: string; cores?: number; logical?: number; manufacturer?: string; description?: string } | null;
-  gpu: { name?: string; driver_version?: string; vram_mb?: number; date?: string } | null;
-  board: { product?: string; manufacturer?: string; version?: string; bios_version?: string; bios_date?: string } | null;
-  storage: { boot_model?: string; size_gb?: number; media_type?: string; interface?: string } | null;
-}
 
 interface Risk {
   id: string;
@@ -92,6 +74,8 @@ export function Machine() {
         ))}
       </nav>
 
+      <MachineOverview system={system} hardware={hardware} />
+
       <h2 className={`${styles.part} display`} id="snapshot">
         Snapshot
       </h2>
@@ -126,8 +110,9 @@ export function Machine() {
         <>
           <Section
             title="The parts this machine is made of"
-            cls="invariant"
-            note="what does not change between readings"
+            cls="derived"
+            basis={basisOf(hardware.reading, 'fingerprint')}
+            note="selected parts and versions at this reading"
             controls={hardware.reading ? <AddToStack item={{ kind: 'reading', envelope: hardware.reading, title: 'Hardware fingerprint and configuration' }} /> : null}
           >
             {fingerprint ? (
@@ -137,11 +122,11 @@ export function Machine() {
                   ['Graphics', <Value value={join([fingerprint.gpu?.name, fingerprint.gpu?.driver_version && `driver ${fingerprint.gpu.driver_version}`, fingerprint.gpu?.date])} />],
                   ['Board', <Value value={join([fingerprint.board?.manufacturer, fingerprint.board?.product])} />],
                   ['Firmware', <Value value={join([fingerprint.board?.bios_version, fingerprint.board?.bios_date])} />],
-                  ['Boot disk', <Value value={join([fingerprint.storage?.boot_model, fingerprint.storage?.size_gb && `${fingerprint.storage.size_gb} GB`, fingerprint.storage?.interface])} />],
+                  ['Disk 0', <Value value={join([fingerprint.storage?.disk0_model, fingerprint.storage?.size_gb && `${fingerprint.storage.size_gb} GB`, fingerprint.storage?.interface])} />],
                 ]}
               />
             ) : null}
-            {fingerprint ? <Everything value={fingerprint} cls="invariant" /> : null}
+            {fingerprint ? <Everything value={fingerprint} cls="derived" /> : null}
           </Section>
 
           <div id="configuration" className={styles.anchor} />

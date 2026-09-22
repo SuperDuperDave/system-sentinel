@@ -70,7 +70,7 @@ $disk  = @(Get-CimInstance Win32_DiskDrive | Where-Object { $_.Index -eq 0 })[0]
 if (-not $cpu)   { $warnings += 'Win32_Processor returned nothing.' }
 if (-not $gpu)   { $warnings += 'Win32_VideoController returned nothing.' }
 if (-not $board) { $warnings += 'Win32_BaseBoard returned nothing.' }
-if (-not $disk)  { $warnings += 'No disk is at index 0: the boot disk was not identified.' }
+if (-not $disk)  { $warnings += 'No disk is at index 0.' }
 
 $secure_boot = $null
 $value = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\SecureBoot\State' -Name UEFISecureBootEnabled -ErrorAction SilentlyContinue).UEFISecureBootEnabled
@@ -114,7 +114,7 @@ if ($os.LastBootUpTime) { $uptime = [int]((Get-Date) - $os.LastBootUpTime).Total
             bios_date    = $(if ($bios.ReleaseDate) { $bios.ReleaseDate.ToString('yyyy-MM-dd') } else { $null })
         }
         storage = [pscustomobject]@{
-            boot_model = $disk.Model
+            disk0_model = $disk.Model
             size_gb    = $(if ($disk.Size) { [math]::Round($disk.Size / 1GB, 0) } else { $null })
             media_type = $disk.MediaType
             interface  = $disk.InterfaceType
@@ -522,13 +522,20 @@ def hardware_risks(config: dict[str, Any]) -> list[dict[str, Any]]:
     return out
 
 
+FINGERPRINT_BASIS = (
+    "selected from the current Windows inventory: first processor and baseboard, the PCI display "
+    "adapter with the most reported memory (or the first display adapter), BIOS, and disk index 0; "
+    "these identifiers and versions can change"
+)
+
+
 def take_hardware(bridge: Bridge, params: dict[str, Any]) -> Reading:
     result = bridge.run(HARDWARE_SCRIPT, depth=DEEP)
 
     def build(payload: dict[str, Any]) -> list[Section]:
         config = payload.get("config") or {}
         return [
-            Section("fingerprint", "invariant", payload.get("fingerprint")),
+            Section("fingerprint", "derived", payload.get("fingerprint"), basis=FINGERPRINT_BASIS),
             Section("config", "raw", config),
             Section("risks", "inferred", hardware_risks(config), basis=RISK_BASIS),
         ]
@@ -787,7 +794,7 @@ register(
     Spec(
         name="hardware",
         description="The fingerprint and the configuration: the parts this machine is made of, the firmware and power settings that shape how it behaves, and the observations those settings support.",
-        classes=("invariant", "raw", "inferred"),
+        classes=("derived", "raw", "inferred"),
         take=take_hardware,
     )
 )

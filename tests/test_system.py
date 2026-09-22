@@ -90,7 +90,7 @@ HARDWARE = {
         "cpu": {"name": "AMD Ryzen 7 5800X 8-Core Processor", "cores": 8, "logical": 16, "manufacturer": "AuthenticAMD", "description": "AMD64 Family"},
         "gpu": {"name": "NVIDIA GeForce RTX 3080", "driver_version": "580.97", "vram_mb": 4095, "date": days_ago(40)},
         "board": {"product": "B550 Taichi", "manufacturer": "ASRock", "version": "", "bios_version": "P3.90", "bios_date": "2024-11-04"},
-        "storage": {"boot_model": "Samsung SSD 990 PRO 2TB", "size_gb": 1863, "media_type": "Fixed hard disk media", "interface": "SCSI"},
+        "storage": {"disk0_model": "Samsung SSD 990 PRO 2TB", "size_gb": 1863, "media_type": "Fixed hard disk media", "interface": "SCSI"},
     },
     "config": {
         "secure_boot": False,
@@ -107,9 +107,9 @@ HARDWARE = {
 
 def test_hardware_keeps_the_fingerprint_the_configuration_and_the_observations_apart():
     r = taken("hardware", answer(HARDWARE))
-    assert classes(r) == {"fingerprint": "invariant", "config": "raw", "risks": "inferred"}
+    assert classes(r) == {"fingerprint": "derived", "config": "raw", "risks": "inferred"}
     assert r.section("risks").basis
-    assert r.section("fingerprint").basis is None  # an invariant states itself
+    assert "disk index 0" in r.section("fingerprint").basis
     assert set(r.section("fingerprint").data) == {"cpu", "gpu", "board", "storage"}
     assert "serial" not in str(r.section("fingerprint").data).lower()
 
@@ -408,7 +408,7 @@ def test_the_catalog_carries_every_machine_reading_as_designed():
     assert {"system", "hardware", "drivers", "dumps", *HARDWARE_DOMAINS} <= set(REGISTRY)
     assert all(REGISTRY[name].heavy for name in HARDWARE_DOMAINS)
     assert not REGISTRY["system"].heavy and not REGISTRY["dumps"].heavy
-    assert REGISTRY["hardware"].classes == ("invariant", "raw", "inferred")
+    assert REGISTRY["hardware"].classes == ("derived", "raw", "inferred")
     assert REGISTRY["drivers"].params[0].name == "count" and REGISTRY["drivers"].params[0].default == 30
     assert REGISTRY["hardware.board"].private == ("board.serial",)
     assert REGISTRY["hardware.storage"].private == ("disks[].serial_number",)
@@ -439,7 +439,7 @@ def test_system_snapshot_on_the_host():
 @pytest.mark.host
 def test_hardware_on_the_host():
     r = observed(asyncio.run(take("hardware", real_bridge_or_skip(), {})))
-    assert classes(r) == {"fingerprint": "invariant", "config": "raw", "risks": "inferred"}
+    assert classes(r) == {"fingerprint": "derived", "config": "raw", "risks": "inferred"}
     assert r.section("fingerprint").data["cpu"]["name"]
     assert r.section("fingerprint").data["board"]["manufacturer"]
     config = r.section("config").data

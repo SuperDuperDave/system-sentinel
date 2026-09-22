@@ -409,7 +409,7 @@ def _reading(name: str, sections: list[tuple[str, str, object]], outcome: str = 
 
 def _inputs(**over):
     base = {
-        "hardware": _reading("hardware", [("fingerprint", "invariant", {"gpu": {"date": "2018-01-01", "driver_version": "1.0"}}), ("config", "raw", {"fast_startup": False})]),
+        "hardware": _reading("hardware", [("fingerprint", "derived", {"gpu": {"date": "2018-01-01", "driver_version": "1.0"}}), ("config", "raw", {"fast_startup": False})]),
         "pcie": _reading("pcie", [("groups", "derived", [{"root_port": {"instance_id": "PCI\\R", "name": "Root Port"}, "members": [{"name": "GPU", "status": "OK"}, {"name": "Audio", "status": "Error"}]}])]),
         "power": _reading("power", [("derived", "derived", {"fast_startup": True, "uptime_seconds": 30 * 86400, "link_power_management": {"ac": {"index": "0x2", "setting": "L1"}}, "ledger": {"counts": {"unexpected shutdown": 2, "wake": 1, "display driver reset": 1}, "window": {"first": "a", "last": "b"}}})]),
         "constraints": _reading("constraints", [("derived", "derived", constraints_derived(CONSTRAINT_DEVICES))]),
@@ -501,7 +501,7 @@ def test_an_index_fall_across_a_missing_day_is_not_placed_on_the_next_returned_d
 
 def test_signals_is_empty_rather_than_ok_when_the_inputs_are_observed_and_quiet():
     quiet = {
-        "hardware": _reading("hardware", [("fingerprint", "invariant", {}), ("config", "raw", {"fast_startup": False})]),
+        "hardware": _reading("hardware", [("fingerprint", "derived", {}), ("config", "raw", {"fast_startup": False})]),
         "pcie": _reading("pcie", [("groups", "derived", [])]),
         "power": _reading("power", [("derived", "derived", {"fast_startup": False, "uptime_seconds": 60, "ledger": {"counts": {}, "window": {}}})]),
         "constraints": _reading("constraints", [("derived", "derived", constraints_derived([]))]),
