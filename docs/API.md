@@ -194,16 +194,16 @@ An item:
 
 | Field | Meaning |
 | --- | --- |
-| `kind` | `reading` (a whole reading), `selection` (some records of a reading, chosen by `RecordId` in `ids`), `note` (text the person or agent wrote) |
+| `kind` | `reading` (a whole reading), `selection` (some records chosen by numeric `RecordId`, or signals chosen by string signal ID, in `ids`), `note` (text the person or agent wrote) |
 | `rank` | 1 first to 5 last in the composed handoff; default 3 |
-| `verbosity` | `summary` (a table of time, level, provider, ID and the first line of the message) or `full` (the records as JSON); default `full` |
+| `verbosity` | `summary` (a compact record table, or signal identity, title, summary and source readings) or `full` (selected records or signals with evidence as JSON); default `full` |
 | `reading` | The envelope, kept as it was at the moment of adding: its `asked_at`, `outcome` and `method` are the item's provenance |
 
 | Route | Does |
 | --- | --- |
 | `GET /api/stack` | `{ "items": [...], "prompt_id": "...", "system_prompt": true }` |
 | `PATCH /api/stack` | Change `prompt_id` or `system_prompt` |
-| `POST /api/stack/items` | Add an item. Body: `kind`, optional `title`, `rank`, `verbosity`, `ids`, `note`, and either `take: { "name": "...", "params": {...} }` (the server takes the reading now) or `envelope: { ... }` (a reading the caller already holds, stored as given). Returns the item. Adding the same reading with the same parameters and the same `ids` twice is refused with `409`. |
+| `POST /api/stack/items` | Add an item. Body: `kind`, optional `title`, `rank`, `verbosity`, `ids`, `note`, and either `take: { "name": "...", "params": {...} }` (the server takes the reading now) or `envelope: { ... }` (a reading the caller already holds, stored as given). A selection needs distinct IDs present in that reading: numeric `RecordId` values for records, string `id` values for signals. The composed signal selection keeps the signal section's basis and, at full verbosity, its rule evidence. Adding the same reading with the same parameters and the same `ids` twice is refused with `409`; a signal selected from a later reading is a new snapshot. |
 | `PATCH /api/stack/items/{id}` | Change `rank`, `verbosity` or `title` |
 | `DELETE /api/stack/items/{id}` | Remove one |
 | `DELETE /api/stack` | Clear |

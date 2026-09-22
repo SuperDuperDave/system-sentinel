@@ -69,6 +69,9 @@ export function AddToStack({ item, label = 'Add to stack' }: { item: NewItem; la
 function signature(item: NewItem): string {
   if (item.kind === 'note') return `note:${item.note}`;
   const ids = 'ids' in item ? item.ids : null;
-  if ('envelope' in item) return JSON.stringify([item.kind, item.envelope.reading, item.envelope.params, ids]);
+  if ('envelope' in item) {
+    const moment = item.kind === 'selection' && item.envelope.reading === 'signals' ? item.envelope.asked_at : null;
+    return JSON.stringify([item.kind, item.envelope.reading, item.envelope.params, ids, moment]);
+  }
   return JSON.stringify([item.kind, item.take.name, item.take.params, ids]);
 }

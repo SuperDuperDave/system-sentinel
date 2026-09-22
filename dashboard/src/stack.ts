@@ -20,7 +20,7 @@ export interface StackItem {
   rank: number;
   verbosity: Verbosity;
   reading: Reading | null;
-  ids: number[] | null;
+  ids: (number | string)[] | null;
   note: string | null;
 }
 
@@ -42,7 +42,7 @@ export interface Prompt {
 export type NewItem =
   | { kind: 'reading'; title?: string; rank?: number; verbosity?: Verbosity; envelope: Reading }
   | { kind: 'reading'; title?: string; rank?: number; verbosity?: Verbosity; take: { name: string; params: Record<string, unknown> } }
-  | { kind: 'selection'; title?: string; rank?: number; verbosity?: Verbosity; envelope: Reading; ids: number[] }
+  | { kind: 'selection'; title?: string; rank?: number; verbosity?: Verbosity; envelope: Reading; ids: (number | string)[] }
   | { kind: 'note'; title?: string; rank?: number; note: string };
 
 /** The handoff as the server rendered it, with what redaction removed from it. */

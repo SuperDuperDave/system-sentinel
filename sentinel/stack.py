@@ -47,7 +47,7 @@ class Item:
     rank: int = 3
     verbosity: str = "full"
     reading: dict[str, Any] | None = None
-    ids: list[int] | None = None
+    ids: list[int | str] | None = None
     note: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -68,7 +68,10 @@ class Item:
         """What makes two items the same evidence. A note is never a duplicate: it is written, not taken."""
         if self.kind == "note" or not self.reading:
             return None
-        return (self.reading.get("reading"), json.dumps(self.reading.get("params"), sort_keys=True), tuple(sorted(self.ids or ())))
+        # A lead is a snapshot: the same rule can report different evidence later. Keep a
+        # second observation distinct while still refusing the same snapshot twice.
+        moment = self.reading.get("asked_at") if self.kind == "selection" and self.reading.get("reading") == "signals" else None
+        return (self.reading.get("reading"), json.dumps(self.reading.get("params"), sort_keys=True), tuple(sorted(self.ids or ())), moment)
 
 
 def item_from_dict(raw: dict[str, Any]) -> Item:
@@ -233,7 +236,7 @@ class Prompts:
 async def new_item(stack: Stack, bridge: Bridge, body: dict[str, Any]) -> Item:
     """Turn what a client sent into an item: take the reading now, or keep the envelope it holds.
 
-    Refuses what cannot be evidence — a selection without record ids, a note without text, a
+    Refuses what cannot be evidence — a selection without matching ids, a note without text, a
     reading without either a ``take`` or an ``envelope`` — before anything is stored.
     """
     kind = body.get("kind") or "reading"
@@ -247,7 +250,7 @@ async def new_item(stack: Stack, bridge: Bridge, body: dict[str, Any]) -> Item:
         raise ValueError(f"verbosity must be one of {list(VERBOSITIES)}")
 
     envelope: dict[str, Any] | None = None
-    ids: list[int] | None = None
+    ids: list[int | str] | None = None
     note: str | None = None
 
     if kind == "note":
@@ -269,9 +272,7 @@ async def new_item(stack: Stack, bridge: Bridge, body: dict[str, Any]) -> Item:
             if "reading" not in envelope or "outcome" not in envelope:
                 raise ValueError("'envelope' must be a reading as the API returned it")
         if kind == "selection":
-            ids = [int(i) for i in body.get("ids") or []]
-            if not ids:
-                raise ValueError("a selection needs the RecordIds it selects")
+            ids = _selection_ids(envelope, body.get("ids") or [])
 
     return Item(
         id=uuid.uuid4().hex,
@@ -286,14 +287,16 @@ async def new_item(stack: Stack, bridge: Bridge, body: dict[str, Any]) -> Item:
     )
 
 
-def default_title(kind: str, envelope: dict[str, Any] | None, ids: list[int] | None, note: str | None) -> str:
+def default_title(kind: str, envelope: dict[str, Any] | None, ids: list[int | str] | None, note: str | None) -> str:
     if kind == "note":
         text = (note or "").strip().splitlines()[0] if note else "Note"
         return text[:60] or "Note"
     name = (envelope or {}).get("reading", "reading")
     params = _params_text((envelope or {}).get("params") or {})
     if kind == "selection":
-        return f"{len(ids or [])} records from {name}"
+        count = len(ids or [])
+        noun = "signal" if name == "signals" else "record"
+        return f"{count} {noun if count == 1 else noun + 's'} from {name}"
     return f"{name} ({params})" if params else str(name)
 
 
@@ -343,17 +346,30 @@ def _item_lines(position: int, item: dict[str, Any]) -> list[str]:
     lines.append(f"- method: {(envelope.get('method') or {}).get('kind', 'unknown')}")
 
     records = _records(envelope)
-    if item.get("ids") is not None and records is not None:
-        wanted = {int(i) for i in item["ids"]}
-        records = [r for r in records if _record_id(r) in wanted]
-        lines.append(f"- selected: {len(records)} of the reading's records, by RecordId")
+    selected_signals = _signal_section(envelope) if envelope.get("reading") == "signals" and item.get("ids") is not None else None
+    if item.get("ids") is not None:
+        if selected_signals is not None:
+            wanted = set(item["ids"])
+            selected_signals = {**selected_signals, "data": [s for s in selected_signals["data"] if s.get("id") in wanted]}
+            lines.append(f"- selected: {len(selected_signals['data'])} of the reading's signals, by signal id")
+        elif records is not None:
+            wanted = set(item["ids"])
+            records = [r for r in records if _record_id(r) in wanted]
+            lines.append(f"- selected: {len(records)} of the reading's records, by RecordId")
+        else:
+            lines += ["", "The selected evidence is unavailable in the stored reading.", ""]
+            return lines
 
     lines.append("")
     if envelope.get("outcome") not in ("ok", "empty"):
         detail = (envelope.get("error") or {}).get("detail") or ""
         lines += [f"The machine was not observed{': ' + detail if detail else ''}.", ""]
         return lines
-    if item.get("verbosity") == "summary" and records is not None:
+    if selected_signals is not None:
+        if item.get("verbosity") == "summary":
+            selected_signals["data"] = [{k: s.get(k) for k in ("id", "class", "title", "summary", "readings")} for s in selected_signals["data"]]
+        lines += _json_block(selected_signals)
+    elif item.get("verbosity") == "summary" and records is not None:
         lines += _table(records)
     elif item.get("verbosity") == "summary" and envelope.get("reading") == "dump_header":
         # The exact bytes remain on the stored reading and in the API. A handoff starts with
@@ -385,10 +401,45 @@ def _outcome_text(envelope: dict[str, Any]) -> str:
 def _records(envelope: dict[str, Any]) -> list[dict[str, Any]] | None:
     """The first section that is a list of log records, or nothing: not every reading has records."""
     for section in envelope.get("sections") or []:
+        if not isinstance(section, dict):
+            continue
         data = section.get("data")
         if isinstance(data, list) and data and all(isinstance(d, dict) and ("RecordId" in d or "TimeCreated" in d) for d in data):
             return data
     return None
+
+
+def _signal_section(envelope: dict[str, Any]) -> dict[str, Any] | None:
+    """The signal rows and their basis travel together when only some leads are handed on."""
+    for section in envelope.get("sections") or []:
+        if not isinstance(section, dict):
+            continue
+        if section.get("name") == "signals" and isinstance(section.get("data"), list) and all(isinstance(s, dict) and isinstance(s.get("id"), str) for s in section["data"]):
+            return section
+    return None
+
+
+def _selection_ids(envelope: dict[str, Any], raw: Any) -> list[int | str]:
+    if not isinstance(raw, list):
+        raise ValueError("selection ids must be a list")
+    if envelope.get("reading") == "signals":
+        section = _signal_section(envelope)
+        if section is None or not raw or any(not isinstance(i, str) or not i for i in raw):
+            raise ValueError("a signal selection needs signal ids from its reading")
+        ids: list[int | str] = list(raw)
+        available = {s["id"] for s in section["data"]}
+    else:
+        records = _records(envelope)
+        if records is None or not raw or any(type(i) not in (int, str) for i in raw):
+            raise ValueError("a record selection needs the RecordIds from its reading")
+        try:
+            ids = [int(i) for i in raw]
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError("a record selection needs the RecordIds from its reading") from exc
+        available = {_record_id(r) for r in records}
+    if len(ids) != len(set(ids)) or not set(ids) <= available:
+        raise ValueError("selection ids must be distinct and present in the reading")
+    return ids
 
 
 def _record_id(record: dict[str, Any]) -> int | None:

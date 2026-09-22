@@ -1,5 +1,5 @@
 import { AddToStack } from '../AddToStack';
-import { observed, section } from '../api';
+import { Reading, observed, section } from '../api';
 import { OutcomeLine } from '../Outcome';
 import { Head, MomentLink, RowList, Section, Tree } from '../Sections';
 import { useReading } from '../useReading';
@@ -32,9 +32,10 @@ interface Input {
  */
 export function Signals() {
   const taken = useReading<Signal[]>('signals');
-  const signals = section(taken.reading, 'signals') ?? [];
-  const head = observed(taken.reading) ? taken.reading?.sections.find((s) => s.name === 'signals') : undefined;
-  const inputs = ((taken.reading?.method ?? {}) as { readings?: Input[] }).readings ?? [];
+  const reading = taken.reading;
+  const signals = section(reading, 'signals') ?? [];
+  const head = observed(reading) ? reading?.sections.find((s) => s.name === 'signals') : undefined;
+  const inputs = ((reading?.method ?? {}) as { readings?: Input[] }).readings ?? [];
   const missingInputs = inputs.some((input) => input.outcome !== 'ok' && input.outcome !== 'empty');
   const groups = CLASSES.map((cls) => [cls, signals.filter((s) => s.class === cls)] as const);
   const silent = groups.filter(([, found]) => found.length === 0).map(([cls]) => cls);
@@ -53,10 +54,10 @@ export function Signals() {
       {head ? <SignalOverview groups={groups} /> : null}
       {inputs.length ? <Inputs inputs={inputs} /> : null}
 
-      {head ? (
+      {head && reading ? (
         <div className={styles.section}>
           <Section title="What was noticed" cls={head.class} basis={head.basis}>
-            {groups.map(([cls, found]) => (found.length ? <Group key={cls} cls={cls} signals={found} /> : null))}
+            {groups.map(([cls, found]) => (found.length ? <Group key={cls} cls={cls} signals={found} reading={reading} /> : null))}
             {signals.length && silent.length ? <p className={`${styles.silent} readout`}>No signal in {silent.join(', ')}.</p> : null}
           </Section>
         </div>
@@ -66,7 +67,7 @@ export function Signals() {
 }
 
 /** One class of signal: what the class looks for, then the leads that fired under it. */
-function Group({ cls, signals }: { cls: string; signals: Signal[] }) {
+function Group({ cls, signals, reading }: { cls: string; signals: Signal[]; reading: Reading }) {
   return (
     <div className={styles.group} id={`signal-${cls}`}>
       <h3 className={`${styles.groupTitle} label`}>{cls}</h3>
@@ -87,6 +88,7 @@ function Group({ cls, signals }: { cls: string; signals: Signal[] }) {
             <Tree value={s.evidence} />
             <Jumps evidence={s.evidence} />
             <p className={`${styles.from} readout`}>read from {s.readings.join(', ')} · {s.id}</p>
+            <div className={styles.stackLead}><AddToStack item={{ kind: 'selection', envelope: reading, ids: [s.id], title: s.title }} label="Stack this lead" /></div>
           </div>
         )}
       />

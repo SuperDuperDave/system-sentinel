@@ -207,8 +207,8 @@ STACK_TOOLS: dict[str, RouteTool] = {
         RouteTool(
             "stack_add",
             "Add evidence to the stack: a reading the tool takes now ('take'), a reading you already hold ('envelope'), "
-            "some of its records ('selection' with 'ids'), or a note you wrote. The same reading with the same parameters "
-            "and records is refused rather than stacked twice.",
+            "some of its records or signals ('selection' with 'ids'), or a note you wrote. The same reading with the same parameters "
+            "and selected ids is refused rather than stacked twice.",
             {
                 "type": "object",
                 "properties": {
@@ -216,7 +216,7 @@ STACK_TOOLS: dict[str, RouteTool] = {
                     "title": {"type": "string", "description": "Optional; one is derived from the reading otherwise."},
                     "rank": {"type": "integer", "description": "1 first to 5 last in the composed handoff.", "default": 3},
                     "verbosity": {"type": "string", "enum": ["summary", "full"], "default": "full"},
-                    "ids": {"type": "array", "items": {"type": "integer"}, "description": "For a selection: the RecordIds to keep."},
+                    "ids": {"type": "array", "items": {"type": ["integer", "string"]}, "description": "For a selection: RecordIds for log records, or signal ids for a signals reading. Each id must be present in the reading."},
                     "note": {"type": "string", "description": "For a note: the text, carried into the handoff verbatim."},
                     "take": {
                         "type": "object",

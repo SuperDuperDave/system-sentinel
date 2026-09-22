@@ -49,6 +49,7 @@ a.classCard:hover, a.classCard:focus-visible { background: var(--lit); text-deco
 /* The ways into the log from a lead, set apart by the gap rather than by a rule. */
 .jumps { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 20px; margin: 10px 0 0; }
 .from { margin: 10px 0 0; color: var(--muted); overflow-wrap: anywhere; }
+.stackLead { margin-top: 6px; }
 .silent { margin: 22px 0 0; color: var(--muted); }
 
 @media (min-width: 720px) {

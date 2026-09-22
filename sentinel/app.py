@@ -75,7 +75,7 @@ class NewStackItem(BaseModel):
     title: str | None = None
     rank: int | None = None
     verbosity: Literal["summary", "full"] | None = None
-    ids: list[int] | None = None
+    ids: list[int | str] | None = None
     note: str | None = None
     take: TakeRequest | None = None
     envelope: dict[str, Any] | None = None

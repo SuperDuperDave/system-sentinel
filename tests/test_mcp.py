@@ -115,6 +115,7 @@ def test_every_tool_says_what_it_does_to_the_machine():
     assert destroys == {"stack_remove", "stack_clear"}
     for name in ("stack_add", "stack_update", "stack_prompt", "capture_create"):
         assert listed[name].annotations.read_only_hint is False and listed[name].annotations.destructive_hint is False, name
+    assert set(listed["stack_add"].input_schema["properties"]["ids"]["items"]["type"]) == {"integer", "string"}
 
 
 def test_every_reading_declares_the_same_envelope_and_the_route_tools_declare_none():
@@ -231,6 +232,20 @@ def test_the_catalog_and_the_handoff_are_resources(surface: Surface):
 
     with pytest.raises(MCPError, match="no resource"):
         resource(surface, "sentinel://nothing")
+
+
+def test_agent_can_hand_on_one_signal_with_its_basis(surface: Surface):
+    envelope = {
+        "reading": "signals", "params": {}, "asked_at": "2026-09-21T00:00:00Z", "outcome": "ok",
+        "method": {"kind": "readings"}, "sections": [{"name": "signals", "class": "inferred", "basis": "Synthetic input coverage.", "data": [
+            {"id": "pressure:one", "title": "One lead", "evidence": {"count": 4}},
+            {"id": "pressure:two", "title": "Another lead", "evidence": {"count": 8}},
+        ]}],
+    }
+    selected = payload(call(surface, "stack_add", kind="selection", ids=["pressure:one"], envelope=envelope))
+    assert selected["ids"] == ["pressure:one"]
+    handoff = resource(surface, HANDOFF_URI).contents[0].text
+    assert "Synthetic input coverage." in handoff and "pressure:one" in handoff and "pressure:two" not in handoff
 
 
 def test_a_stack_change_publishes_the_handoff(surface: Surface):

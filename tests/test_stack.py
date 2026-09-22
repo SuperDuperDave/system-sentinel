@@ -102,6 +102,43 @@ def test_the_same_evidence_twice_is_refused(client: TestClient):
     assert client.post("/api/stack/items", headers=AUTH, json={"kind": "selection", "ids": [307001], "take": {"name": "events", "params": {"count": 2}}}).status_code == 201
 
 
+def test_one_signal_can_be_handed_on_with_its_basis_and_evidence(client: TestClient):
+    envelope = {
+        "reading": "signals", "params": {}, "asked_at": "2026-09-21T00:00:00Z", "outcome": "ok",
+        "method": {"kind": "readings", "readings": [{"name": "events", "outcome": "ok"}, {"name": "whea", "outcome": "denied"}]},
+        "sections": [{"name": "signals", "class": "inferred", "basis": "WHEA was not observed.", "data": [
+            {"id": "pressure:events", "class": "pressure", "title": "The event log is busy", "summary": "A lead to inspect.", "readings": ["events"], "evidence": {"count": 12}},
+            {"id": "gaps:whea", "class": "gaps", "title": "WHEA has a gap", "summary": "A missing input.", "readings": ["whea"], "evidence": {"reason": "denied"}},
+        ]}],
+    }
+    item = add(client, kind="selection", ids=["pressure:events"], envelope=envelope)
+    assert item["title"] == "1 signal from signals" and item["ids"] == ["pressure:events"]
+    text = client.get("/api/stack/composed", headers=AUTH).json()["text"]
+    assert "- selected: 1 of the reading's signals, by signal id" in text
+    assert '"basis": "WHEA was not observed."' in text and '"count": 12' in text
+    assert "gaps:whea" not in text and "denied" not in text.split("```json")[-1]
+    assert client.post("/api/stack/items", headers=AUTH, json={"kind": "selection", "ids": ["pressure:events"], "envelope": envelope}).status_code == 409
+
+    summary = client.patch(f"/api/stack/items/{item['id']}", headers=AUTH, json={"verbosity": "summary"})
+    assert summary.status_code == 200
+    text = client.get("/api/stack/composed", headers=AUTH).json()["text"]
+    assert "A lead to inspect." in text and '"count": 12' not in text
+    assert '"basis": "WHEA was not observed."' in text
+    later = {**envelope, "asked_at": "2026-09-21T00:05:00Z"}
+    assert add(client, kind="selection", ids=["pressure:events"], envelope=later)["id"] != item["id"]
+
+
+def test_a_selection_cannot_name_evidence_absent_from_its_reading(client: TestClient):
+    envelope = client.get("/api/readings/events?count=2", headers=AUTH).json()
+    for ids in ([307001, 307001], [999999], ["not-a-record"]):
+        response = client.post("/api/stack/items", headers=AUTH, json={"kind": "selection", "ids": ids, "envelope": envelope})
+        assert response.status_code == 422, response.text
+    signals = {"reading": "signals", "outcome": "ok", "sections": [{"name": "signals", "data": [{"id": "lead:one"}]}]}
+    for ids in (["lead:one", "lead:one"], ["lead:other"], [1]):
+        response = client.post("/api/stack/items", headers=AUTH, json={"kind": "selection", "ids": ids, "envelope": signals})
+        assert response.status_code == 422, response.text
+
+
 def test_notes_are_never_duplicates(client: TestClient):
     add(client, kind="note", note="it froze twice this evening")
     add(client, kind="note", note="it froze twice this evening")

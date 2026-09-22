@@ -166,12 +166,14 @@ export function Stack() {
 function Item({ item, onChange, onRemove }: { item: StackItem; onChange: (c: { rank?: number; verbosity?: Verbosity }) => void; onRemove: () => void }) {
   const envelope = item.reading;
   const lost = envelope ? envelope.outcome !== 'ok' && envelope.outcome !== 'empty' : false;
+  const selectedCount = item.ids?.length ?? 0;
+  const selectedNoun = envelope?.reading === 'signals' ? 'signal' : 'record';
   return (
     <li className={styles.item}>
       <p className={styles.itemTitle}>{item.title}</p>
       <p className={`${styles.itemMeta} readout`}>
         {item.kind}
-        {item.kind === 'selection' ? ` · ${item.ids?.length ?? 0} records` : ''}
+        {item.kind === 'selection' ? ` · ${selectedCount} ${selectedNoun}${selectedCount === 1 ? '' : 's'}` : ''}
         {envelope ? ` · ${envelope.reading}` : ''}
         {envelope ? <span className={lost ? styles.lost : styles.fine}> · {lost ? `not observed: ${envelope.outcome}` : envelope.outcome}</span> : null}
         {` · added ${ago(item.added_at)}`}
