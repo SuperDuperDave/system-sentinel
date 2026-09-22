@@ -221,7 +221,9 @@ def test_the_pool_survives_the_whole_catalog_taken_twice(monkeypatch):
     bridge = real_bridge_or_skip()
     monkeypatch.setattr(sentinel.bridge, "POOL_SIZE", 4)
     moment = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-    params = {"record": {"before": moment}}
+    # A selected-file reading needs a path; a clean runner may have no dump, and `empty` is still
+    # a real answer from the same bridge session for this transport soak.
+    params = {"record": {"before": moment}, "dump_header": {"path": r"C:\Windows\MEMORY.DMP"}}
 
     seen: dict[str, list[str]] = {}
     for _ in range(2):

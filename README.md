@@ -130,7 +130,7 @@ What changed and when: [CHANGELOG.md](CHANGELOG.md). How to work on it: [CONTRIB
 
 ## What it does not do
 
-No live telemetry as a service, no prediction, no crash-dump decoding, no diagnosis. A burst of corrected errors, a gap in the log or a correlated event is a lead to investigate; the reading belongs to the person or the agent holding the evidence.
+No live telemetry as a service, no prediction, no full crash-dump analysis, no diagnosis. The tool can read a dump file's bounded header when Windows permits it, but it does not inspect its stack or memory or name a cause. A burst of corrected errors, a gap in the log or a correlated event is a lead to investigate; the reading belongs to the person or the agent holding the evidence.
 
 ## License
 

@@ -68,6 +68,14 @@ interface DumpFile {
   modified: string;
 }
 
+interface DumpInspection {
+  format: string;
+  header_status: string;
+  architecture?: string | null;
+  bugcheck?: { code: string; name: string | null; parameters: string[] };
+  limit: string;
+}
+
 const STOP_COUNTS = [5, 20];
 const FAULT_COUNTS = [30, 100];
 
@@ -201,6 +209,7 @@ export function Crashes() {
                           ['Written', f.modified],
                         ]}
                       />
+                      <DumpHeaderDetail path={f.path} />
                       <div className={styles.actions}>
                         <MomentLink at={f.modified} />
                       </div>
@@ -259,6 +268,7 @@ function StopDetail({ stop, envelope }: { stop: Stop; envelope: Reading | null }
   return (
     <>
       <Facts rows={rows} />
+      {stop.dump?.path && stop.dump.bytes != null ? <DumpHeaderDetail path={stop.dump.path} /> : null}
       {stop.last_record_before?.Message ? <p className={styles.lastWord}>{stop.last_record_before.Message}</p> : null}
       <div className={styles.actions}>
         <MomentLink at={moment} />
@@ -266,6 +276,29 @@ function StopDetail({ stop, envelope }: { stop: Stop; envelope: Reading | null }
           <AddToStack item={{ kind: 'selection', envelope, ids, title: `Stop at ${moment ?? stop.stopped_at ?? 'an unknown time'}` }} label="Stack this stop" />
         ) : null}
       </div>
+    </>
+  );
+}
+
+/** Read just the selected file's header when the person opens its detail. */
+function DumpHeaderDetail({ path }: { path: string }) {
+  const taken = useReading('dump_header', { path });
+  const info = part<DumpInspection>(taken.reading, 'inspection');
+  const rows: [string, ReactNode][] = info ? [
+    ['Format', info.format],
+    ['Header', info.header_status],
+  ] : [];
+  if (info?.architecture) rows.push(['Architecture', info.architecture]);
+  if (info?.bugcheck) {
+    rows.push(['In file: bug check', [info.bugcheck.code, info.bugcheck.name].filter(Boolean).join(' · ')]);
+    rows.push(['In file: parameters', <Value value={info.bugcheck.parameters} />]);
+  }
+  if (info) rows.push(['Limit', info.limit]);
+  return (
+    <>
+      <p className="label">Inside the dump</p>
+      <OutcomeLine taken={taken} noun="dump header" emptyText="This file is no longer in the dump inventory" />
+      {observed(taken.reading) && info ? <Facts rows={rows} /> : null}
     </>
   );
 }
