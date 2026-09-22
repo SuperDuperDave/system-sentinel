@@ -9,6 +9,7 @@
 ### Changed
 - The reliability reading now counts returned records by source **and event ID** in its derived daily rollup. The UI and API name informational records, including successful Windows updates, so event volume cannot masquerade as failure volume.
 - The index-fall signal requires adjacent UTC days and carries the event types Windows returned. A missing day no longer assigns an unseen index change to the next returned day.
+- WHEA decoding checks the CPER header, declared length and section bounds before starting the external decoder. Malformed records retain their raw payload and carry a per-record error. Identical payloads are decoded once per reading and still appear under each record's own ID. The synthetic screenshot server now serves structurally valid CPER data wherever it offers binary data, so reproducing screenshots does not feed short fixture tokens to the real decoder.
 
 ## [1.1.0] - 2026-09-21
 

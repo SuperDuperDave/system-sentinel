@@ -48,7 +48,7 @@ DECODE_BUDGET = 30.0
 DECODE_WORKERS = 4
 _INTEROP_ATTEMPTS = 3
 
-DECODED_BASIS = "DecodeWheaRecord.exe over each record's RawData"
+DECODED_BASIS = "CPER header and section bounds checked locally, then DecodeWheaRecord.exe over each structurally bounded RawData"
 
 # A storm is bounded by the window, but the window is the caller's: cap what one reading pulls
 # out of the log and say so when the cap bites, rather than serializing an unbounded log.
@@ -118,15 +118,24 @@ def decode_all(records: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], lis
             ["the CPER decoder is not present: the records were read but not decoded"],
         )
     deadline = time.monotonic() + DECODE_BUDGET
-    # One process per record; a few at a time, in the records' order. The decoder is a local
-    # executable over a string, so nothing it does contends with the bridge.
+    # The decoder is a pure function of RawData. Repeated records often carry identical binary
+    # data, especially fixtures: one process per distinct payload is enough, then put each
+    # answer back under its own RecordId. This also bounds a bad payload to one attempted launch
+    # per reading rather than one launch per occurrence.
+    unique: dict[str, dict[str, Any]] = {}
+    for record in records:
+        unique.setdefault(str(record.get("RawData") or ""), record)
     with ThreadPoolExecutor(max_workers=DECODE_WORKERS) as pool:
-        return list(pool.map(lambda r: decode_record(r, deadline), records)), []
+        answers = dict(zip(unique, pool.map(lambda r: decode_record(r, deadline), unique.values()), strict=True))
+    return [
+        {**answers[str(record.get("RawData") or "")], "RecordId": record.get("RecordId")}
+        for record in records
+    ], []
 
 
 def decode_record(record: dict[str, Any], deadline: float) -> dict[str, Any]:
     record_id = record.get("RecordId")
-    payload = re.sub(r"[^0-9A-Fa-f]", "", str(record.get("RawData") or ""))
+    payload = str(record.get("RawData") or "").strip()
     if not payload:
         return {"RecordId": record_id, "error": "the record carries no binary payload"}
     if len(payload) > MAX_HEX:
@@ -135,7 +144,11 @@ def decode_record(record: dict[str, Any], deadline: float) -> dict[str, Any]:
     if remaining <= 0:
         return {"RecordId": record_id, "error": "the reading's decoding budget was spent before this record"}
 
-    stdout, stderr, code, error = _run_decoder(payload, min(DECODE_TIMEOUT, remaining))
+    checked, reason = checked_cper(payload)
+    if reason:
+        return {"RecordId": record_id, "error": reason}
+
+    stdout, stderr, code, error = _run_decoder(checked, min(DECODE_TIMEOUT, remaining))
     if error:
         return {"RecordId": record_id, "error": error}
     if code != 0 or not stdout:
@@ -144,6 +157,37 @@ def decode_record(record: dict[str, Any], deadline: float) -> dict[str, Any]:
         return {"RecordId": record_id, "decoded": json.loads(stdout)}
     except json.JSONDecodeError:
         return {"RecordId": record_id, "error": f"the decoder's output was not JSON: {stdout.splitlines()[0][:200]}"}
+
+
+def checked_cper(payload: str) -> tuple[str, str | None]:
+    """Reject malformed CPER structure before the external decoder can crash on its input.
+
+    The raw record stays in its section. We only check the fixed header and descriptor bounds,
+    not the meaning of a section's data, so a passing check is permission to try the decoder,
+    never a claim that the whole record is valid. Layout: Microsoft's WHEA_ERROR_RECORD header
+    and SectionDescriptor structures (128 and 72 bytes respectively).
+    """
+    if len(payload) % 2 or not re.fullmatch(r"[0-9A-Fa-f]+", payload):
+        return "", "the binary payload is not an even-length hexadecimal string"
+    data = bytes.fromhex(payload)
+    if len(data) < 128:
+        return "", "the CPER header is shorter than 128 bytes"
+    if data[:4] != b"CPER" or data[6:10] != b"\xff\xff\xff\xff":
+        return "", "the CPER header signatures do not match"
+    sections = int.from_bytes(data[10:12], "little")
+    if sections == 0:
+        return "", "the CPER header lists no sections"
+    descriptors_end = 128 + 72 * sections
+    declared = int.from_bytes(data[20:24], "little")
+    if descriptors_end > declared or declared > len(data):
+        return "", "the CPER length or section directory is outside the binary payload"
+    for index in range(sections):
+        base = 128 + 72 * index
+        offset = int.from_bytes(data[base : base + 4], "little")
+        length = int.from_bytes(data[base + 4 : base + 8], "little")
+        if offset < descriptors_end or offset + length > declared:
+            return "", f"CPER section {index + 1} points outside the declared record"
+    return payload[: declared * 2].upper(), None
 
 
 def _run_decoder(payload: str, timeout: float) -> tuple[str, str, int | None, str | None]:

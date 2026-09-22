@@ -13,8 +13,8 @@ over records built for this purpose:
   4101, storahci 129, Service Control Manager 7034/7036, DistributedCOM 10016,
   Microsoft-Windows-Kernel-Boot 20, FilterManager 6).
 - [`tests/fixtures/whea-records.json`](../../tests/fixtures/whea-records.json) — the WHEA-Logger
-  fixture already in the test suite (a baseline, a tail, a burst and one fatal record), with the
-  most recent record given a real, decodable CPER payload built the way
+  fixture already in the test suite (a baseline, a tail, a burst and one fatal record). The
+  screenshot server gives every record with binary data a real, decodable CPER payload built the way
   `tests/test_whea.py`'s `minimal_cper()` builds one, so the decoded structure is genuine decoder
   output, not invented JSON.
 

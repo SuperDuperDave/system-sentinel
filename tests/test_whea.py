@@ -66,6 +66,10 @@ def test_the_query_asks_the_provider_for_the_payload_and_treats_a_no_match_as_em
 
 def test_each_record_carries_its_decoded_structure_or_the_reason_there_is_none(monkeypatch):
     records = load(groups={"burst"})[:2]
+    records[0]["RawData"] = minimal_cper()
+    other = bytearray.fromhex(minimal_cper())
+    other[12] = 1  # a second structurally valid payload, so each fake answer has its own input
+    records[1]["RawData"] = other.hex()
     monkeypatch.setattr(whea, "DECODER", str(FIXTURE))  # present, but never actually run
     answers = [
         (json.dumps({"SectionCount": 1, "ErrorSeverity": "Corrected"}), "", 0, None),
@@ -82,6 +86,15 @@ def test_each_record_carries_its_decoded_structure_or_the_reason_there_is_none(m
     assert decoded.data[0] == {"RecordId": records[0]["RecordId"], "decoded": {"SectionCount": 1, "ErrorSeverity": "Corrected"}}
     assert decoded.data[1]["RecordId"] == records[1]["RecordId"]
     assert decoded.data[1]["error"] == "Hexadecimal string is not a valid CPER record"
+
+
+def test_identical_cper_payloads_are_decoded_once_and_keep_their_own_record_ids(monkeypatch):
+    calls = []
+    monkeypatch.setattr(whea, "_run_decoder", lambda payload, timeout: (calls.append(payload) or '{}', "", 0, None))
+    payload = minimal_cper()
+    decoded, warnings = whea.decode_all([{"RecordId": 41, "RawData": payload}, {"RecordId": 42, "RawData": payload}])
+    assert not warnings and len(calls) == 1
+    assert decoded == [{"RecordId": 41, "decoded": {}}, {"RecordId": 42, "decoded": {}}]
 
 
 def test_a_record_without_a_payload_never_reaches_the_decoder(monkeypatch):
@@ -317,6 +330,48 @@ def minimal_cper() -> str:
         + bytes(8 + 4 + 8 + 12)  # record id, flags, persistence info, reserved
     )
     return (header + descriptor).hex().upper()
+
+
+@pytest.mark.parametrize("damage", [
+    "not hex", "odd hex", "short", "signature", "signature end", "no sections",
+    "directory past record", "declared past payload", "section before data", "section past record",
+])
+def test_malformed_cper_never_starts_the_external_decoder(monkeypatch, damage: str):
+    monkeypatch.setattr(whea, "_run_decoder", lambda payload, timeout: pytest.fail("malformed CPER reached the decoder"))
+    data = bytearray.fromhex(minimal_cper())
+    if damage == "not hex":
+        payload = "not hexadecimal"
+    elif damage == "odd hex":
+        payload = minimal_cper()[:-1]
+    elif damage == "short":
+        payload = minimal_cper()[:16]
+    else:
+        if damage == "signature":
+            data[0] = 0
+        elif damage == "signature end":
+            data[6] = 0
+        elif damage == "no sections":
+            data[10:12] = (0).to_bytes(2, "little")
+        elif damage == "directory past record":
+            data[10:12] = (2).to_bytes(2, "little")
+        elif damage == "declared past payload":
+            data[20:24] = (9999).to_bytes(4, "little")
+        elif damage == "section before data":
+            data[128:132] = (100).to_bytes(4, "little")
+        elif damage == "section past record":
+            data[132:136] = (1).to_bytes(4, "little")
+        payload = data.hex()
+    entry = whea.decode_record({"RecordId": 17, "RawData": payload}, deadline=time.monotonic() + 10)
+    assert entry["RecordId"] == 17 and "error" in entry
+
+
+def test_the_screenshot_fixture_never_feeds_a_truncated_cper_to_the_real_decoder():
+    from runpy import run_path
+
+    fixture = run_path(str(Path(__file__).parents[1] / "docs/screens/fixtures/fixture-server.py"))
+    records = fixture["whea_records"](time.time(), count=30)
+    assert records
+    assert all(whea.checked_cper(record["RawData"])[1] is None for record in records if record.get("RawData"))
 
 
 def _ran(entry: dict[str, Any]) -> dict[str, Any]:

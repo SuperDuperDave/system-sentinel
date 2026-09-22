@@ -5,8 +5,8 @@ that renders the real thing, over records that were never on this machine.
 
 Answers:
   - the identity probe (``$env:COMPUTERNAME``): a placeholder host and user
-  - WHEA (``whea``, ``storms``): tests/fixtures/whea-records.json, one record given a real,
-    decodable CPER payload (the minimal construction from tests/test_whea.py)
+  - WHEA (``whea``, ``storms``): tests/fixtures/whea-records.json, each record with binary data
+    given a real, decodable CPER payload (the minimal construction from tests/test_whea.py)
   - the System log (``events``, ``record``): docs/screens/fixtures/system-log.json, filtered
     and paged the way Get-WinEvent would be
   - anything else: empty
@@ -23,7 +23,7 @@ import re
 import sys
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -45,8 +45,8 @@ def find_repo_root(start: Path) -> Path:
 REPO = find_repo_root(HERE)
 sys.path.insert(0, str(REPO))
 
-from sentinel.bridge import BridgeResult  # noqa: E402
 from sentinel.app import State, create_app  # noqa: E402
+from sentinel.bridge import BridgeResult  # noqa: E402
 
 WHEA_FIXTURE = REPO / "tests" / "fixtures" / "whea-records.json"
 SYSTEM_LOG_FIXTURE = HERE / "system-log.json"
@@ -88,7 +88,7 @@ CPER_HEX = minimal_cper()
 
 def _powershell_stamp(epoch: float) -> str:
     """PowerShell's 'o' format, which the readings parse: seven fractional digits."""
-    moment = datetime.fromtimestamp(epoch, timezone.utc)
+    moment = datetime.fromtimestamp(epoch, UTC)
     return moment.strftime("%Y-%m-%dT%H:%M:%S.") + f"{moment.microsecond:06d}0Z"
 
 
@@ -104,10 +104,9 @@ def _parse_stamp(stamp: str) -> float:
 
 def whea_records(now: float, count: int | None = None) -> list[dict[str, Any]]:
     """The committed WHEA fixture, materialized relative to ``now``, capped the way ``-MaxEvents``
-    would cap it (most recent first). The most recent record is given a real, decodable CPER
-    payload — rather than only the fixture's one payload-less record — so the decoded structure
-    is guaranteed to be within whatever count the view asks for, exactly as ``take_whea``'s own
-    decode budget expects a small handful of records, not the whole fixture, per take."""
+    would cap it (most recent first). Every record with binary data is given the same small,
+    decodable CPER payload so none of the fixture's short signature tokens reaches the real
+    decoder. The record with no binary data remains absent, and the reading says so."""
     doc = json.loads(WHEA_FIXTURE.read_text(encoding="utf-8"))
     out = []
     for entry in doc["records"]:
@@ -118,8 +117,13 @@ def whea_records(now: float, count: int | None = None) -> list[dict[str, Any]]:
     out.sort(key=lambda r: r["TimeCreated"], reverse=True)
     if count is not None:
         out = out[:count]
-    if out:
-        out[0]["RawData"] = CPER_HEX  # the most recent record always decodes, whatever the cap
+    # The committed fixture holds short tokens to exercise signature grouping. They are not CPER
+    # records: feeding them to the real .NET decoder can cause an unhandled exception that
+    # Windows logs as an application crash. Every binary payload served for a screenshot must be structurally
+    # valid, even when only the newest one's detail is visible in the final image.
+    for record in out:
+        if record.get("RawData"):
+            record["RawData"] = CPER_HEX
     return out
 
 
@@ -143,8 +147,8 @@ def system_log_records(now: float) -> list[dict[str, Any]]:
 def _fill_template(text: str, moment: float) -> str:
     """The triad's two message templates carry their own moment as a parameter: 12's is its own
     boot instant, 6008's is the crash six minutes and change earlier — the Display 4101 moment."""
-    boot = datetime.fromtimestamp(moment, timezone.utc)
-    shutdown = datetime.fromtimestamp(moment - 6.2 * 60, timezone.utc)
+    boot = datetime.fromtimestamp(moment, UTC)
+    shutdown = datetime.fromtimestamp(moment - 6.2 * 60, UTC)
     return text.format(
         boot_iso=boot.strftime("%Y-%m-%dT%H:%M:%S.000000000Z"),
         shutdown_time=shutdown.strftime("%-I:%M:%S %p"),
