@@ -3,15 +3,17 @@ import { create } from 'zustand';
 export type ViewId = 'record' | 'errors' | 'crashes' | 'machine' | 'diagnostics' | 'signals' | 'stack' | 'agents';
 
 /** The views, in the order the nav shows them. The studio page copies these names; change them there too. */
-export const VIEWS: { id: ViewId; label: string }[] = [
-  { id: 'record', label: 'Record' },
-  { id: 'errors', label: 'Hardware errors' },
-  { id: 'crashes', label: 'Crashes' },
-  { id: 'machine', label: 'Machine' },
-  { id: 'diagnostics', label: 'Diagnostics' },
-  { id: 'signals', label: 'Signals' },
-  { id: 'stack', label: 'Stack' },
-  { id: 'agents', label: 'Agents' },
+export type ViewGroup = 'Evidence' | 'Interpret' | 'Carry';
+
+export const VIEWS: { id: ViewId; label: string; group: ViewGroup }[] = [
+  { id: 'record', label: 'Record', group: 'Evidence' },
+  { id: 'errors', label: 'Hardware errors', group: 'Evidence' },
+  { id: 'crashes', label: 'Crashes', group: 'Evidence' },
+  { id: 'machine', label: 'Machine', group: 'Evidence' },
+  { id: 'diagnostics', label: 'Diagnostics', group: 'Interpret' },
+  { id: 'signals', label: 'Signals', group: 'Interpret' },
+  { id: 'stack', label: 'Stack', group: 'Carry' },
+  { id: 'agents', label: 'Agents', group: 'Carry' },
 ];
 
 interface AppState {

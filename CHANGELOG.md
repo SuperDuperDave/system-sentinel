@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased] - 2026-09-22
+
+### Added
+- A grouped, left-aligned navigation rail with distinct line icons and a phone-sized strip that keeps each view's name visible.
+- A day-by-day visual history in Crashes: Windows' stability index and returned reliability events share a UTC timeline. Selecting a day shows exact event types, the reported index, and the raw records; the same reading can be stacked for an agent.
+
+### Changed
+- The reliability reading now counts returned records by source **and event ID** in its derived daily rollup. The UI and API name informational records, including successful Windows updates, so event volume cannot masquerade as failure volume.
+- The index-fall signal requires adjacent UTC days and carries the event types Windows returned. A missing day no longer assigns an unseen index change to the next returned day.
+
 ## [1.1.0] - 2026-09-21
 
 The moment, answered in one call and one click. "It froze at 02:14" now has a reading that names the stop, the bug check, the dump and the machine's last word before it, and a dashboard where every time that frames an investigation is a place you can go to.
@@ -8,7 +18,7 @@ The moment, answered in one call and one click. "It froze at 02:14" now has a re
 - A person-triggered tray update flow: check GitHub's latest stable release, confirm before download, verify the executable with GitHub's asset digest and the release's SHA-256 list, then start it through the existing handoff. `system-sentinel update` checks from a terminal; `--install` installs on Windows. No background checks or machine readings leave the computer.
 - `crash`: the stops the machine did not plan, newest first, each one composed out of the records of its session — when it stopped as Windows estimated it (read from the EventLog 6008 record's binary value, not from its locale text), when it started again, the bug check if one was written and the parameters it carried, the dump file on disk that belongs to it and how it was matched to it, and the last record the machine managed before it went, with how long it had been quiet. Give it a moment instead of a count and it reports what the first start at or after that moment announced, which is the only thing that can answer for a freeze; a start that announced nothing is an answer too, and the reading says which start it was. One launch, however many stops it names.
 - `faults`: what went wrong while the machine kept running — the programs that crashed or hung and the kernel's own live reports, a GPU timeout or a watchdog, each with its application, its module and its exception named, and one entry per report however many records Windows wrote it across.
-- `reliability`: Windows' own record of this machine, the failures the Reliability Analysis Component counted and the stability index it computes every hour, rolled up by day — where the index stood at each day's end, how low it went, and what Windows counted that day, by source. It is somebody else's arithmetic, which is exactly why it is worth having beside the tool's own readings: it can disagree, and a disagreement is a lead.
+- `reliability`: Windows' own events related to reliability, including informational entries, and the stability index it computes every hour, rolled up by day — where the index stood at each day's end, how low it went, and what Windows returned that day, by source. It is somebody else's arithmetic, which is exactly why it is worth having beside the tool's own readings: it can disagree, and a disagreement is a lead.
 - **Crashes**, the view, in place of Crash dumps: the stops, the programs and the kernel's live reports, and the dump files, each reading with its own outcome line and each row opening in place on the facts behind it. Opening a dump now takes `dump_header` on demand: its format and recorded bug check where readable, or an explicit Windows denial.
 - `dump_header` opens only a selected file from the Windows dump inventory and exposes bounded structural bytes and their offsets. A recognized x64 kernel header yields its stop code and four parameters; an MDMP stream minidump yields its directory, exception and system metadata, and up to 128 module records. An exception address is located within a recorded module range where possible, without treating that module as a cause. Crashes puts the interpreted facts first, with an in-place raw readout and one action to stack the same reading for an agent. The rest of the dump is not validated.
 - The moment as somewhere to go. A stop, a fault, a dump file, a hardware-error record, a time inside a signal's evidence, a lit stretch of the hardware-error trace: each carries one control that frames the log around that instant — the records before it, oldest first, ending there, widened twenty-five at a time, with the way back beside them. The frame is held while you look at something else and is still there when you come back.

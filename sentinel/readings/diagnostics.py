@@ -885,9 +885,15 @@ def _repeated_stops(stops: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _index_fall(days: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """The day Windows' own index fell furthest below where the day before left it."""
+    """The adjacent UTC day Windows' index fell furthest below the prior day's end."""
     falls: list[tuple[float, float, dict[str, Any]]] = []
     for before, day in zip(days, days[1:], strict=False):  # a list against its own tail: the last day has no day after it
+        try:
+            adjacent = (datetime.fromisoformat(str(day.get("day"))) - datetime.fromisoformat(str(before.get("day")))).days == 1
+        except ValueError:
+            adjacent = False
+        if not adjacent:
+            continue  # a missing day cannot locate when the index moved
         left_at, went_to = _float(before.get("index_last")), _float(day.get("index_min"))
         if left_at is None or went_to is None or left_at - went_to < INDEX_FALL:
             continue
@@ -900,8 +906,8 @@ def _index_fall(days: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "transitions",
             "transition:reliability-index-fall",
             f"Windows' reliability index fell {fall} on {day['day']}",
-            "Windows lowers this index when it counts a failure, so this points at the day it counted, not at a second failure. What it counted that day is named here.",
-            {"day": day["day"], "index_before": left_at, "index_min": _float(day.get("index_min")), "fall": fall, "records": day.get("records") or {}},
+            "Windows' index changed between adjacent UTC days. The events returned for this day are shown here, but the index does not identify which event drove the change.",
+            {"day": day["day"], "index_before": left_at, "index_min": _float(day.get("index_min")), "fall": fall, "records": day.get("records") or {}, "event_types": day.get("event_types") or []},
             ["reliability"],
         )
     ]

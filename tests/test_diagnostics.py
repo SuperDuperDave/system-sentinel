@@ -92,7 +92,7 @@ MEMORY_PAYLOAD = {
     "log_begins": "2026-07-01T06:15:00.000Z",
 }
 
-# Three hours of Windows' own index over three days, and what it counted on each. The largest fall
+# Three days of Windows' own index and events, including two successful updates. The largest fall
 # is not on the day the index is lowest, which is the whole point of the rule that reads it.
 RELIABILITY_STABILITY = [
     {"TimeGenerated": "2026-09-17T22:00:00.000Z", "SystemStabilityIndex": 9.4, "RelID": 1},
@@ -348,6 +348,9 @@ def test_the_day_rollup_reads_the_index_at_each_days_end_and_its_lowest_hour():
     assert [d["index_last"] for d in rollup["days"]] == [9.1, 7.4, 6.2]  # the last hour that reported one
     assert [d["index_min"] for d in rollup["days"]] == [9.1, 7.4, 6.2]
     assert rollup["days"][1]["records"] == {"Microsoft-Windows-WindowsUpdateClient": 2}
+    assert rollup["days"][1]["event_types"] == [
+        {"source": "Microsoft-Windows-WindowsUpdateClient", "event_id": 19, "count": 2}
+    ]
     assert rollup["days"][0]["records"] == {}  # a day Windows counted nothing on is still a day
     assert rollup["index_now"] == 6.2
     assert rollup["index_lowest"] == {"day": "2026-09-19", "index": 6.2}
@@ -357,7 +360,11 @@ def test_the_day_rollup_reads_the_index_at_each_days_end_and_its_lowest_hour():
 
 def test_a_day_with_records_and_no_index_is_still_a_day():
     rollup = reliability_days([RELIABILITY_RECORDS[2]], [])
-    assert rollup["days"] == [{"day": "2026-09-19", "index_last": None, "index_min": None, "records": {"Application Error": 1}}]
+    assert rollup["days"] == [{
+        "day": "2026-09-19", "index_last": None, "index_min": None,
+        "records": {"Application Error": 1},
+        "event_types": [{"source": "Application Error", "event_id": 1000, "count": 1}],
+    }]
     assert rollup["index_now"] is None and rollup["index_lowest"] is None
 
 
@@ -466,17 +473,29 @@ def test_the_unexpected_shutdown_signal_names_the_stops_when_crash_was_observed(
     assert without["readings"] == ["power"] and "stops" not in without["evidence"]
 
 
-def test_the_index_fall_points_at_the_day_windows_counted_not_the_lowest_day():
+def test_the_index_fall_points_at_the_day_it_fell_not_the_lowest_day():
     fall = next(s for s in take_signals_sync(_inputs())[0] if s["id"] == "transition:reliability-index-fall")
     assert fall["evidence"]["day"] == "2026-09-18"  # the furthest fall, not the lowest index
     assert fall["evidence"]["fall"] == 1.7 and fall["evidence"]["index_before"] == 9.1
     assert fall["evidence"]["records"] == {"Microsoft-Windows-WindowsUpdateClient": 2}
+    assert fall["evidence"]["event_types"] == [
+        {"source": "Microsoft-Windows-WindowsUpdateClient", "event_id": 19, "count": 2}
+    ]
     assert fall["readings"] == ["reliability"]
 
 
 def test_an_index_that_only_drifts_fires_nothing():
     steady = [{"day": "2026-09-17", "index_last": 9.1, "index_min": 9.1, "records": {}}, {"day": "2026-09-18", "index_last": 8.9, "index_min": 8.9, "records": {}}]
     signals, _ = take_signals_sync(_inputs(reliability=_reading("reliability", [("days", "derived", {"days": steady})])))
+    assert not any(s["id"] == "transition:reliability-index-fall" for s in signals)
+
+
+def test_an_index_fall_across_a_missing_day_is_not_placed_on_the_next_returned_day():
+    spaced = [
+        {"day": "2026-09-17", "index_last": 9.1, "index_min": 9.1, "records": {}},
+        {"day": "2026-09-19", "index_last": 4.0, "index_min": 4.0, "records": {}},
+    ]
+    signals, _ = take_signals_sync(_inputs(reliability=_reading("reliability", [("days", "derived", {"days": spaced})])))
     assert not any(s["id"] == "transition:reliability-index-fall" for s in signals)
 
 

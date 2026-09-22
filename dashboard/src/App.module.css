@@ -67,8 +67,15 @@
   scrollbar-width: none;
 }
 .nav::-webkit-scrollbar { display: none; }
+.navGroup { display: flex; gap: 4px; }
+.navGroup + .navGroup { margin-left: 10px; }
+.navGroupLabel { display: none; }
 
 .navItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  text-align: left;
   font-family: var(--font-readout);
   font-size: 13px;
   color: var(--muted);
@@ -77,10 +84,11 @@
   white-space: nowrap;
   min-height: 40px;
 }
+.navItem svg { flex: none; opacity: 0.8; }
 .navItem:hover { color: var(--ink); }
 .navActive { color: var(--ink); background: rgba(234, 243, 238, 0.06); }
 /* Not a view: the same control, set apart by the gap rather than by a rule. */
-.navAside { margin-left: 18px; }
+.navAside { margin-left: 10px; white-space: normal; }
 
 .main {
   grid-area: main;
@@ -99,12 +107,15 @@
   .header { padding: 22px 28px 20px; }
   .nav {
     flex-direction: column;
-    padding: 20px 12px;
+    padding: 20px 12px 32px;
     overflow: visible;
     border-right: 1px solid var(--rule-soft);
   }
-  .navItem { padding: 8px 12px; }
-  .navAside { margin: 18px 0 0; }
+  .navGroup { flex-direction: column; gap: 2px; }
+  .navGroup + .navGroup { margin: 22px 0 0; }
+  .navGroupLabel { display: block; padding: 0 12px 7px; }
+  .navItem { width: 100%; padding: 8px 12px; }
+  .navAside { margin: 24px 0 0; }
   .main { padding: 28px 32px 64px; }
 }
 

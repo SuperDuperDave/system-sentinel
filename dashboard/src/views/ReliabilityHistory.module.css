@@ -1,0 +1,61 @@
+.intro { max-width: 72ch; margin: 0 0 12px; }
+.figure { margin: 20px 0 0; }
+.plotLabel { display: flex; justify-content: space-between; gap: 12px; margin: 0 0 7px; }
+.plotLabel span { font-weight: 400; letter-spacing: normal; text-transform: none; }
+.indexPlot { display: grid; grid-template-columns: 22px minmax(0, 1fr); align-items: stretch; height: 88px; margin: 0 0 22px; }
+.indexAxis { display: flex; flex-direction: column; justify-content: space-between; padding: 2px 0 3px; color: var(--muted); font-size: 10px; }
+.indexPlot svg { display: block; width: 100%; height: 88px; overflow: visible; }
+.gridline { stroke: var(--rule-soft); stroke-width: 1; }
+.indexLine { stroke: var(--phosphor); stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; filter: drop-shadow(0 0 4px rgba(111, 240, 168, 0.28)); }
+.indexDot { fill: var(--phosphor); }
+.indexSelected { fill: var(--phosphor-core); stroke: var(--field); stroke-width: 1.5; }
+.noIndex { margin: 0 0 18px; color: var(--muted); }
+.plot {
+  display: flex;
+  align-items: flex-end;
+  width: calc(100% - 22px);
+  min-height: 90px;
+  margin-left: 22px;
+  padding: 8px 0 0;
+  border-bottom: 1px solid var(--rule);
+}
+.day {
+  flex: 1 1 0;
+  min-width: 8px;
+  height: 80px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  position: relative;
+  border-radius: 3px 3px 0 0;
+}
+.day:hover, .day:focus-visible, .active { background: rgba(234, 243, 238, 0.07); }
+.barTrack { flex: 1; width: min(55%, 18px); display: flex; flex-direction: column; justify-content: flex-end; align-items: center; }
+.bar { width: 100%; min-height: 2px; background: var(--body); border-radius: 2px 2px 0 0; }
+.zero { width: 4px; height: 4px; margin-bottom: 1px; border-radius: 50%; background: var(--muted); }
+.absent { width: 6px; height: 1px; margin-bottom: 2px; background: var(--rule); }
+.tick { height: 6px; width: 1px; margin-top: 4px; background: var(--rule); }
+.missing .tick { opacity: 0.45; }
+.caption { display: flex; justify-content: space-between; gap: 8px; margin-top: 7px; color: var(--muted); font-size: 11px; }
+.caption span:nth-child(2) { text-align: center; }
+.key { margin: 8px 0 0; color: var(--muted); }
+.pickerLabel, .picker { display: none; }
+.inspect { margin-top: 14px; padding: 14px 0; border-top: 1px solid var(--rule-soft); }
+.dayTitle { margin: 0 0 4px; font-size: 15px; color: var(--ink); font-weight: 500; }
+.dayTitle span { font-size: 11px; color: var(--muted); }
+.summary { margin: 0; max-width: 74ch; }
+.sources { margin: 10px 0 0; max-width: 500px; }
+.sources div { display: flex; gap: 12px; justify-content: space-between; padding: 3px 0; border-top: 1px solid var(--rule-soft); }
+.sources dt { min-width: 0; overflow-wrap: anywhere; }
+.sources dd { margin: 0; color: var(--ink); }
+.raw { margin-top: 12px; }
+.raw summary { width: fit-content; cursor: pointer; }
+.raw pre { max-height: 300px; overflow: auto; padding: 12px; background: var(--deep); white-space: pre; border-radius: 6px; }
+@media (max-width: 600px) {
+  .caption span:nth-child(2) { display: none; }
+  .day { min-width: 7px; }
+  .barTrack { width: 60%; }
+  .pickerLabel { display: block; margin-top: 14px; }
+  .picker { display: block; width: 100%; min-height: 44px; margin-top: 5px; padding: 8px 10px; background: var(--deep); border: 1px solid var(--rule); border-radius: 6px; color: var(--ink); }
+}

@@ -88,7 +88,7 @@ def test_the_claims_note_counts_the_prompt_presets_the_stack_seeds():
 def test_the_claims_note_names_the_views_the_dashboard_has():
     """The count and the names both: a view renamed in the source is drift a count would not catch."""
     source = (ROOT / "dashboard" / "src" / "store.ts").read_text(encoding="utf-8")
-    views = re.findall(r"\{\s*id:\s*'[a-z]+',\s*label:\s*'([^']+)'\s*\}", source)
+    views = re.findall(r"\{\s*id:\s*'[a-z]+',\s*label:\s*'([^']+)'(?:,\s*group:\s*'[^']+')?\s*\}", source)
     assert views, "dashboard/src/store.ts no longer declares VIEWS in the shape this test reads"
     line = line_with("docs/CLAIMS.md", "views: ")
     assert counted(line, r"\|\s*([a-z-]+) views\b") == len(views), stale("docs/CLAIMS.md", line, len(views))

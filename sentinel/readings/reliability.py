@@ -1,11 +1,10 @@
 """Windows' own second opinion: ``reliability``.
 
 The Reliability Analysis Component keeps a record of this machine that nothing else here keeps:
-the failures Windows itself counted, and the stability index it computes from them, one value for
-every hour. It is worth having beside the tool's own readings precisely because it is somebody
-else's arithmetic — it can disagree, and a disagreement is a lead. Windows lowers the index
-because it counted a failure, so a fall points at the day it counted; it is not a measure of how
-the machine is, and nothing here treats it as one.
+events related to reliability (including informational events), and Windows' stability index,
+one value for every hour. It is worth having beside the tool's own readings precisely because
+it is somebody else's arithmetic — it can disagree, and a disagreement is a lead. A fall in
+the index points at a day to inspect; it does not name the event that caused it.
 
 Both classes answer without elevation, and either can hold nothing — a machine with no history,
 a runner that was built this morning — so an empty result is a finding, not a failure. The script
@@ -89,11 +88,12 @@ try {
 DAYS_BASIS = (
     "One entry per UTC day the returned rows cover, oldest first: the stability index at the last "
     "hour of that day that reported one, the lowest index any of that day's hours reported, and "
-    "that day's reliability records counted by the source that wrote them. The window is the span "
+    "that day's reliability records counted by their source and event identifier. These include "
+    "informational events, such as successful updates. The window is the span "
     "the rows actually cover, not the days asked for; the sources are that whole window counted, "
     "the current index is the last one reported, and the lowest is the day whose lowest hour was "
-    "lowest. Windows lowers the index when it counts a failure, so a day's fall points at what "
-    "Windows counted that day; it is not a second failure and not a measure of the machine's health."
+    "lowest. A day's index fall points at a day to inspect; it does not establish which event "
+    "caused it or diagnose the machine."
 )
 
 
@@ -110,10 +110,13 @@ def reliability_days(records: list[dict[str, Any]], stability: list[dict[str, An
             hours[day].append(row)
 
     counted: dict[str, Counter] = defaultdict(Counter)
+    typed: dict[str, Counter] = defaultdict(Counter)
     for record in records:
         day = _day(record.get("TimeGenerated"))
         if day:
-            counted[day][str(record.get("SourceName") or "unnamed source")] += 1
+            source = str(record.get("SourceName") or "unnamed source")
+            counted[day][source] += 1
+            typed[day][(source, record.get("EventIdentifier"))] += 1
 
     days: list[dict[str, Any]] = []
     for day in sorted(set(hours) | set(counted)):
@@ -125,6 +128,12 @@ def reliability_days(records: list[dict[str, Any]], stability: list[dict[str, An
                 "index_last": indexes[-1] if indexes else None,
                 "index_min": min(indexes) if indexes else None,
                 "records": dict(sorted(counted.get(day, Counter()).items(), key=lambda kv: (-kv[1], kv[0]))),
+                "event_types": [
+                    {"source": source, "event_id": event_id, "count": count}
+                    for (source, event_id), count in sorted(
+                        typed.get(day, Counter()).items(), key=lambda kv: (-kv[1], kv[0][0], str(kv[0][1]))
+                    )
+                ],
             }
         )
 
@@ -198,11 +207,11 @@ register(
     Spec(
         name="reliability",
         description=(
-            "Windows' own record of this machine: the failures the Reliability Analysis Component "
-            "counted, its hourly stability index, and both rolled up by day — where the index stood "
-            "at each day's end, how low it went, and what Windows counted that day, by source. "
-            "Windows lowers the index because it counted a failure, so a fall is a pointer at the "
-            "day, not a diagnosis. An empty result is a finding: Windows kept no record here."
+            "Windows' own record of this machine: reliability-related events, including informational "
+            "events, its hourly stability index, and both rolled up by day — where the index stood "
+            "at each day's end, how low it went, and what Windows returned by source and event ID. "
+            "A fall is a pointer at a day, not a cause finding. An empty result is a finding: "
+            "Windows kept no record here."
         ),
         classes=("raw", "derived"),
         take=take_reliability,

@@ -132,7 +132,7 @@ Only `ok` and `empty` say anything about the machine. Treat the other four as "n
 | `power` | Power configuration and transitions | `raw`, `derived` | |
 | `memory` | Physical memory and stability signals | `raw`, `derived` | |
 | `constraints` | Configured limits and their sources | `raw`, `derived` | |
-| `reliability` | Windows' own record of this machine: the failures the Reliability Analysis Component counted and the stability index it computes hourly | `records` (raw), `stability` (raw), `days` (derived: per UTC day the index at the day's last reporting hour and at its lowest, and that day's records by source) | `days` (default 30, 1 to 366) |
+| `reliability` | Windows' reliability related events, including informational entries such as successful updates, and its hourly stability index | `records` (raw), `stability` (raw), `days` (derived: per UTC day the last and lowest reported index, and returned records by source and event ID) | `days` (default 30, 1 to 366) |
 | `signals` | Forensic signals across the readings and the recent log | `signals` (inferred: suppressions, gaps, pressure, transitions, mismatches; `basis` names the inputs) | |
 
 `GET /api/readings/{name}` takes the reading. Parameters are query parameters; a name the reading does not take is refused with `422` rather than ignored, so a misspelled parameter cannot read the wrong evidence with a clean outcome. Heavy readings (`dump_header`, `hardware.*`, `pcie`, `power`, `memory`, `reliability`, `signals`) are loaded on demand by the dashboard.

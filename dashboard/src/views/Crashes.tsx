@@ -4,6 +4,7 @@ import { EventRecord, Reading, observed } from '../api';
 import { OutcomeLine, clock } from '../Outcome';
 import { Facts, Head, MomentLink, RowList, Section, Segmented, Value, ago, basisOf, byDay, duration, part, size } from '../Sections';
 import { useReading } from '../useReading';
+import { ReliabilityHistory } from './ReliabilityHistory';
 import styles from './Crashes.module.css';
 
 /** What a bug check is, wherever the code was found: the record that named it says so. */
@@ -152,6 +153,8 @@ export function Crashes() {
           ))}
         </Section>
       ) : null}
+
+      <ReliabilityHistory />
 
       <Section
         title="Programs and the kernel's live reports"

@@ -2,8 +2,9 @@ import { FormEvent, ReactElement, useEffect, useRef, useState } from 'react';
 import { catalog, openSession } from './api';
 import { Devices } from './Devices';
 import { Lockup, Mark } from './Mark';
+import { NavIcon } from './NavIcon';
 import { Live } from './Live';
-import { useApp, VIEWS, ViewId } from './store';
+import { useApp, VIEWS, ViewGroup, ViewId } from './store';
 import { Record } from './views/Record';
 import { Errors } from './views/Errors';
 import { Crashes } from './views/Crashes';
@@ -24,6 +25,7 @@ const VIEW_COMPONENTS: { [K in ViewId]: () => ReactElement } = {
   stack: Stack,
   agents: Agents,
 };
+const NAV_GROUPS: ViewGroup[] = ['Evidence', 'Interpret', 'Carry'];
 
 export function App() {
   const session = useApp((s) => s.session);
@@ -61,13 +63,20 @@ function Shell() {
       </header>
       <div className={styles.trace} aria-hidden="true" />
       <nav className={styles.nav} aria-label="Views">
-        {VIEWS.map((v) => (
-          <button key={v.id} className={`${styles.navItem} ${v.id === view ? styles.navActive : ''}`} onClick={() => setView(v.id)} aria-current={v.id === view ? 'page' : undefined}>
-            {v.label}
-          </button>
+        {NAV_GROUPS.map((group) => (
+          <div className={styles.navGroup} key={group}>
+            <span className={`${styles.navGroupLabel} label`}>{group}</span>
+            {VIEWS.filter((v) => v.group === group).map((v) => (
+              <button key={v.id} className={`${styles.navItem} ${v.id === view ? styles.navActive : ''}`} onClick={() => setView(v.id)} aria-current={v.id === view ? 'page' : undefined}>
+                <NavIcon name={v.id} />
+                <span>{v.label}</span>
+              </button>
+            ))}
+          </div>
         ))}
         <button className={`${styles.navItem} ${styles.navAside}`} onClick={() => setDevices(true)} aria-haspopup="dialog">
-          Sign in another device
+          <NavIcon name="device" />
+          <span>Sign in another device</span>
         </button>
       </nav>
       <main className={styles.main}><View /></main>

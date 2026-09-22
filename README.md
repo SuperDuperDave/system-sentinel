@@ -30,7 +30,7 @@ The screens show the tool rendering a synthetic record built from Windows' own p
 | `dumps`, `dump_header` | The crash-dump inventory and an on-demand structural readout of one file: its exact header bytes, kernel bug check or minidump streams and exception, with the raw readout available in Crashes |
 | `system`, `hardware`, `hardware.cpu`, `.gpu`, `.board`, `.storage`, `.network`, `drivers` | The snapshot, the fingerprint and configuration, one subsystem at a time, and driver changes |
 | `pcie`, `power`, `memory`, `constraints` | The PCIe fabric, power configuration and transitions, physical memory, devices present and not working |
-| `reliability` | Windows' own record of this machine: the failures the Reliability Analysis Component counted and its hourly stability index, rolled up by day |
+| `reliability` | Windows' reliability related events, including informational entries, and its hourly stability index, rolled up by day and event type |
 | `signals` | Leads across the readings and the recent log: suppressions, gaps, pressure, transitions, mismatches |
 | `health` | Whether the tool can reach Windows at all, and how: the shell it found, a round trip, the decoder, and the live sessions carrying your questions |
 
