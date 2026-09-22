@@ -2,14 +2,15 @@ import { useState } from 'react';
 import { AddToStack } from '../AddToStack';
 import { observed, type Section as SectionData } from '../api';
 import { OutcomeLine, firstLine, clock } from '../Outcome';
-import { Head, RowList, Section, Tree, Value } from '../Sections';
+import { Head, RowList, Section, Tree, Value, part } from '../Sections';
 import { useReading } from '../useReading';
+import { MemoryMap, type MemorySummary } from './MemoryMap';
 import styles from './Diagnostics.module.css';
 
 /**
  * Diagnostics: the four readings that ask the machine about itself rather than about its log.
  *
- * Each is heavy — several queries, seconds of the machine's attention — so none is taken until
+ * Three are heavy — several queries, seconds of the machine's attention — so none is taken until
  * the person asks for it. That is the whole design of this view: four offers, and what came back
  * under each one, with what Windows said kept apart from what the tool computed from it.
  */
@@ -22,7 +23,7 @@ export function Diagnostics() {
       </p>
       <Panel name="pcie" title="PCIe" what="Every device on the PCI bus: the bridges that carry the tree, the endpoints hanging off them, and which endpoints share an upstream link." />
       <Panel name="power" title="Power" what="The sleep states the firmware offers, what Windows chose, what may wake the machine, and how it has moved between states." />
-      <Panel name="memory" title="Memory" what="What is in each slot, how fast it is running against its rating, and what the log holds about memory faults." />
+      <Panel name="memory" title="Memory" what="Which modules Windows returned, their reported capacity and speed, recent hardware-error records, and Windows' own memory test result." />
       <Panel name="constraints" title="Constraints" what="What the machine is not using and why: devices that are present and not operating, with the problem each one reports." />
     </section>
   );
@@ -35,6 +36,7 @@ function Panel({ name, title, what }: { name: string; title: string; what: strin
   // Only a reading that observed the machine has anything to show. Whatever an unobserved one
   // carries, nothing of it is rendered: the outcome line is the whole answer.
   const sections = observed(taken.reading) ? taken.reading?.sections ?? [] : [];
+  const memory = name === 'memory' && observed(taken.reading) ? part<MemorySummary>(taken.reading, 'derived') : null;
 
   return (
     <article className={styles.panel} aria-labelledby={`panel-${name}`}>
@@ -49,8 +51,9 @@ function Panel({ name, title, what }: { name: string; title: string; what: strin
           <button className={styles.take} onClick={() => setAsked(true)}>Take the reading</button>
         </p>
       )}
+      {memory ? <MemoryMap data={memory} /> : null}
       {sections.map((s) => (
-        <div key={s.name} className={styles.section}>
+        <div key={s.name} className={styles.section} id={`diagnostic-${name}-${s.name}`}>
           <Section title={sectionTitle(s.name)} cls={s.class} basis={s.basis}>
             <Payload name={name} section={s} />
           </Section>

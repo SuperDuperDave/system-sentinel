@@ -7,9 +7,11 @@
 - A day-by-day visual history in Crashes: Windows' stability index and returned reliability events share a UTC timeline. Selecting a day shows exact event types, the reported index, and the raw records; the same reading can be stacked for an agent.
 - Dashboard addresses now remember the selected view and an investigation moment. Refresh, copied links and browser back/forward return to the right screen; links to sections that load after a reading answer land at the section, and view changes focus the new title.
 - Record opens with a time-density view and leading sources for the returned System log rows. A bar or source opens and focuses one exact row below; the chart names its sample boundary instead of implying it covers the whole log.
+- Diagnostics shows a memory map after the person takes the reading: installed capacity, reported slot population and each returned module's configured speed against its rating, with links to the exact derived and Windows fields below.
 
 ### Changed
 - Network adapter inventory stays available when Windows cannot assemble IP configuration; affected `ip` fields are null with a reading warning instead of empty lists that suggest no addresses.
+- The memory reading leaves installed capacity unknown if any module lacks a reported capacity, and leaves free slot count unknown when the array's total is missing, contradictory or unsupported by returned modules. Missing data no longer becomes zero capacity or zero free slots.
 - Signals opens with a visual five-class lead map and input coverage, with each count linked to its evidence and no health score implied.
 - Machine opens with a visual inventory of four selected components and gauges for processor load and free physical memory; each part leads to its detailed reading, with exact fields still available below. The hardware fingerprint is classified as derived, with its selection rule on the wire. The disk selected by Windows index 0 is labeled disk 0 and exposed as `disk0_model`, rather than being called the boot disk without evidence.
 - The reliability reading now counts returned records by source **and event ID** in its derived daily rollup. The UI and API name informational records, including successful Windows updates, so event volume cannot masquerade as failure volume.

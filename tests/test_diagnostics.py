@@ -280,6 +280,26 @@ def test_memory_reads_the_slots_the_kit_and_the_ledger():
     assert derived["ledger"] == {"window_days": 30, "records": 1, "counts": {"whea": 1}, "most_recent": "2026-09-01T00:00:00.000Z"}
 
 
+def test_memory_does_not_invent_empty_slots_when_the_array_count_is_unknown_or_inconsistent():
+    for count in (None, 0, 1):
+        payload = dict(MEMORY_PAYLOAD, array={"MemoryDevices": count})
+        derived = memory_derived(payload)
+        assert derived["slots_used"] == 2
+        assert derived["slots_total"] is None
+        assert derived["slots_free"] is None
+
+
+def test_memory_does_not_turn_missing_module_capacity_into_zero_gigabytes():
+    modules = [dict(MEMORY_PAYLOAD["modules"][0], Capacity=None), MEMORY_PAYLOAD["modules"][1]]
+    derived = memory_derived(dict(MEMORY_PAYLOAD, modules=modules))
+    assert derived["installed_gb"] is None
+    assert derived["modules"][0]["capacity_gb"] is None
+    assert derived["modules"][1]["capacity_gb"] == 8.0
+    empty = memory_derived(dict(MEMORY_PAYLOAD, modules=[]))
+    assert empty["installed_gb"] is None
+    assert empty["slots_free"] is None
+
+
 def test_the_bug_check_half_of_the_ledger_belongs_to_the_crash_reading_now():
     assert "Microsoft-Windows-WHEA-Logger" in MEMORY_SCRIPT
     assert "WER-SystemErrorReporting" not in MEMORY_SCRIPT

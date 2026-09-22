@@ -485,7 +485,10 @@ def take_power(bridge: Bridge, params: dict[str, Any]) -> Reading:
 # ---------------------------------------------------------------------------
 
 MEMORY_BASIS = (
-    "A module is counted as populated where the array reports its slot; the kit is the set of "
+    "Populated slots are counted from returned modules. Total slots are reported only when the "
+    "physical array names a plausible total; free slots also require returned modules. An unreadable "
+    "or contradictory total is unknown. Installed capacity requires a reported capacity for every module. "
+    "The kit is the set of "
     "distinct manufacturer and part numbers, so more than one is a mixed kit. Error correction is "
     "read from the module's total width exceeding its data width. A module runs below its rating "
     "where its configured clock is under its rated speed. The ledger counts the WHEA records over "
@@ -504,7 +507,10 @@ def memory_derived(payload: dict[str, Any]) -> dict[str, Any]:
     ledger = list(payload.get("ledger") or [])
 
     slots_used = len(modules)
-    slots_total = _int(array.get("MemoryDevices")) or slots_used
+    reported_slots = _int(array.get("MemoryDevices"))
+    slots_total = reported_slots if reported_slots is not None and reported_slots > 0 and reported_slots >= slots_used else None
+    capacities = [_int(m.get("Capacity")) for m in modules]
+    capacity_known = bool(capacities) and all(value is not None and value > 0 for value in capacities)
     kits = sorted({f"{m.get('Manufacturer') or '?'} {m.get('PartNumber') or '?'}".strip() for m in modules})
     below_rating = [
         m.get("DeviceLocator")
@@ -516,20 +522,20 @@ def memory_derived(payload: dict[str, Any]) -> dict[str, Any]:
     diagnostic = payload.get("diagnostic") if isinstance(payload.get("diagnostic"), dict) else None
 
     return {
-        "installed_gb": round(sum(_int(m.get("Capacity")) or 0 for m in modules) / 1024**3, 2),
+        "installed_gb": round(sum(value or 0 for value in capacities) / 1024**3, 2) if capacity_known else None,
         "slots_used": slots_used,
         "slots_total": slots_total,
-        "slots_free": max(slots_total - slots_used, 0),
+        "slots_free": slots_total - slots_used if slots_total is not None and modules else None,
         "modules": [
             {
                 "locator": _locator(m),
-                "capacity_gb": round((_int(m.get("Capacity")) or 0) / 1024**3, 2),
+                "capacity_gb": round(capacities[index] / 1024**3, 2) if capacities[index] and capacities[index] > 0 else None,
                 "rated_mhz": _int(m.get("Speed")),
                 "configured_mhz": _int(m.get("ConfiguredClockSpeed")),
                 "configured_millivolts": _int(m.get("ConfiguredVoltage")),
                 "error_correction": _ecc(m),
             }
-            for m in modules
+            for index, m in enumerate(modules)
         ],
         "kits": kits,
         "mixed_kit": len(kits) > 1,
