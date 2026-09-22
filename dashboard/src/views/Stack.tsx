@@ -329,7 +329,7 @@ function Captures({ captures, onTaken, guard }: { captures: Capture[]; onTaken: 
     <>
       <p className={styles.what}>
         Every reading in the catalog, taken now and written into the data directory as one ZIP: an envelope for each, the stack, and the handoff.
-        It takes as long as the slowest query on this machine. Nothing is sent anywhere.
+        It takes as long as the slowest query on this machine. Nothing is sent anywhere. The list below reads each manifest; it does not verify the rest of the ZIP.
       </p>
       <p className={styles.handoffLine}>
         <button
@@ -356,7 +356,15 @@ function Captures({ captures, onTaken, guard }: { captures: Capture[]; onTaken: 
           {captures.map((c) => (
             <li key={c.name} className={styles.capture}>
               <a className={`${styles.captureName} readout`} href={`/api/captures/${c.name}`} download>{c.name}</a>
-              <span className={`${styles.captureMeta} readout`}>{size(c.bytes)} · {ago(c.created_at)}</span>
+              <span className={`${styles.captureMeta} readout`}>{size(c.bytes)} · {c.manifest?.status === 'read' ? `captured ${ago(c.manifest.captured_at)}` : `file modified ${ago(c.created_at)}`}</span>
+              <span className={`${styles.captureDetails} readout`}>
+                {c.manifest?.status === 'read' ? (
+                  <>
+                    <span className={c.manifest.unredacted ? styles.captureUnredacted : undefined}>{c.manifest.unredacted ? 'Manifest: unredacted · review before sharing' : 'Manifest: redacted'}</span>
+                    <span>{c.manifest.readings} {c.manifest.readings === 1 ? 'reading' : 'readings'} · {Object.entries(c.manifest.outcomes).map(([outcome, count]) => `${count} ${captureOutcome(outcome)}`).join(' · ')}</span>
+                  </>
+                ) : <span>Manifest {captureManifestState(c.manifest?.status)} · privacy and reading outcomes unknown</span>}
+              </span>
             </li>
           ))}
         </ul>
@@ -365,4 +373,12 @@ function Captures({ captures, onTaken, guard }: { captures: Capture[]; onTaken: 
       )}
     </>
   );
+}
+
+function captureOutcome(outcome: string): string {
+  return outcome === 'ok' ? 'returned data' : outcome === 'empty' ? 'returned empty' : outcome;
+}
+
+function captureManifestState(status: NonNullable<Capture['manifest']>['status'] | undefined): string {
+  return status === 'missing' ? 'missing' : status === 'limit' ? 'over read limit' : status === 'unreadable' ? 'unreadable' : 'not returned';
 }

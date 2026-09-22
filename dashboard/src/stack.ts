@@ -56,7 +56,11 @@ export interface Composed {
 export interface Capture {
   name: string;
   bytes: number;
+  /** File modification time. The manifest's captured_at is the original capture time when readable. */
   created_at: string;
+  manifest?:
+    | { status: 'read'; captured_at: string; unredacted: boolean; readings: number; outcomes: Record<string, number> }
+    | { status: 'missing' | 'unreadable' | 'limit' };
 }
 
 /** The boundary refused this evidence because the stack already holds it. */

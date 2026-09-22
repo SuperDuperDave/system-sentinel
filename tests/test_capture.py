@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 
 from sentinel.app import State, create_app
 from sentinel.bridge import BridgeResult
+from sentinel.capture import MAX_LIST_MANIFEST_BYTES, listing
 from sentinel.paths import captures_dir
 from sentinel.reading import REGISTRY
 from tests.conftest import FakeBridge, identity_result, real_bridge_or_skip
@@ -61,14 +62,19 @@ def test_a_capture_holds_every_reading_the_stack_and_the_handoff(client: TestCli
 
 def test_a_capture_is_redacted_unless_asked_by_name(client: TestClient):
     client.post("/api/stack/items", headers=AUTH, json={"kind": "reading", "take": {"name": "events", "params": {"count": 2}}})
-    files = members(client.post("/api/captures", headers=AUTH).content)
+    redacted_response = client.post("/api/captures", headers=AUTH)
+    files = members(redacted_response.content)
     assert all(b"TESTBOX" not in body and b"tester" not in body for body in files.values())
     assert "host" in json.loads(files["manifest.json"])["redacted"]
     assert json.loads(files["readings/events.json"])["redacted"] == ["host", "user"]
 
-    open_files = members(client.post("/api/captures?unredacted=true", headers=AUTH).content)
+    unredacted_response = client.post("/api/captures?unredacted=true", headers=AUTH)
+    open_files = members(unredacted_response.content)
     assert b"TESTBOX" in open_files["readings/events.json"]
     assert json.loads(open_files["manifest.json"])["unredacted"] is True
+    listed = {capture["name"]: capture["manifest"] for capture in client.get("/api/captures", headers=AUTH).json()["captures"]}
+    assert listed[redacted_response.headers["X-Capture-Name"]]["unredacted"] is False
+    assert listed[unredacted_response.headers["X-Capture-Name"]]["unredacted"] is True
 
 
 def test_a_reading_that_cannot_be_taken_is_written_with_its_outcome(client: TestClient):
@@ -87,6 +93,11 @@ def test_captures_are_listed_and_fetched_and_nothing_wanders(client: TestClient)
     listed = client.get("/api/captures", headers=AUTH).json()["captures"]
     assert [c["name"] for c in listed] == [name]
     assert listed[0]["bytes"] == len(first.content) and (captures_dir() / name).is_file()
+    summary = listed[0]["manifest"]
+    assert summary["status"] == "read" and summary["unredacted"] is False
+    assert summary["readings"] == len(REGISTRY)
+    assert sum(summary["outcomes"].values()) == len(REGISTRY)
+    assert summary["captured_at"] == json.loads(members(first.content)["manifest.json"])["created_at"]
 
     again = client.get(f"/api/captures/{name}", headers=AUTH)
     assert again.status_code == 200 and again.content == first.content
@@ -100,6 +111,23 @@ def test_two_captures_in_the_same_second_do_not_overwrite_each_other(client: Tes
     names = {client.post("/api/captures", headers=AUTH).headers["X-Capture-Name"] for _ in range(2)}
     assert len(names) == 2
     assert len(client.get("/api/captures", headers=AUTH).json()["captures"]) == 2
+
+
+def test_listing_keeps_missing_damaged_and_oversized_manifests_explicit():
+    examples = {
+        "capture-20260920T000000Z.zip": ("other.txt", "no manifest", "missing"),
+        "capture-20260920T000001Z.zip": ("manifest.json", "{broken", "unreadable"),
+        "capture-20260920T000002Z.zip": ("manifest.json", " " * (MAX_LIST_MANIFEST_BYTES + 1), "limit"),
+    }
+    for name, (member, content, _) in examples.items():
+        with zipfile.ZipFile(captures_dir() / name, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr(member, content)
+    (captures_dir() / "capture-20260920T000003Z.zip").write_bytes(b"not a zip")
+
+    listed = {capture["name"]: capture["manifest"] for capture in listing()}
+    assert {name: listed[name]["status"] for name in examples} == {name: example[2] for name, example in examples.items()}
+    assert listed["capture-20260920T000003Z.zip"] == {"status": "unreadable"}
+    assert all("unredacted" not in summary and "outcomes" not in summary for summary in listed.values())
 
 
 @pytest.mark.host

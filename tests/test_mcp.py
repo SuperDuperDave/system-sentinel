@@ -133,7 +133,7 @@ def test_a_reason_is_asked_for_only_where_it_could_be_needed():
     carrying = listed["events"].input_schema
     assert carrying["then"] == {"required": ["reason"]}
     assert carrying["if"] == {"properties": {"unredacted": {"const": True}}, "required": ["unredacted"]}
-    # prompts_list is the person's own text and capture_list is file names: no machine data, nothing to unredact.
+    # prompts_list is the person's own text; capture_list has bounded status metadata but no identity fields to unredact.
     assert "unredacted" not in listed["prompts_list"].input_schema["properties"]
     assert "unredacted" not in listed["capture_list"].input_schema["properties"]
 
@@ -320,7 +320,11 @@ def test_a_capture_is_a_tool_as_well_as_a_route(surface: Surface):
         assert json.loads(archive.read("manifest.json")) == manifest
         assert "TESTBOX" not in archive.read("readings/events.json").decode("utf-8")
 
-    assert [c["name"] for c in payload(call(surface, "capture_list"))["captures"]] == [name]
+    listed = payload(call(surface, "capture_list"))["captures"]
+    assert [c["name"] for c in listed] == [name]
+    assert listed[0]["manifest"]["unredacted"] is False
+    assert listed[0]["manifest"]["readings"] == manifest["readings"]
+    assert sum(listed[0]["manifest"]["outcomes"].values()) == manifest["readings"]
 
 
 def test_an_unredacted_capture_still_needs_a_reason(surface: Surface):

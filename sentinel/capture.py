@@ -16,13 +16,14 @@ from __future__ import annotations
 import json
 import re
 import zipfile
+from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from . import __version__
-from .bridge import Bridge
+from .bridge import OUTCOMES, Bridge
 from .paths import captures_dir
 from .reading import REGISTRY, Reading, take
 from .redact import Redactor
@@ -34,6 +35,7 @@ READINGS_MEMBER = "readings/{name}.json"
 STACK_MEMBER = "stack.json"
 COMPOSED_MEMBER = "composed.md"
 MANIFEST_MEMBER = "manifest.json"
+MAX_LIST_MANIFEST_BYTES = 256 * 1024
 
 
 @dataclass(frozen=True)
@@ -109,13 +111,65 @@ async def _take(name: str, bridge: Bridge, at: datetime) -> Reading:
 
 
 def listing() -> list[dict[str, Any]]:
-    """What is on disk, newest first."""
+    """What is on disk, newest first, with only bounded facts from each capture's manifest."""
     out = []
     for path in captures_dir().glob("capture-*.zip"):
         if NAME.match(path.name):
-            stat = path.stat()
-            out.append({"name": path.name, "bytes": stat.st_size, "created_at": _stamp(datetime.fromtimestamp(stat.st_mtime, tz=UTC))})
+            try:
+                stat = path.stat()
+            except OSError:  # a capture removed between the directory scan and this entry
+                continue
+            out.append({
+                "name": path.name,
+                "bytes": stat.st_size,
+                "created_at": _stamp(datetime.fromtimestamp(stat.st_mtime, tz=UTC)),
+                "manifest": _manifest_summary(path),
+            })
     return sorted(out, key=lambda c: c["name"], reverse=True)
+
+
+def _manifest_summary(path: Path) -> dict[str, Any]:
+    """Read one small manifest; never decompress a capture's reading members to list it."""
+    try:
+        with zipfile.ZipFile(path) as archive:
+            manifests = [info for info in archive.infolist() if info.filename == MANIFEST_MEMBER]
+            if not manifests:
+                return {"status": "missing"}
+            if len(manifests) != 1:
+                return {"status": "unreadable"}
+            if manifests[0].file_size > MAX_LIST_MANIFEST_BYTES:
+                return {"status": "limit"}
+            with archive.open(manifests[0]) as stream:
+                raw = stream.read(MAX_LIST_MANIFEST_BYTES + 1)
+            if len(raw) > MAX_LIST_MANIFEST_BYTES:
+                return {"status": "limit"}
+        manifest = json.loads(raw)
+    except (OSError, ValueError, RuntimeError, NotImplementedError, zipfile.BadZipFile):
+        return {"status": "unreadable"}
+
+    if not isinstance(manifest, dict) or manifest.get("tool") != "system-sentinel":
+        return {"status": "unreadable"}
+    unredacted, readings, members, captured_at = (manifest.get(key) for key in ("unredacted", "readings", "members", "created_at"))
+    if type(unredacted) is not bool or type(readings) is not int or readings < 0 or not isinstance(members, list) or not isinstance(captured_at, str):
+        return {"status": "unreadable"}
+    try:
+        if datetime.fromisoformat(captured_at.replace("Z", "+00:00")).tzinfo is None:
+            return {"status": "unreadable"}
+    except ValueError:
+        return {"status": "unreadable"}
+    rows = [member for member in members if isinstance(member, dict) and "reading" in member]
+    if len(rows) != readings or len({row.get("reading") for row in rows if isinstance(row.get("reading"), str)}) != readings:
+        return {"status": "unreadable"}
+    if any(row.get("outcome") not in OUTCOMES for row in rows):
+        return {"status": "unreadable"}
+    counts = Counter(row["outcome"] for row in rows)
+    return {
+        "status": "read",
+        "captured_at": captured_at,
+        "unredacted": unredacted,
+        "readings": readings,
+        "outcomes": {outcome: counts[outcome] for outcome in OUTCOMES if counts[outcome]},
+    }
 
 
 def find(name: str) -> Path | None:

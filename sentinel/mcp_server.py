@@ -281,7 +281,9 @@ CAPTURE_TOOLS: dict[str, RouteTool] = {
             _capture_create,
             effect="changes",
         ),
-        RouteTool("capture_list", "The captures on disk, newest first. Captures are never deleted by the tool.", _NO_ARGUMENTS, _capture_list, carries_machine_data=False),
+        # Only bounded outcome counts and privacy state leave the manifest; there are no identity
+        # fields to reveal through an unredacted variant of this tool.
+        RouteTool("capture_list", "The captures on disk, newest first, with each readable manifest's redaction state and reading outcomes. Captures are never deleted by the tool.", _NO_ARGUMENTS, _capture_list, carries_machine_data=False),
     )
 }
 

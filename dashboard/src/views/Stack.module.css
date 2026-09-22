@@ -84,7 +84,7 @@
 /* Handoff */
 .handoffLine { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4em; margin: 0 0 8px; color: var(--muted); }
 .spacer { flex: 1 0 8px; }
-.saveHandoff { min-height: 40px; font: 12.5px var(--font-readout); white-space: nowrap; }
+.saveHandoff { min-height: 40px; margin-left: 8px; font: 12.5px var(--font-readout); white-space: nowrap; }
 .preview {
   margin: 0;
   padding: 14px;
@@ -112,3 +112,5 @@
 }
 .captureName { color: var(--ink); overflow-wrap: anywhere; min-width: 0; }
 .captureMeta { color: var(--muted); }
+.captureDetails { display: flex; flex-basis: 100%; flex-wrap: wrap; gap: 2px 16px; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.captureUnredacted { color: var(--ink); }
