@@ -39,6 +39,8 @@ Codex takes a bearer token from the environment rather than from a header, so `S
 
 Streamable HTTP at `http://127.0.0.1:8000/mcp` with the same header. Every reading below is one tool, named as the reading is named, except that a dot becomes an underscore because MCP tool names allow only letters, digits, underscore and hyphen: `hardware.cpu` is the tool `hardware_cpu`. The stack, the composer and the captures are tools too: `stack_list`, `stack_add`, `stack_update`, `stack_remove`, `stack_clear`, `stack_prompt`, `compose`, `prompts_list`, `capture_create`, `capture_list`. Every tool is annotated with what it does to the machine, so a client can stop confirming the readings and keep confirming `stack_remove` and `stack_clear`; every reading answers with typed structured content beside its text, against one shared schema for the envelope. The six presets are also MCP prompts, and the catalog and the composed handoff are resources (`sentinel://catalog`, `sentinel://handoff`). Asking for `unredacted` requires a `reason`, which is carried into the answer's warnings.
 
+Clients that support `subscriptions/listen` can subscribe to `sentinel://handoff`. A stack change from the dashboard or an MCP tool sends a resource-updated notification; read the resource again for the new handoff. The listen request is an event stream; ordinary MCP calls still return one JSON response.
+
 ### Without MCP
 
 `curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8000/api/readings/events` works from any shell. Prefer this over writing your own PowerShell: the reading carries provenance, the outcome and the redaction, and it is the same evidence the person sees.

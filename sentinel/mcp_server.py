@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from mcp import types
 from mcp.server.lowlevel import Server
-from mcp.server.subscriptions import InMemorySubscriptionBus, ResourceUpdated
+from mcp.server.subscriptions import InMemorySubscriptionBus, ListenHandler, ResourceUpdated
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp.shared.exceptions import MCPError
 from starlette.applications import Starlette
@@ -450,6 +450,10 @@ class Surface:
         self.state = state
         self.bus = InMemorySubscriptionBus()
 
+    async def handoff_changed(self) -> None:
+        """Tell subscribed agents to refetch after a dashboard edit to the handoff."""
+        await self.bus.publish(ResourceUpdated(HANDOFF_URI))
+
     async def list_tools(self, _ctx: Any = None, _params: Any = None) -> types.ListToolsResult:
         return types.ListToolsResult(tools=tools())
 
@@ -528,6 +532,7 @@ def _resource(uri: str, mime_type: str, text: str) -> types.ReadResourceResult:
 
 def build_mcp(state: State) -> Starlette:
     surface = Surface(state)
+    listen = ListenHandler(surface.bus)
     server = Server(
         "system-sentinel",
         version=__version__,
@@ -538,18 +543,15 @@ def build_mcp(state: State) -> Starlette:
         on_get_prompt=surface.get_prompt,
         on_list_resources=surface.list_resources,
         on_read_resource=surface.read_resource,
+        on_subscriptions_listen=listen,
     )
     # The token is the boundary; host-header checks would only refuse the tailnet name a phone uses.
     security = TransportSecuritySettings(enable_dns_rebinding_protection=False)
-    # One JSON body per request: no session to keep, nothing to resume. The one thing a body
-    # cannot carry is a stream, and a subscription is a stream — a client subscribes by sending
-    # 'subscriptions/listen', whose own response is the channel the change notifications ride. So
-    # the surface publishes every stack change on its bus (RouteTool.updates) and nothing is
-    # subscribed to it yet. Turning it on is one line, `on_subscriptions_listen=ListenHandler(
-    # surface.bus)` with json_response left at its default, and that default changes what every
-    # client reads off this wire — so it is a decision about the wire, not about this module.
+    # Ordinary calls retain their one JSON body. A subscriptions/listen request is an SSE stream
+    # even in JSON-response mode; its notifications tell a client to refetch the handoff resource.
     app = server.streamable_http_app(
         streamable_http_path="/mcp", stateless_http=True, json_response=True, transport_security=security
     )
     app.state.surface = surface
+    app.state.listen = listen
     return app

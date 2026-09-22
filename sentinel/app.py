@@ -14,6 +14,7 @@ from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from typing import Any, Literal
 
+import anyio
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from pydantic import BaseModel
@@ -184,6 +185,8 @@ def create_app(state: State | None = None, mcp: bool = True) -> FastAPI:
                     await stack.enter_async_context(mcp_app.router.lifespan_context(mcp_app))
                 yield
         finally:
+            if mcp_app is not None:
+                mcp_app.state.listen.close()
             # The bridge's live sessions are child processes of this one. They end here, however
             # this server ends: a powershell.exe left behind by a stopped server would be exactly
             # the kind of thing this tool exists to make visible.
@@ -199,7 +202,18 @@ def create_app(state: State | None = None, mcp: bool = True) -> FastAPI:
         lifespan=lifespan,
     )
     app.state.sentinel = state
+    app.state.mcp_surface = mcp_app.state.surface if mcp_app is not None else None
     app.add_middleware(TokenMiddleware, token=state.token)
+
+    async def handoff_changed() -> None:
+        if mcp_app is not None:
+            await mcp_app.state.surface.handoff_changed()
+
+    def handoff_changed_from_route() -> None:
+        # FastAPI runs synchronous routes in a worker thread. Publish on the server's event loop
+        # so the subscription stream can receive the event without moving file I/O onto that loop.
+        if mcp_app is not None:
+            anyio.from_thread.run(mcp_app.state.surface.handoff_changed)
 
     def guarded(payload: Any, unredacted: bool = False, status_code: int = 200) -> JSONResponse:
         """The one way anything leaves: redacted unless the caller asked for the real values by name."""
@@ -343,11 +357,13 @@ def create_app(state: State | None = None, mcp: bool = True) -> FastAPI:
     def stack_choose(choice: StackChoice, unredacted: bool = False) -> Response:
         """Change which prompt leads the handoff, or whether one does at all."""
         changed = state.stack.choose(prompt_id=choice.prompt_id, system_prompt=choice.system_prompt, set_prompt="prompt_id" in choice.model_fields_set)
+        handoff_changed_from_route()
         return guarded(changed, unredacted)
 
     @app.delete("/api/stack", tags=["stack"])
     def stack_clear() -> Response:
         state.stack.clear()
+        handoff_changed_from_route()
         return guarded(state.stack.state())
 
     @app.post("/api/stack/items", tags=["stack"], status_code=201)
@@ -356,7 +372,9 @@ def create_app(state: State | None = None, mcp: bool = True) -> FastAPI:
         records, or a note. The same reading with the same parameters and records is refused."""
         try:
             added = await new_item(state.stack, state.bridge, item.model_dump(exclude_unset=True))
-            return guarded(state.stack.add(added).to_dict(), unredacted, status_code=201)
+            response = guarded(state.stack.add(added).to_dict(), unredacted, status_code=201)
+            await handoff_changed()
+            return response
         except Duplicate as exc:
             return JSONResponse({"error": "duplicate", "detail": "this evidence is already on the stack", "id": str(exc)}, status_code=409)
         except ValueError as exc:
@@ -365,11 +383,13 @@ def create_app(state: State | None = None, mcp: bool = True) -> FastAPI:
     @app.patch("/api/stack/items/{item_id}", tags=["stack"])
     def stack_change(item_id: str, change: ItemChange, unredacted: bool = False) -> Response:
         try:
-            return guarded(state.stack.update(item_id, rank=change.rank, verbosity=change.verbosity, title=change.title), unredacted)
+            response = guarded(state.stack.update(item_id, rank=change.rank, verbosity=change.verbosity, title=change.title), unredacted)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=f"no item {item_id!r}") from exc
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+        handoff_changed_from_route()
+        return response
 
     @app.delete("/api/stack/items/{item_id}", tags=["stack"])
     def stack_remove(item_id: str) -> Response:
@@ -377,6 +397,7 @@ def create_app(state: State | None = None, mcp: bool = True) -> FastAPI:
             state.stack.remove(item_id)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=f"no item {item_id!r}") from exc
+        handoff_changed_from_route()
         return guarded(state.stack.state())
 
     @app.get("/api/stack/composed", tags=["stack"])
@@ -399,9 +420,11 @@ def create_app(state: State | None = None, mcp: bool = True) -> FastAPI:
     @app.patch("/api/prompts/{prompt_id}", tags=["stack"])
     def prompts_change(prompt_id: str, change: PromptChange) -> dict[str, Any]:
         try:
-            return state.prompts.update(prompt_id, **change.model_dump(exclude_unset=True))
+            changed = state.prompts.update(prompt_id, **change.model_dump(exclude_unset=True))
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=f"no prompt {prompt_id!r}") from exc
+        handoff_changed_from_route()
+        return changed
 
     @app.delete("/api/prompts/{prompt_id}", tags=["stack"])
     def prompts_remove(prompt_id: str) -> dict[str, Any]:
@@ -409,6 +432,7 @@ def create_app(state: State | None = None, mcp: bool = True) -> FastAPI:
             state.prompts.remove(prompt_id)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=f"no prompt {prompt_id!r}") from exc
+        handoff_changed_from_route()
         return {"prompts": state.prompts.all()}
 
     @app.post("/api/captures", tags=["captures"])

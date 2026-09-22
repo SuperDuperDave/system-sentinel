@@ -13,6 +13,7 @@ import asyncio
 import json
 import zipfile
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 from mcp import types
@@ -35,6 +36,7 @@ from sentinel.paths import captures_dir
 from sentinel.reading import REGISTRY
 from sentinel.stack import PRESET_PROMPTS, slug
 from tests.conftest import FakeBridge, identity_result
+from tests.test_stream import serve
 
 TOKEN = "test-token-0123456789"
 AUTH = {"Authorization": f"Bearer {TOKEN}"}
@@ -251,6 +253,53 @@ def test_a_stack_change_publishes_the_handoff(surface: Surface):
 
     refused = call(surface, "stack_remove", id="nothing-like-that")
     assert refused.is_error is True and len(published) == 3  # a refusal is not a change
+
+
+def test_a_dashboard_edit_notifies_a_subscribed_agent():
+    """The MCP listener and dashboard routes share one bus in the running server."""
+    app = create_app(State(bridge=machine(), token=TOKEN))
+    published: list[ServerEvent] = []
+    app.state.mcp_surface.bus.subscribe(published.append)
+    server, thread, port = serve(app)
+    body = {
+        "jsonrpc": "2.0",
+        "id": 17,
+        "method": "subscriptions/listen",
+        "params": {
+            "notifications": {"resourceSubscriptions": [HANDOFF_URI]},
+            "_meta": {"io.modelcontextprotocol/protocolVersion": "2026-07-28", "io.modelcontextprotocol/clientCapabilities": {}},
+        },
+    }
+    headers = {**MCP_HEADERS, "MCP-Protocol-Version": "2026-07-28", "Mcp-Method": "subscriptions/listen"}
+    try:
+        with httpx.stream("POST", f"http://127.0.0.1:{port}/mcp", headers=headers, json=body, timeout=10) as response:
+            assert response.status_code == 200, response.text
+            assert response.headers["content-type"].startswith("text/event-stream")
+            lines = response.iter_lines()
+            acknowledged = json.loads(next(line.removeprefix("data: ") for line in lines if line.startswith("data: ")))
+            assert acknowledged["method"] == "notifications/subscriptions/acknowledged"
+            assert acknowledged["params"]["_meta"]["io.modelcontextprotocol/subscriptionId"] == 17
+
+            refused = httpx.delete(f"http://127.0.0.1:{port}/api/stack/items/missing", headers=AUTH, timeout=10)
+            assert refused.status_code == 404 and published == []
+
+            added = httpx.post(f"http://127.0.0.1:{port}/api/stack/items", headers=AUTH, json={"kind": "note", "note": "one"}, timeout=10)
+            assert added.status_code == 201, added.text
+            updated = json.loads(next(line.removeprefix("data: ") for line in lines if line.startswith("data: ")))
+            assert updated["method"] == "notifications/resources/updated"
+            assert updated["params"]["uri"] == HANDOFF_URI
+            assert updated["params"]["_meta"]["io.modelcontextprotocol/subscriptionId"] == 17
+            assert published == [ResourceUpdated(HANDOFF_URI)]
+
+            changed = httpx.patch(f"http://127.0.0.1:{port}/api/prompts/emergency-triage", headers=AUTH, json={"content": "Updated triage"}, timeout=10)
+            assert changed.status_code == 200, changed.text
+            prompt_update = json.loads(next(line.removeprefix("data: ") for line in lines if line.startswith("data: ")))
+            assert prompt_update["method"] == "notifications/resources/updated"
+            assert prompt_update["params"]["uri"] == HANDOFF_URI
+    finally:
+        server.should_exit = True
+        thread.join(timeout=10)
+    assert not thread.is_alive()
 
 
 # --- captures --------------------------------------------------------------------------------
