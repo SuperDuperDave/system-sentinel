@@ -1,4 +1,4 @@
-import { ReactNode, useState } from 'react';
+import { ReactNode, useRef, useState } from 'react';
 import { AddToStack } from '../AddToStack';
 import { EventRecord, Reading, observed } from '../api';
 import { OutcomeLine, clock } from '../Outcome';
@@ -25,7 +25,7 @@ interface Dump {
   matched_by: string;
 }
 
-/** The machine's last word before a stop: the last System record written before it started again. */
+/** The last System record before the next start; it may be after Windows' stop estimate. */
 interface LastRecord {
   RecordId: number | null;
   TimeCreated: string | null;
@@ -86,6 +86,7 @@ interface DumpInspection {
 
 const STOP_COUNTS = [5, 20];
 const FAULT_COUNTS = [30, 100];
+const STOP_STAMP = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
 const KIND_WORD: Record<string, string> = {
   'application crash': 'crash',
@@ -100,8 +101,8 @@ const KIND_WORD: Record<string, string> = {
  * Three readings, three outcome lines, because they answer three questions and fail apart: a
  * machine that has not stopped still has faults, and an empty dump inventory says something about
  * the configuration rather than about the stops. The order is the order of the founding question
- * — it froze at 02:14 — so the stops come first and every one of them offers the two things that
- * answer it: the record the machine wrote before it, and the evidence handed to the stack.
+ * — it froze at 02:14 — so the stops come first and every one of them offers the System record
+ * before its restart and the evidence handed to the stack.
  *
  * Nothing here is styled as a verdict. A stop with no bug check reads as a stop with no bug check,
  * which is itself the finding; the bucket WER named is shown as WER's words, not as a cause.
@@ -109,16 +110,30 @@ const KIND_WORD: Record<string, string> = {
 export function Crashes() {
   const [stopCount, setStopCount] = useState(5);
   const [faultCount, setFaultCount] = useState(30);
+  const [selection, setSelection] = useState<{ reading: Reading; index: number } | null>(null);
+  const stopButtons = useRef(new Map<number, HTMLButtonElement>());
 
   const crash = useReading('crash', { count: stopCount });
   const faults = useReading('faults', { count: faultCount });
   const dumps = useReading('dumps');
 
   const stops = part<Stop[]>(crash.reading, 'stops') ?? [];
+  const indexedStops = stops.map((stop, index) => ({ stop, index }));
+  const selectedStop = selection?.reading === crash.reading ? selection.index : null;
   const faultRecords = part<EventRecord[]>(faults.reading, 'records') ?? [];
   const decoded = part<Fault[]>(faults.reading, 'decoded') ?? [];
   const files = part<DumpFile[]>(dumps.reading, 'files') ?? [];
   const times = new Map(faultRecords.map((r) => [r.RecordId, r.TimeCreated]));
+
+  function inspectStop(index: number) {
+    if (!crash.reading) return;
+    setSelection({ reading: crash.reading, index });
+    requestAnimationFrame(() => {
+      const button = stopButtons.current.get(index);
+      button?.scrollIntoView({ block: 'center' });
+      button?.focus({ preventScroll: true });
+    });
+  }
 
   return (
     <section>
@@ -130,25 +145,32 @@ export function Crashes() {
 
       {observed(crash.reading) && stops.length > 0 ? (
         <Section title="Stops" cls="derived" basis={basisOf(crash.reading, 'stops')} note="newest first">
-          {byDay(stops, whenOf).map(([label, rows]) => (
+          <StopSequence stops={stops} selected={selectedStop} onInspect={inspectStop} />
+          {byDay(indexedStops, ({ stop }) => whenOf(stop)).map(([label, rows]) => (
             <div key={label}>
               <p className={`${styles.day} label`}>{label}</p>
-              <RowList
-                items={rows}
-                layout={styles.stopRow}
-                cells={(s) => (
-                  <>
-                    <span className={`${styles.time} readout`}>{at(whenOf(s))}</span>
-                    <span className={`${styles.down} readout`}>{s.down_seconds == null ? '' : `down ${howLong(s.down_seconds)}`}</span>
+              <ol className={styles.stopRows}>
+                {rows.map(({ stop, index }) => <li key={index} className={`${styles.stopRowItem} ${selectedStop === index ? styles.stopRowOpen : ''}`}>
+                  <button
+                    ref={(node) => { if (node) stopButtons.current.set(index, node); else stopButtons.current.delete(index); }}
+                    className={`${styles.stopRowButton} ${styles.stopRow}`}
+                    onClick={() => setSelection(selectedStop === index || !crash.reading ? null : { reading: crash.reading, index })}
+                    aria-expanded={selectedStop === index}
+                    aria-controls={`stop-detail-${index}`}
+                  >
+                    <span className={`${styles.time} readout`}>{at(whenOf(stop))}</span>
+                    <span className={`${styles.down} readout`}>{stop.down_seconds == null ? '' : `down ${howLong(stop.down_seconds)}`}</span>
                     <span className={styles.check}>
-                      {s.bugcheck?.name ?? s.bugcheck?.code ?? <span className={styles.quiet}>{s.no_bugcheck_recorded ? 'no bug check recorded' : 'no bug check named'}</span>}
-                      {s.bugcheck?.name && s.bugcheck.code ? <span className={`${styles.code} readout`}>{s.bugcheck.code}</span> : null}
+                      {stop.bugcheck?.name ?? stop.bugcheck?.code ?? <span className={styles.quiet}>{stop.no_bugcheck_recorded ? 'no bug check recorded' : 'no bug check named'}</span>}
+                      {stop.bugcheck?.name && stop.bugcheck.code ? <span className={`${styles.code} readout`}>{stop.bugcheck.code}</span> : null}
                     </span>
-                    <span className={`${styles.dumpName} readout`}>{s.dump?.name ?? ''}</span>
-                  </>
-                )}
-                inspect={(s) => <StopDetail stop={s} envelope={crash.reading} />}
-              />
+                    <span className={`${styles.dumpName} readout`}>{stop.dump?.name ?? ''}</span>
+                  </button>
+                  <div id={`stop-detail-${index}`} className={styles.stopInspect}>
+                    {selectedStop === index ? <StopDetail stop={stop} envelope={crash.reading} /> : null}
+                  </div>
+                </li>)}
+              </ol>
             </div>
           ))}
         </Section>
@@ -234,10 +256,81 @@ export function Crashes() {
   );
 }
 
+/** Three labeled points from each returned stop, with no claim that they form a timed line. */
+function StopSequence({ stops, selected, onInspect }: { stops: Stop[]; selected: number | null; onInspect: (index: number) => void }) {
+  return (
+    <section className={styles.sequence} aria-labelledby="stop-sequence-title">
+      <div className={styles.sequenceHead}>
+        <div><p className="label">Returned stops · crash reading</p><h3 id="stop-sequence-title" className="display">Evidence around each stop</h3></div>
+        <p>Separate evidence points in your browser’s local time. The last System record before restart can be later than Windows’ stop estimate; these times do not establish a cause. A report without a returned session shows its report evidence.</p>
+      </div>
+      <ol className={styles.sequenceList}>
+        {stops.map((stop, index) => {
+          const last = stop.last_record_before;
+          const relation = recordToEstimate(last?.TimeCreated, stop.stopped_at);
+          const reportOnly = Boolean(stop.reported_at && !last && !stop.stopped_at && !stop.started_at && !stop.announced_at);
+          return <li key={index}>
+            <button
+              type="button"
+              className={`${styles.sequenceButton} ${selected === index ? styles.sequenceSelected : ''}`}
+              onClick={() => onInspect(index)}
+              aria-expanded={selected === index}
+              aria-controls={`stop-detail-${index}`}
+            >
+              <span className={styles.sequenceLabel}><span className="readout">{String(index + 1).padStart(2, '0')} / returned stop</span><span className="readout">Inspect exact stop ↓</span></span>
+              {reportOnly ? <span className={styles.reportOnly}>
+                <span className={styles.reportMain}><span className="label">Windows error report filed</span><strong className="readout">{stamp(stop.reported_at)}</strong></span>
+                <span className={styles.reportFacts}>
+                  <span><span className="label">Bug check</span><strong className="readout">{[stop.bugcheck?.name, stop.bugcheck?.code].filter(Boolean).join(' · ') || 'Not named'}</strong></span>
+                  <span><span className="label">Matched dump</span><strong className="readout">{stop.dump?.name ?? 'None matched'}</strong></span>
+                </span>
+                <span className={`${styles.reportLimits} readout`}>No last System record before restart, Windows stop estimate, or next start was returned for this report.</span>
+              </span> : <><span className={styles.sequencePhases}>
+                <span className={styles.phase}>
+                  <span className={`${styles.phaseLabel} label`}>Last System record before restart</span>
+                  <strong className="readout">{last ? stamp(last.TimeCreated, 'Time not recorded') : 'Not recorded'}</strong>
+                  {last ? <span className={styles.phaseNote}>{[last.ProviderName, last.Id == null ? null : `event ${last.Id}`].filter(Boolean).join(' · ') || 'Source not recorded'}</span> : null}
+                  {relation ? <span className={styles.phaseRelation}>{relation}</span> : null}
+                </span>
+                <span className={styles.phase}>
+                  <span className={`${styles.phaseLabel} label`}>Windows stop estimate</span>
+                  <strong className="readout">{stamp(stop.stopped_at)}</strong>
+                  <span className={styles.phaseNote}>{stop.stopped_at ? 'Read from EventLog 6008' : 'No estimate in the returned records'}</span>
+                </span>
+                <span className={styles.phase}>
+                  <span className={`${styles.phaseLabel} label`}>Next start</span>
+                  <strong className="readout">{stamp(stop.started_at)}</strong>
+                  <span className={styles.phaseNote}>{stop.started_at ? 'Kernel-General start record' : 'No start in the returned records'}</span>
+                </span>
+              </span>
+              {stop.reported_at ? <span className={`${styles.reported} readout`}>Report filed {stamp(stop.reported_at)}{!stop.started_at && !stop.stopped_at ? ' · only report timing is available' : ''}</span> : null}</>}
+            </button>
+          </li>;
+        })}
+      </ol>
+    </section>
+  );
+}
+
+function stamp(value: string | null | undefined, missing = 'Not recorded'): string {
+  if (!value) return missing;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? missing : STOP_STAMP.format(date);
+}
+
+function recordToEstimate(recordAt: string | null | undefined, estimateAt: string | null): string | null {
+  if (!recordAt || !estimateAt) return null;
+  const record = Date.parse(recordAt);
+  const estimate = Date.parse(estimateAt);
+  if (!Number.isFinite(record) || !Number.isFinite(estimate)) return null;
+  if (record === estimate) return 'Same reported time as the estimate';
+  return record > estimate ? 'Record time after the estimate' : 'Record time before the estimate';
+}
+
 /**
  * One stop in full: what Windows estimated, what it recorded, the dump it matched and the last
- * thing the machine said. Then the two moves that follow from it — the record before the stop, and
- * the stop itself onto the stack — because from here the question is always one of those two.
+ * System record before restart. Then the two moves that follow — the record before the next
+ * start and the stop itself onto the stack.
  */
 function StopDetail({ stop, envelope }: { stop: Stop; envelope: Reading | null }) {
   const moment = stop.started_at ?? stop.announced_at ?? stop.reported_at;
@@ -268,8 +361,8 @@ function StopDetail({ stop, envelope }: { stop: Stop; envelope: Reading | null }
   }
   if (stop.last_record_before) {
     const last = stop.last_record_before;
-    rows.push(['Last record before', <Value value={[last.TimeCreated, last.ProviderName, last.Id, last.LevelDisplayName].filter((v) => v != null).join(' · ')} />]);
-    rows.push(['Quiet for', stop.quiet_seconds == null ? <Value value={null} /> : <Value value={howLong(stop.quiet_seconds)} />]);
+    rows.push(['Last System record before restart', <Value value={[last.TimeCreated, last.ProviderName, last.Id, last.LevelDisplayName].filter((v) => v != null).join(' · ')} />]);
+    rows.push(['Until next start', stop.quiet_seconds == null ? <Value value={null} /> : <Value value={howLong(stop.quiet_seconds)} />]);
   }
   // The one field of the 41 that points somewhere else: hardware errors counted at that boot are
   // the Errors view's subject, and a stop that carries them is worth reading there too.
@@ -279,7 +372,7 @@ function StopDetail({ stop, envelope }: { stop: Stop; envelope: Reading | null }
     <>
       <Facts rows={rows} />
       {stop.dump?.path && stop.dump.bytes != null ? <DumpHeaderDetail path={stop.dump.path} /> : null}
-      {stop.last_record_before?.Message ? <p className={styles.lastWord}>{stop.last_record_before.Message}</p> : null}
+      {stop.last_record_before?.Message ? <p className={styles.lastRecordMessage}>{stop.last_record_before.Message}</p> : null}
       <div className={styles.actions}>
         <MomentLink at={moment} />
         {envelope && ids.length ? (

@@ -5,8 +5,9 @@ it kept running).
 name one stop are spread over four records in two logs and a file on disk. ``crash`` fetches them
 in one launch and composes one stop per session: when the machine stopped as Windows estimated it,
 when it started again, the bug check if one was written, the dump that belongs to it, and the last
-record the machine managed before it went. Given a moment instead, it reports what the first start
-after that moment announced, which is the only thing that can answer for a freeze.
+System record before the next start. That record can be later than Windows' stop estimate. Given a
+moment instead, it reports what the first start after that moment announced, which is the only
+thing that can answer for a freeze.
 
 ``faults`` is the other half of the same question: the programs that crashed or hung, and the
 kernel's own live reports, which are failures the machine survived and so never become a stop.
@@ -545,7 +546,7 @@ $dumps = @()
 try { $dumps = @(& { {dumps} }) }
 catch { $warnings += "The dump inventory did not read: $($_.Exception.Message)" }
 
-# The machine's last word before each stop: the last record before the start that announced it, or
+# The last System record before each next start: the last record before the start that announced it, or
 # before the announcement itself where the log's retention begins after that start. The starts are
 # already in hand, so this costs one indexed query each and no second launch.
 $before = @()
@@ -1190,7 +1191,8 @@ register(
         description=(
             "The stops this machine did not plan, newest first, each one named: when it stopped as Windows "
             "estimated it, when it started again, the bug check if one was recorded, the dump that belongs to it, "
-            "and the last record the machine wrote before it. Give it a moment and it reports what the first start "
+            "and the last System record before the next start, which may be later than the stop estimate. "
+            "Give it a moment and it reports what the first start "
             "at or after that moment announced, which is how a freeze is answered: the log does not announce one, "
             "the next start does."
         ),

@@ -5,6 +5,7 @@
 ### Added
 - Continuous local performance history: one elected collector per data home keeps numeric-only aggregate processor, memory and disk samples across stops. The default interval is one minute, configurable to ten minutes; daily JSONL is capped and kept up to 30 days. A pause switch, clear action and last-attempt status are authenticated controls. `load` takes a fresh snapshot; `performance_history` gives agents exact rows and a derived window summary. The Performance view charts the returned samples with unconnected gaps, a keyboard-operable sample inspector, raw JSON and a window held before an investigation moment.
 - A fresh `processes` reading names the returned process instances using Windows' CPU time, private memory and process I/O counters, with bounded raw rows and separately derived leaders. Performance opens with three visual rankings that lead to exact, searchable process rows; no process name enters the retained history.
+- Crashes shows the last System record before restart, Windows' stop estimate and the next start as separate evidence points for each returned stop. A report-only stop leads with its filed time, bug check and matched dump while naming the missing System evidence. Selecting either kind opens its exact detail, record jump and stack action.
 - A grouped, left-aligned navigation rail with distinct line icons. On phones, the current view stays visible above a keyboard-operable disclosure of every view and the device sign-in action.
 - A day-by-day visual history in Crashes: Windows' stability index and returned reliability events share a UTC timeline. Selecting a day shows exact event types, the reported index, and the raw records; the same reading can be stacked for an agent.
 - Dashboard addresses now remember the selected view and an investigation moment. Refresh, copied links and browser back/forward return to the right screen; links to sections that load after a reading answer land at the section, and view changes focus the new title.
@@ -14,6 +15,7 @@
 - On phones, Record keeps the selected level and window visible in one disclosure. Its full filter controls remain one tap away, letting the returned evidence appear sooner in the first viewport.
 
 ### Changed
+- Crash descriptions now say precisely that the last System record is the last one before the next start. Its timestamp may be later than Windows' estimated stop and does not by itself establish cause.
 - Network adapter inventory stays available when Windows cannot assemble IP configuration; affected `ip` fields are null with a reading warning instead of empty lists that suggest no addresses.
 - The memory reading leaves installed capacity unknown if any module lacks a reported capacity, and leaves free slot count unknown when the array's total is missing, contradictory or unsupported by returned modules. Missing data no longer becomes zero capacity or zero free slots.
 - Signals opens with a visual five-class lead map and input coverage, with each count linked to its evidence and no health score implied.

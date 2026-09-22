@@ -35,7 +35,7 @@ Opening Performance also asks Windows which processes are using CPU time, privat
 | Reading | What it is |
 | --- | --- |
 | `events`, `record` | Records from the System and Application logs by level, from a moment or from this session's start, and the records *before* a moment |
-| `crash`, `faults` | The stops the machine did not plan, each composed into one: when it stopped as Windows estimated it, when it came back, the bug check if one was written, the dump that belongs to it and the last record before it — and, while it kept running, the programs that crashed or hung and the kernel's own live reports |
+| `crash`, `faults` | The stops the machine did not plan, each composed into one: when it stopped as Windows estimated it, when it came back, the bug check if one was written, the dump that belongs to it and the last System record before the next start — and, while it kept running, the programs that crashed or hung and the kernel's own live reports |
 | `whea`, `storms` | Hardware-error records with their binary payload decoded beside them, and the same records over a window in wall-clock buckets, grouped by signature, with burst and acceleration flags |
 | `dumps`, `dump_header` | The crash-dump inventory and an on-demand structural readout of one file: its exact header bytes, kernel bug check or minidump streams and exception, with the raw readout available in Crashes |
 | `system`, `hardware`, `hardware.cpu`, `.gpu`, `.board`, `.storage`, `.network`, `drivers` | The snapshot, the fingerprint and configuration, one subsystem at a time, and driver changes |
@@ -88,7 +88,7 @@ Register it once and every reading is a tool:
 claude mcp add --transport http system-sentinel http://127.0.0.1:8000/mcp --header "Authorization: Bearer $(system-sentinel token)"
 ```
 
-Any MCP client reaches the same address over streamable HTTP with the same header; any shell reaches the same evidence with `curl`. The reading to reach for when someone says *it froze* is `crash`: it composes each unplanned stop out of the records of its session — when the machine stopped as Windows estimated it, when it came back, the bug check if one was written, the dump on disk that belongs to it, and the last record the machine managed before it went. Give it the moment instead and it reports what the first start at or after that moment announced, which is the only thing that can answer for a freeze.
+Any MCP client reaches the same address over streamable HTTP with the same header; any shell reaches the same evidence with `curl`. The reading to reach for when someone says *it froze* is `crash`: it composes each unplanned stop out of the records of its session — when the machine stopped as Windows estimated it, when it came back, the bug check if one was written, the dump on disk that belongs to it, and the last System record before the next start. That record can be later than Windows' stop estimate; it is context, not a cause. Give `crash` a moment instead and it reports what the first start at or after that moment announced.
 
 ```
 curl -H "Authorization: Bearer $TOKEN" \
