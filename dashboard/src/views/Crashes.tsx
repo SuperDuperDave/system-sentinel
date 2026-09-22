@@ -324,7 +324,7 @@ function DumpHeaderDetail({ path }: { path: string }) {
       {observed(taken.reading) && raw.length > 0 ? (
         <details className={styles.rawDisclosure}>
           <summary>Raw file readout</summary>
-          <pre tabIndex={0}>{JSON.stringify(raw, null, 2)}</pre>
+          <pre>{JSON.stringify(raw, null, 2)}</pre>
         </details>
       ) : null}
       {taken.reading ? <div className={styles.actions}><AddToStack item={{ kind: 'reading', envelope: taken.reading, title: 'Dump inspection', verbosity: 'summary' }} label="Stack this dump inspection" /></div> : null}
