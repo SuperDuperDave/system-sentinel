@@ -50,7 +50,10 @@ function Shell() {
   const restoreAddress = useApp((s) => s.restoreAddress);
   const [devices, setDevices] = useState(false);
   const View = VIEW_COMPONENTS[view];
+  const activeView = VIEWS.find((item) => item.id === view) ?? VIEWS[0];
+  const mobileNavigation = useRef<HTMLDetailsElement>(null);
   const previousNavigation = useRef(`${view}\u0000${moment ?? ''}`);
+  const closeMobileNavigation = () => { if (mobileNavigation.current) mobileNavigation.current.open = false; };
 
   useEffect(() => {
     window.addEventListener('popstate', restoreAddress);
@@ -63,6 +66,7 @@ function Shell() {
     const current = `${view}\u0000${moment ?? ''}`;
     if (previousNavigation.current === current) return;
     previousNavigation.current = current;
+    closeMobileNavigation();
     window.scrollTo(0, 0);
     const title = document.querySelector<HTMLElement>('main h1');
     if (title) {
@@ -109,26 +113,46 @@ function Shell() {
       </header>
       <div className={styles.trace} aria-hidden="true" />
       <nav className={styles.nav} aria-label="Views">
-        {NAV_GROUPS.map((group) => (
-          <div className={styles.navGroup} key={group}>
-            <span className={`${styles.navGroupLabel} label`}>{group}</span>
-            {VIEWS.filter((v) => v.group === group).map((v) => (
-              <button key={v.id} className={`${styles.navItem} ${v.id === view ? styles.navActive : ''}`} onClick={() => setView(v.id)} aria-current={v.id === view ? 'page' : undefined}>
-                <NavIcon name={v.id} />
-                <span>{v.label}</span>
-              </button>
-            ))}
+        <NavChoices view={view} onChoose={setView} onDevices={() => setDevices(true)} />
+      </nav>
+      <nav className={styles.mobileNav} aria-label="Views">
+        <details ref={mobileNavigation}>
+          <summary className={styles.mobileSummary}>
+            <span className={styles.mobileCurrent}>
+              <NavIcon name={activeView.id} />
+              <span><span className={`${styles.mobileEyebrow} label`}>Current view</span><span className={styles.mobileTitle}>{activeView.label}</span></span>
+            </span>
+            <span className={styles.mobileToggle}>All views <span className={styles.mobileChevron} aria-hidden="true" /></span>
+          </summary>
+          <div className={styles.mobileChoices}>
+            <NavChoices view={view} onChoose={(next) => { closeMobileNavigation(); setView(next); }} onDevices={() => { closeMobileNavigation(); setDevices(true); }} />
           </div>
-        ))}
-        <button className={`${styles.navItem} ${styles.navAside}`} onClick={() => setDevices(true)} aria-haspopup="dialog">
-          <NavIcon name="device" />
-          <span>Sign in another device</span>
-        </button>
+        </details>
       </nav>
       <main className={styles.main}><View /></main>
       <Devices open={devices} onClose={() => setDevices(false)} />
     </div>
   );
+}
+
+function NavChoices({ view, onChoose, onDevices }: { view: ViewId; onChoose: (next: ViewId) => void; onDevices: () => void }) {
+  return <>
+    {NAV_GROUPS.map((group) => (
+      <div className={styles.navGroup} key={group}>
+        <span className={`${styles.navGroupLabel} label`}>{group}</span>
+        {VIEWS.filter((item) => item.group === group).map((item) => (
+          <button key={item.id} className={`${styles.navItem} ${item.id === view ? styles.navActive : ''}`} onClick={() => onChoose(item.id)} aria-current={item.id === view ? 'page' : undefined}>
+            <NavIcon name={item.id} />
+            <span>{item.label}</span>
+          </button>
+        ))}
+      </div>
+    ))}
+    <button className={`${styles.navItem} ${styles.navAside}`} onClick={onDevices} aria-haspopup="dialog">
+      <NavIcon name="device" />
+      <span>Sign in another device</span>
+    </button>
+  </>;
 }
 
 function SignIn() {

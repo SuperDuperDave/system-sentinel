@@ -1,5 +1,5 @@
 /* The shell: a header on the lit field with the graticule in one zone, the trace as its horizon,
-   the views as a strip on a phone and a rail on a desk. */
+   the views as a disclosed list on a phone and a rail on a desk. */
 
 .shell {
   min-height: 100dvh;
@@ -60,13 +60,8 @@
 
 .nav {
   grid-area: nav;
-  display: flex;
-  gap: 4px;
-  padding: 10px var(--gutter) 0;
-  overflow-x: auto;
-  scrollbar-width: none;
+  display: none;
 }
-.nav::-webkit-scrollbar { display: none; }
 .navGroup { display: flex; gap: 4px; }
 .navGroup + .navGroup { margin-left: 10px; }
 .navGroupLabel { display: none; }
@@ -90,6 +85,37 @@
 /* Not a view: the same control, set apart by the gap rather than by a rule. */
 .navAside { margin-left: 10px; white-space: normal; }
 
+.mobileNav {
+  grid-area: nav;
+  border-bottom: 1px solid var(--rule-soft);
+}
+.mobileSummary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 64px;
+  padding: 10px var(--gutter);
+  cursor: pointer;
+  list-style: none;
+}
+.mobileSummary::-webkit-details-marker { display: none; }
+.mobileSummary:focus-visible { outline: 2px solid var(--ink); outline-offset: -4px; }
+.mobileCurrent { display: inline-flex; align-items: center; gap: 12px; min-width: 0; }
+.mobileCurrent > svg { flex: none; }
+.mobileCurrent > span { min-width: 0; }
+.mobileEyebrow { display: block; color: var(--muted); font-size: 10px; }
+.mobileTitle { display: block; color: var(--ink); font-size: 15px; line-height: 1.3; }
+.mobileToggle { display: inline-flex; align-items: center; gap: 9px; flex: none; color: var(--body); font-size: 12px; }
+.mobileChevron { width: 7px; height: 7px; border: solid currentColor; border-width: 0 1.5px 1.5px 0; transform: translateY(-2px) rotate(45deg); }
+.mobileNav details[open] .mobileChevron { transform: translateY(2px) rotate(225deg); }
+.mobileChoices { display: flex; flex-direction: column; padding: 4px var(--gutter) 20px; }
+.mobileChoices .navGroup { flex-direction: column; gap: 2px; }
+.mobileChoices .navGroup + .navGroup { margin: 18px 0 0; }
+.mobileChoices .navGroupLabel { display: block; padding: 0 12px 6px; }
+.mobileChoices .navItem { width: 100%; min-height: 44px; padding: 9px 12px; }
+.mobileChoices .navAside { margin: 18px 0 0; }
+
 .main {
   grid-area: main;
   min-width: 0;
@@ -105,8 +131,11 @@
     grid-template-areas: 'header header' 'trace trace' 'nav main';
   }
   .header { padding: 22px 28px 20px; }
+  .mobileNav { display: none; }
   .nav {
+    display: flex;
     flex-direction: column;
+    gap: 4px;
     padding: 20px 12px 32px;
     overflow: visible;
     border-right: 1px solid var(--rule-soft);
