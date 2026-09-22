@@ -20,6 +20,8 @@ Every read of the machine passes through one boundary, the API. The dashboard, a
 
 The screens show the tool rendering a synthetic record built from Windows' own providers, ids and message templates, so nothing from any real machine appears.
 
+The dashboard address remembers the view you opened (`?view=machine`, for example) and a moment you opened in Record. You can copy it to revisit that screen, use browser back and forward, or link to a section. The recipient still needs their own signed-in session.
+
 ## What it reads
 
 | Reading | What it is |

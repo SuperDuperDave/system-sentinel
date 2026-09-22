@@ -16,6 +16,26 @@ export const VIEWS: { id: ViewId; label: string; group: ViewGroup }[] = [
   { id: 'agents', label: 'Agents', group: 'Carry' },
 ];
 
+/** The address carries the visible view and a held investigation moment, never a credential. */
+function navigationFromAddress(): { view: ViewId; moment: string | null } {
+  const query = new URLSearchParams(window.location.search);
+  const requested = query.get('view');
+  const view = VIEWS.find((item) => item.id === requested)?.id ?? 'record';
+  const candidate = query.get('moment');
+  const moment = candidate && candidate.length <= 64 && /^\d{4}-\d{2}-\d{2}T/.test(candidate) && !Number.isNaN(Date.parse(candidate)) ? candidate : null;
+  return { view, moment };
+}
+
+function writeAddress(view: ViewId, moment: string | null) {
+  const url = new URL(window.location.href);
+  if (view === 'record') url.searchParams.delete('view');
+  else url.searchParams.set('view', view);
+  if (moment) url.searchParams.set('moment', moment);
+  else url.searchParams.delete('moment');
+  url.hash = '';
+  history.pushState(null, '', url);
+}
+
 interface AppState {
   /** unknown until the first request answers; closed on any 401. */
   session: 'unknown' | 'open' | 'closed';
@@ -33,13 +53,26 @@ interface AppState {
    * place it belongs to can never disagree. Clearing it leaves the view where it is.
    */
   setMoment: (at: string | null) => void;
+  /** Restore a browser history entry without writing another entry. */
+  restoreAddress: () => void;
 }
 
-export const useApp = create<AppState>((set) => ({
+const initial = navigationFromAddress();
+
+export const useApp = create<AppState>((set, get) => ({
   session: 'unknown',
   setSession: (session) => set({ session }),
-  view: 'record',
-  setView: (view) => set({ view }),
-  moment: null,
-  setMoment: (at) => set(at ? { moment: at, view: 'record' } : { moment: null }),
+  view: initial.view,
+  setView: (view) => {
+    if (view === get().view) return;
+    set({ view });
+    writeAddress(view, get().moment);
+  },
+  moment: initial.moment,
+  setMoment: (at) => {
+    if (at === get().moment && (!at || get().view === 'record')) return;
+    set(at ? { moment: at, view: 'record' } : { moment: null });
+    writeAddress(get().view, at);
+  },
+  restoreAddress: () => set(navigationFromAddress()),
 }));

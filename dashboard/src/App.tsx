@@ -43,9 +43,53 @@ export function App() {
 
 function Shell() {
   const view = useApp((s) => s.view);
+  const moment = useApp((s) => s.moment);
   const setView = useApp((s) => s.setView);
+  const restoreAddress = useApp((s) => s.restoreAddress);
   const [devices, setDevices] = useState(false);
   const View = VIEW_COMPONENTS[view];
+  const previousNavigation = useRef(`${view}\u0000${moment ?? ''}`);
+
+  useEffect(() => {
+    window.addEventListener('popstate', restoreAddress);
+    return () => window.removeEventListener('popstate', restoreAddress);
+  }, [restoreAddress]);
+
+  // A view change or moment jump is navigation for a keyboard reader too. Focus the new title,
+  // and put it on screen even when the action came from far down another view.
+  useEffect(() => {
+    const current = `${view}\u0000${moment ?? ''}`;
+    if (previousNavigation.current === current) return;
+    previousNavigation.current = current;
+    window.scrollTo(0, 0);
+    const title = document.querySelector<HTMLElement>('main h1');
+    if (title) {
+      title.tabIndex = -1;
+      title.focus({ preventScroll: true });
+    }
+  }, [view, moment]);
+
+  // A copied section link may name a row created only after its reading answers. Wait for that
+  // element, then let the browser land on it; ordinary in-page anchor clicks stay native.
+  useEffect(() => {
+    const hash = window.location.hash.slice(1);
+    if (!hash || hash === 'link') return;
+    let id: string;
+    try { id = decodeURIComponent(hash); } catch { return; }
+    const reveal = () => {
+      const target = document.getElementById(id);
+      if (!target) return false;
+      target.scrollIntoView({ block: 'start' });
+      return true;
+    };
+    if (reveal()) return;
+    const main = document.querySelector('main');
+    if (!main) return;
+    const observer = new MutationObserver(() => { if (reveal()) observer.disconnect(); });
+    observer.observe(main, { childList: true, subtree: true });
+    const expiry = window.setTimeout(() => observer.disconnect(), 15_000);
+    return () => { observer.disconnect(); window.clearTimeout(expiry); };
+  }, [view]);
 
   // The tray hands a phone over by landing here on #link. The hash is spent like the code that
   // came with it, so a reload is the dashboard and not this dialog again.
