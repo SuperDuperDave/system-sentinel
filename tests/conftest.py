@@ -31,6 +31,8 @@ BIND_ERROR = "<3>WSL (530414 - ) ERROR: UtilBindVsockAnyPort:307: socket failed 
 def answer(script):
     """What the machine says to this script: (stdout, stderr, exit code). A mode that raises in a
     launch exits non-zero; in a session the frame's catch reports exactly the same two things."""
+    if not script.strip():  # the real startup probe asks an empty question
+        return "", "", 0
     m = re.search(r"# fake: ([a-z0-9-]+)", script)
     mode = m.group(1) if m else "ok-list"
     if mode == "ok-list":
@@ -90,12 +92,20 @@ def one_shot(args):
 
 def session():
     """Read framed questions on stdin and answer each one, then write its mark back."""
-    if os.environ.get("SENTINEL_FAKE_NO_SESSION"):  # a machine where a session will not start
+    no_session = os.environ.get("SENTINEL_FAKE_NO_SESSION")
+    if no_session == "interop":
+        sys.stderr.write(INTEROP + " PRIVATE_CANARY_42\n")
+        sys.stderr.flush()
+        sys.exit(1)
+    if no_session and no_session != "prelude-note":  # a machine where a session will not start
         sys.exit(1)
     frame = re.compile(r"FromBase64String\('([A-Za-z0-9+/=]*)'\).*WriteLine\(\"([0-9a-f]+)\"\)")
     for line in sys.stdin:
         found = frame.search(line)
         if found is None:
+            if no_session == "prelude-note":
+                sys.stderr.write("startup note PRIVATE_CANARY_42\n")
+                sys.stderr.flush()
             continue  # the prelude, or anything else that is not a question
         script = base64.b64decode(found.group(1)).decode("utf-16le")
         out, err, code = answer(script)

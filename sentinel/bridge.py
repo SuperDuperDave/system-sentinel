@@ -36,7 +36,7 @@ import sys
 import threading
 import time
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import IO, Any, Literal
@@ -383,7 +383,12 @@ def _frame(script: str, depth: int, mark: str) -> str:
     return _FRAME.replace("{payload}", payload).replace("{depth}", str(depth)).replace("{mark}", mark)
 
 
-def _reader(name: str, pipe: IO[bytes] | None, into: queue.Queue[str | None]) -> threading.Thread:
+def _reader(
+    name: str,
+    pipe: IO[bytes] | None,
+    into: queue.Queue[str | None],
+    observe: Callable[[str], None] | None = None,
+) -> threading.Thread:
     """Drain one pipe into a queue, line by line, until it ends.
 
     Both pipes get one of these because a full stderr buffer stops the process writing stdout, and
@@ -395,7 +400,10 @@ def _reader(name: str, pipe: IO[bytes] | None, into: queue.Queue[str | None]) ->
             if pipe is not None:
                 for raw in pipe:
                     # The BOM belongs to the console encoding the prelude set, not to the answer.
-                    into.put(raw.decode("utf-8", errors="replace").rstrip("\r\n").lstrip("\ufeff"))
+                    line = raw.decode("utf-8", errors="replace").rstrip("\r\n").lstrip("\ufeff")
+                    if observe is not None:
+                        observe(line)
+                    into.put(line)
         except (OSError, ValueError):
             pass  # the pipe was closed under us: the session is going
         finally:
@@ -419,9 +427,11 @@ class Session:
         self._proc = proc
         self._out: queue.Queue[str | None] = queue.Queue()
         self._err: queue.Queue[str | None] = queue.Queue()
+        self._startup_interop = threading.Event()  # a category, never the stderr text
+        self._watching_startup = True
         self._readers = (
             _reader(f"sentinel-session-{proc.pid}-out", proc.stdout, self._out),
-            _reader(f"sentinel-session-{proc.pid}-err", proc.stderr, self._err),
+            _reader(f"sentinel-session-{proc.pid}-err", proc.stderr, self._err, self._observe_startup_stderr),
         )
         self.started_at = time.monotonic()
         self.answered = 0
@@ -455,12 +465,15 @@ class Session:
                     probe = session.ask("", timeout=min(timeout, SESSION_START_TIMEOUT), depth=1)
                 except SessionLost as exc:
                     session.discard("start")
-                    raise SessionStartFailed("probe_lost", f"the session ended before it answered: {exc}") from exc
+                    reason = "wsl_interop" if session._startup_interop.is_set() else "probe_lost"
+                    raise SessionStartFailed(reason, f"the session ended before it answered: {exc}") from exc
                 if not probe.observed:
                     session.discard("start")
-                    reason = "wsl_interop" if probe.error and _wsl_interop_error(probe.error) else f"probe_{probe.outcome}"
+                    interop = session._startup_interop.is_set() or bool(probe.error and _wsl_interop_error(probe.error))
+                    reason = "wsl_interop" if interop else f"probe_{probe.outcome}"
                     raise SessionStartFailed(reason, f"the session did not answer its first question: {probe.outcome}")
                 session.answered = 0  # the probe is nobody's question
+                session._watching_startup = False
                 return session
         except SlotTimeout as exc:
             raise SessionStartFailed("launch_slot_timeout", str(exc)) from exc
@@ -478,6 +491,12 @@ class Session:
     @property
     def pid(self) -> int:
         return self._proc.pid
+
+    def _observe_startup_stderr(self, line: str) -> None:
+        # The probe has no preceding question. Record only the known launch-failure signature,
+        # before a queue drain or the other reader's EOF can make that evidence disappear.
+        if self._watching_startup and _wsl_interop_error(line):
+            self._startup_interop.set()
 
     def ask(self, script: str, *, timeout: float, depth: int) -> BridgeResult:
         """Ask this session one question. Raises :class:`SessionLost` if the process went away."""
@@ -549,6 +568,12 @@ class Session:
             proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
             pass
+        if proc.poll() is not None:
+            # A reaped child's pipes normally reach EOF. Let the readers observe their buffered
+            # tail before closing the streams, with one bound shared by both reader threads.
+            drain_by = time.monotonic() + 0.5
+            for reader in self._readers:
+                reader.join(timeout=max(0.0, drain_by - time.monotonic()))
         for pipe in (proc.stdout, proc.stderr):
             try:
                 if pipe is not None:

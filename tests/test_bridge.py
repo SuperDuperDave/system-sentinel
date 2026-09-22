@@ -297,6 +297,26 @@ def test_the_one_shot_transport_answers_when_a_session_will_not_start(session_br
     assert report["last_start_failure"] == "probe_lost"
 
 
+def test_a_live_startup_interop_error_keeps_a_bounded_reason(session_bridge: Bridge, monkeypatch):
+    monkeypatch.setenv("SENTINEL_FAKE_NO_SESSION", "interop")
+    result = session_bridge.run("# fake: ok-list")
+    assert result.outcome == "ok" and result.items[0]["Id"] == 41
+    report = sessions_report(session_bridge)
+    assert report["start_failures"] == report["fell_back"] == 1
+    assert report["last_start_failure"] == "wsl_interop"
+    assert "PRIVATE_CANARY_42" not in str(report)
+
+
+def test_preframe_stderr_does_not_reject_a_session_that_answers(session_bridge: Bridge, monkeypatch):
+    monkeypatch.setenv("SENTINEL_FAKE_NO_SESSION", "prelude-note")
+    result = session_bridge.run("# fake: ok-list")
+    assert result.outcome == "ok" and result.items[0]["Id"] == 41
+    report = sessions_report(session_bridge)
+    assert report["start_failures"] == report["fell_back"] == 0
+    assert report["alive"] == 1 and report["answered"] == 1
+    assert "PRIVATE_CANARY_42" not in str(report)
+
+
 def test_a_session_that_dies_in_the_middle_of_a_question_hands_it_to_a_launch(session_bridge: Bridge, monkeypatch):
     """The question is not lost with the session: it is asked again the other way, and the loss is
     a count on health rather than a reading nobody got."""
