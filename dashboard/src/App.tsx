@@ -1,5 +1,5 @@
 import { FormEvent, ReactElement, useEffect, useRef, useState } from 'react';
-import { catalog, openSession } from './api';
+import { Unauthorized, catalog, openSession } from './api';
 import { Devices } from './Devices';
 import { Lockup, Mark } from './Mark';
 import { NavIcon } from './NavIcon';
@@ -36,11 +36,45 @@ export function App() {
   // One cheap request decides whether a session exists: the catalog, which touches no PowerShell.
   useEffect(() => {
     if (session !== 'unknown') return;
-    catalog().then(() => setSession('open')).catch(() => setSession('closed'));
+    let active = true;
+    catalog()
+      .then(() => { if (active) setSession('open'); })
+      .catch((error: unknown) => { if (active) setSession(error instanceof Unauthorized ? 'closed' : 'unreachable'); });
+    return () => { active = false; };
   }, [session, setSession]);
 
+  if (session === 'unknown') return <CheckingConnection />;
+  if (session === 'unreachable') return <ConnectionUnavailable />;
   if (session === 'closed') return <SignIn />;
   return <Shell />;
+}
+
+function CheckingConnection() {
+  return (
+    <div className={styles.signIn}>
+      <div className={styles.signInPanel} role="status">
+        <Mark className={styles.signInMark} />
+        <h1 className={`${styles.signInTitle} display`}>System Sentinel</h1>
+        <p className={styles.signInLede}>Checking the connection…</p>
+      </div>
+    </div>
+  );
+}
+
+function ConnectionUnavailable() {
+  const setSession = useApp((s) => s.setSession);
+  const retry = useRef<HTMLButtonElement>(null);
+  useEffect(() => { retry.current?.focus(); }, []);
+  return (
+    <div className={styles.signIn}>
+      <div className={styles.signInPanel}>
+        <Mark className={styles.signInMark} />
+        <h1 className={`${styles.signInTitle} display`}>Connection unavailable</h1>
+        <p className={styles.signInLede}>The dashboard could not confirm a connection to System Sentinel. Check that the app is running, then try again.</p>
+        <button ref={retry} className={styles.signInButton} onClick={() => setSession('unknown')}>Try again</button>
+      </div>
+    </div>
+  );
 }
 
 function Shell() {
@@ -158,7 +192,7 @@ function NavChoices({ view, onChoose, onDevices }: { view: ViewId; onChoose: (ne
 function SignIn() {
   const setSession = useApp((s) => s.setSession);
   const [token, setToken] = useState('');
-  const [wrong, setWrong] = useState(false);
+  const [problem, setProblem] = useState<'wrong' | 'unavailable' | null>(null);
   const [busy, setBusy] = useState(false);
   const field = useRef<HTMLInputElement>(null);
 
@@ -169,10 +203,15 @@ function SignIn() {
   async function submit(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
-    const ok = await openSession(token);
-    setBusy(false);
-    if (ok) setSession('open');
-    else setWrong(true);
+    setProblem(null);
+    try {
+      if (await openSession(token)) setSession('open');
+      else setProblem('wrong');
+    } catch {
+      setProblem('unavailable');
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -182,8 +221,9 @@ function SignIn() {
         <h1 className={`${styles.signInTitle} display`}>System Sentinel</h1>
         <p className={styles.signInLede}>A stethoscope for your computer. Enter the access token this machine created when the tool first ran.</p>
         <label className="label" htmlFor="token">Access token</label>
-        <input id="token" className={`${styles.tokenInput} readout`} type="password" autoComplete="current-password" ref={field} value={token} onChange={(e) => { setToken(e.target.value); setWrong(false); }} />
-        {wrong ? <p className={`${styles.wrong} readout`}>That token was not accepted.</p> : null}
+        <input id="token" className={`${styles.tokenInput} readout`} type="password" autoComplete="current-password" ref={field} value={token} disabled={busy} onChange={(e) => { setToken(e.target.value); setProblem(null); }} />
+        {problem === 'wrong' ? <p className={`${styles.wrong} readout`} role="alert">That token was not accepted.</p> : null}
+        {problem === 'unavailable' ? <p className={`${styles.wrong} readout`} role="alert">Sign-in could not complete. Check that System Sentinel is running, then try again.</p> : null}
         <button className={styles.signInButton} type="submit" disabled={busy || !token.trim()}>Open</button>
         {/* Two ways in, and the token is the second one. The executable signs a browser in by
             itself, so anyone reading this screen is either on a browser it did not open or

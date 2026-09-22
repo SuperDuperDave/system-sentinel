@@ -140,15 +140,19 @@ export function clearPerformanceHistory(): Promise<{ cleared_files: number }> {
   return request<{ cleared_files: number }>('/api/performance/history', { method: 'DELETE' });
 }
 
-/** Exchange the token for the session cookie. Resolves false when the token is wrong. */
+/** Exchange the token for the session cookie. Only a rejected token resolves false. */
 export async function openSession(token: string): Promise<boolean> {
-  const res = await fetch('/api/session', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ token: token.trim() }),
-    credentials: 'same-origin',
-  });
-  return res.ok;
+  try {
+    await request<{ ok: boolean }>('/api/session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: token.trim() }),
+    });
+    return true;
+  } catch (error) {
+    if (error instanceof Unauthorized) return false;
+    throw error;
+  }
 }
 
 /** Ask this machine for a sign-in link for another device. Each call mints a fresh code. */

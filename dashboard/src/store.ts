@@ -45,8 +45,8 @@ function writeAddress(view: ViewId, moment: string | null) {
 }
 
 interface AppState {
-  /** unknown until the first request answers; closed on any 401. */
-  session: 'unknown' | 'open' | 'closed';
+  /** unknown until the catalog answers; closed on a 401, unreachable on a transport or server failure. */
+  session: 'unknown' | 'open' | 'closed' | 'unreachable';
   setSession: (s: AppState['session']) => void;
   view: ViewId;
   setView: (v: ViewId) => void;
