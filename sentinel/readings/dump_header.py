@@ -18,7 +18,7 @@ from typing import Any
 from ..bridge import Bridge, Outcome
 from ..reading import Param, Reading, Section, Spec, register
 from .crash import BUGCHECKS, EXCEPTIONS
-from .system import DUMPS_SCRIPT
+from .dumps import DUMPS_SCRIPT, inventory, missing_file
 
 PREFIX_BYTES = 96
 MAX_STREAMS = 128
@@ -41,9 +41,10 @@ def dump_header_script(path: str) -> str:
     quoted = path.replace("'", "''")
     return rf"""
 $selected = '{quoted}'
-$file = & {{
+$inventory = & {{
 {DUMPS_SCRIPT.strip()}
-}} | Where-Object {{ $_.path -ieq $selected }} | Select-Object -First 1
+}}
+$file = $inventory.locations | ForEach-Object {{ $_.files }} | Where-Object {{ $_.path -ieq $selected }} | Select-Object -First 1
 if ($file) {{
     try {{
         $stream = [IO.File]::Open($file.path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
@@ -117,13 +118,15 @@ if ($file) {{
             [pscustomobject]@{{ status = 'ok'; name = $file.name; path = $file.path; bytes = $lengthBefore;
                 inventory_bytes = $file.bytes; modified = $file.modified; prefix = $prefix;
                 directory = $directory; directory_status = $directoryStatus; samples = $samples;
-                length_after = $stream.Length }}
+                length_after = $stream.Length; inventory = $inventory }}
         }} finally {{ $stream.Dispose() }}
     }} catch [System.UnauthorizedAccessException] {{
-        [pscustomobject]@{{ status = 'denied' }}
+        [pscustomobject]@{{ status = 'denied'; inventory = $inventory }}
     }} catch {{
-        [pscustomobject]@{{ status = 'failed'; reason = $_.Exception.GetType().Name }}
+        [pscustomobject]@{{ status = 'failed'; reason = $_.Exception.GetType().Name; inventory = $inventory }}
     }}
+}} else {{
+    [pscustomobject]@{{ status = 'not_inventoried'; inventory = $inventory }}
 }}
 """
 
@@ -350,14 +353,15 @@ def _read_encoded(value: Any, maximum: int, name: str) -> bytes:
 
 def take_dump_header(bridge: Bridge, params: dict[str, Any]) -> Reading:
     script = dump_header_script(params["path"])
-    result = bridge.run(script)
+    result = bridge.run(script, depth=8)
     reading = Reading(
         reading="dump_header", params=params, outcome=result.outcome,
         method={"kind": "powershell", "query": textwrap.dedent(script).strip()},
         took_ms=result.took_ms, warnings=list(result.warnings),
     )
     if result.outcome == "empty":
-        reading.error = None
+        reading.outcome = "failed"
+        reading.error = {"kind": "failed", "detail": "The dump query returned no inventory or inspection result."}
         return reading
     if result.outcome != "ok":
         reading.error = {"kind": result.outcome, "detail": result.error or ""}
@@ -367,6 +371,16 @@ def take_dump_header(bridge: Bridge, params: dict[str, Any]) -> Reading:
         reading.error = {"kind": "failed", "detail": "the dump query returned an unexpected shape"}
         return reading
     item = result.items[0]
+    _, collection, warnings = inventory(item.get("inventory"))
+    reading.sections.append(Section("collection", "raw", collection))
+    reading.warnings.extend(warnings)
+    if item.get("status") == "not_inventoried":
+        reading.outcome, detail = missing_file(params["path"], collection)
+        if reading.observed:
+            reading.count = 0
+        else:
+            reading.error = {"kind": reading.outcome, "detail": detail}
+        return reading
     if item.get("status") != "ok":
         status: Outcome = "denied" if item.get("status") == "denied" else "failed"
         reading.outcome = status
@@ -419,6 +433,7 @@ def take_dump_header(bridge: Bridge, params: dict[str, Any]) -> Reading:
         reading.warnings.extend(warnings)
         basis = "The 32-byte MINIDUMP_HEADER, bounded MINIDUMP_DIRECTORY and selected fixed metadata stream prefixes were interpreted at their recorded file offsets."
     reading.sections.append(Section("inspection", "derived", decoded, basis=basis))
+    reading.sections.append(Section("collection", "raw", collection))
     reading.count = 1
     return reading
 

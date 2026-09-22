@@ -38,6 +38,7 @@ from sentinel.readings.crash import (
     since_clause,
 )
 from tests.conftest import FakeBridge, identity_result, real_bridge_or_skip
+from tests.test_dump_inventory import dump_inventory
 
 FIXTURES = Path(__file__).parent / "fixtures"
 TOKEN = "test-token-0123456789"
@@ -58,10 +59,12 @@ def payload(**overrides: Any) -> dict[str, Any]:
     out = {
         "system": sorted(doc["system"], key=lambda r: r["TimeCreated"], reverse=True),
         "reports": sorted(doc["reports"], key=lambda r: r["TimeCreated"], reverse=True),
-        "dumps": doc["dumps"],
+        "dump_inventory": dump_inventory(doc["dumps"]),
         "before": doc["before"],
         "warnings": [],
     }
+    if "dumps" in overrides:
+        overrides["dump_inventory"] = dump_inventory(overrides.pop("dumps"))
     out.update(overrides)
     return out
 
@@ -73,7 +76,7 @@ def from_moment(moment: str) -> dict[str, Any]:
     def keep(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         return sorted([r for r in rows if r["TimeCreated"] >= moment], key=lambda r: r["TimeCreated"])
 
-    return {"system": keep(doc["system"]), "reports": keep(doc["reports"]), "dumps": doc["dumps"], "before": doc["before"], "warnings": []}
+    return {"system": keep(doc["system"]), "reports": keep(doc["reports"]), "dump_inventory": dump_inventory(doc["dumps"]), "before": doc["before"], "warnings": []}
 
 
 def crash(body: dict[str, Any] | None = None, outcome: str = "ok", **params: Any):
@@ -138,7 +141,7 @@ def test_one_launch_asks_both_logs_the_inventory_and_the_record_before_each_star
     assert "-Oldest" not in script
     # The dump inventory is the dumps reading's own query, embedded once and not written again.
     assert script.count("Get-ChildItem") == module.DUMPS_SCRIPT.count("Get-ChildItem")
-    assert "C:\\Windows\\Minidump\\*.dmp" in script
+    assert "Join-Path $env:SystemRoot 'Minidump'" in script
     assert crash(payload(), count=5).method["launches"] == 1
 
 
@@ -276,7 +279,7 @@ def test_a_report_older_than_the_system_log_is_a_stop_of_its_own():
     assert stop["bugcheck"]["code"] == "0x3b" and stop["bugcheck"]["source"] == "BlueScreen report"
     assert stop["bugcheck"]["bucket"].startswith("0x3b_c0000005_nt!")
     # The report named the file; the disk no longer has it, which is not the same as no dump.
-    assert stop["dump"] == {"name": "070426-99999-01.dmp", "path": "C:\\Windows\\Minidump\\070426-99999-01.dmp", "bytes": None, "modified": None, "matched_by": "report"}
+    assert stop["dump"] == {"name": "070426-99999-01.dmp", "path": "C:\\Windows\\Minidump\\070426-99999-01.dmp", "bytes": None, "modified": None, "matched_by": "report", "inventory": {"outcome": "empty", "detail": "No exact match was returned in the observed dump inventory."}}
 
 
 def test_a_start_whose_time_arrives_as_a_json_date_still_dates_the_stop():
@@ -304,10 +307,10 @@ def test_the_whole_memory_dump_belongs_to_a_stop_only_when_it_was_written_in_the
     body = payload()
     report = next(r for r in body["reports"] if r["RecordId"] == 2100)  # 2026-07-04, older than the System log
     report["Properties"][15] = report["Properties"][15] + "\n\\\\?\\C:\\Windows\\MEMORY.DMP"
-    whole = next(f for f in body["dumps"] if f["name"] == "MEMORY.DMP")  # written in September, by a later stop
+    whole = next(f for source in body["dump_inventory"]["locations"] for f in source["files"] if f["name"] == "MEMORY.DMP")  # written in September, by a later stop
 
     stop = next(s for s in crash(body, count=5).section("stops").data if s["records"]["report"] == [2100])
-    assert stop["dump"] == {"name": "070426-99999-01.dmp", "path": "C:\\Windows\\Minidump\\070426-99999-01.dmp", "bytes": None, "modified": None, "matched_by": "report"}
+    assert stop["dump"] == {"name": "070426-99999-01.dmp", "path": "C:\\Windows\\Minidump\\070426-99999-01.dmp", "bytes": None, "modified": None, "matched_by": "report", "inventory": {"outcome": "empty", "detail": "No exact match was returned in the observed dump inventory."}}
 
     whole["modified"] = "2026-07-04T08:30:00.0000000Z"  # written in the half hour before the report: this stop's
     stop = next(s for s in crash(body, count=5).section("stops").data if s["records"]["report"] == [2100])
@@ -378,6 +381,55 @@ def test_a_sub_query_that_did_not_answer_is_a_warning_not_a_silence():
     reading = crash(payload(dumps=[], warnings=["The dump inventory did not read: access is denied."]), count=5)
     assert reading.warnings == ["The dump inventory did not read: access is denied."]
     assert stop_named(reading, "2026-09-12T06:14:58.000Z")["dump"] is None
+
+
+def test_failed_dump_locations_preserve_stops_and_leave_reported_file_presence_unknown():
+    body = payload()
+    source = next(row for row in body["dump_inventory"]["locations"] if row["id"] == "minidump")
+    source.update(outcome="denied", error_count=1, errors=[{"kind": "denied", "detail": "synthetic denial"}])
+    reading = crash(body, count=5)
+    assert reading.outcome == "ok" and reading.count == 5 and reading.warnings
+    assert reading.section("collection").data["dumps"]["complete"] is False
+    orphan = next(stop for stop in reading.section("stops").data if stop["records"]["report"] == [2100])
+    assert orphan["dump"]["inventory"]["outcome"] == "denied"
+    assert "unknown" in orphan["dump"]["inventory"]["detail"]
+    assert stop_named(reading, "2026-09-09T09:59:57.000Z")["dump"]["bytes"] is not None
+
+
+def test_failed_inventory_does_not_change_an_observed_absence_of_stops():
+    reading = crash(payload(system=[], reports=[], before=[], dump_inventory=None), count=5)
+    assert reading.outcome == "empty" and reading.count == 0 and reading.warnings
+    assert reading.section("collection").data["dumps"]["complete"] is False
+
+
+@pytest.mark.parametrize("complete", [True, False])
+def test_stop_without_named_or_matched_dump_retains_inventory_coverage(complete):
+    body = payload(dumps=[])
+    if not complete:
+        source = body["dump_inventory"]["locations"][0]
+        source.update(outcome="denied", present=None, error_count=1, errors=[{"kind": "denied", "detail": "synthetic denial"}])
+    reading = crash(body, count=5)
+    stop = stop_named(reading, "2026-09-12T06:14:58.000Z")
+    assert stop["dump"] is None and stop["dump_inventory_complete"] is complete
+    assert bool(reading.warnings) is not complete
+
+
+def test_time_matched_candidate_keeps_the_incomplete_inventory_qualification():
+    body = payload()
+    source = next(row for row in body["dump_inventory"]["locations"] if row["id"] == "live_kernel")
+    source.update(outcome="denied", present=True, error_count=1, errors=[{"kind": "denied", "detail": "synthetic denial"}])
+    stop = stop_named(crash(body, count=5), "2026-09-12T06:14:58.000Z")
+    assert stop["dump"]["matched_by"] == "time" and stop["dump"]["bytes"] is not None
+    assert stop["dump_inventory_complete"] is False
+
+
+def test_unmatched_historical_memory_dump_does_not_claim_the_current_file_is_absent():
+    body = payload()
+    report = next(row for row in body["reports"] if row["RecordId"] == 2100)
+    report["Properties"][15] = r"C:\Windows\MEMORY.DMP"
+    stop = next(stop for stop in crash(body, count=5).section("stops").data if stop["records"]["report"] == [2100])
+    assert stop["dump"]["bytes"] is None
+    assert stop["dump"]["inventory"] == {"outcome": "ok", "detail": "A file with this path is inventoried, but was not matched to this stop."}
 
 
 def test_a_bridge_that_did_not_answer_is_not_an_absence_of_stops():
@@ -651,7 +703,7 @@ def test_a_stop_arrives_redacted_like_every_other_reading(client: TestClient):
 STOP_KEYS = {
     "started_at", "announced_at", "stopped_at",
     "reported_at", "down_seconds", "bugcheck", "no_bugcheck_recorded",
-    "power", "dump", "last_record_before", "last_record_collection", "quiet_seconds", "records",
+    "power", "dump", "dump_inventory_complete", "last_record_before", "last_record_collection", "quiet_seconds", "records",
 }
 
 

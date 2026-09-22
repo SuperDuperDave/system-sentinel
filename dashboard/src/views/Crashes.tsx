@@ -17,13 +17,14 @@ interface Bugcheck {
   bucket: string | null;
 }
 
-/** The dump that belongs to a stop, and how it was matched to it. A file the inventory no longer holds keeps its path and loses its size. */
+/** A matched dump or the reported path, with coverage explaining an unmatched file. */
 interface Dump {
   name: string | null;
   path: string | null;
   bytes: number | null;
   modified: string | null;
   matched_by: string;
+  inventory?: { outcome: string; detail: string };
 }
 
 /** The last System record before the next start; it may be after Windows' stop estimate. */
@@ -48,6 +49,7 @@ interface Stop {
   last_record_collection?: { outcome: string; returned: number; error: string | null };
   power: { sleep_in_progress?: unknown; power_button_timestamp?: unknown; whea_boot_error_count?: unknown; boot_app_status?: unknown; checkpoint?: unknown } | null;
   dump: Dump | null;
+  dump_inventory_complete?: boolean;
   last_record_before: LastRecord | null;
   quiet_seconds: number | null;
   records: { start: number | null; power_41: number | null; eventlog_6008: number | null; wer_1001: number | null; report: number[] };
@@ -265,6 +267,7 @@ export function Crashes() {
         controls={dumps.reading ? <AddToStack item={{ kind: 'reading', envelope: dumps.reading, title: 'Crash dump inventory' }} /> : null}
       >
         <OutcomeLine taken={dumps} noun="dump files" singular="dump file" emptyText="No dump files under the Windows dump locations" />
+        <DumpCoverage reading={dumps.reading} />
         {observed(dumps.reading) && dumpPath && !files.some((file) => file.path === dumpPath) ? <p ref={missingDumpRef} className={`${styles.selectionMissing} readout`} role="status" tabIndex={-1}>The previously selected dump file is not in this returned inventory.</p> : null}
         <div ref={dumpRowsRef}>
         {observed(dumps.reading) && files.length > 0
@@ -496,11 +499,11 @@ function StopDetail({ stop, envelope }: { stop: Stop; envelope: Reading | null }
         : stop.no_bugcheck_recorded ? <span className={styles.quiet}>none recorded: the Kernel-Power 41 carried bug check code 0</span> : <Value value={null} />,
     ]);
   }
-  rows.push(['Dump', stop.dump ? <Value value={stop.dump.name} /> : <span className={styles.quiet}>none matched</span>]);
+  rows.push(['Dump', stop.dump ? <Value value={stop.dump.name} /> : <span className={styles.quiet}>{stop.dump_inventory_complete ? 'No dump matched in the observed inventory' : 'No dump matched in the returned inventory; coverage is incomplete'}</span>]);
   if (stop.dump) {
     rows.push(['Dump file', <span className={styles.path}>{stop.dump.path}</span>]);
-    rows.push(['Dump size', stop.dump.bytes == null ? <span className={styles.quiet}>the report named it; the inventory does not hold it</span> : <Value value={size(stop.dump.bytes)} />]);
-    rows.push(['Matched by', <Value value={stop.dump.matched_by} />]);
+    rows.push(['Dump size', stop.dump.bytes == null ? <span className={styles.quiet}>{stop.dump.inventory?.detail ?? 'The report named this path; no matched file metadata was returned.'}</span> : <Value value={size(stop.dump.bytes)} />]);
+    rows.push(['Matched by', <Value value={stop.dump.matched_by === 'time' ? `time · newest matching returned file${stop.dump_inventory_complete ? '' : '; inventory incomplete'}` : stop.dump.matched_by} />]);
   }
   if (stop.last_record_before) {
     const last = stop.last_record_before;
@@ -526,6 +529,22 @@ function StopDetail({ stop, envelope }: { stop: Stop; envelope: Reading | null }
       </div>
     </>
   );
+}
+
+/** Keep each location's observation available beside the files or inspection it supports. */
+function DumpCoverage({ reading }: { reading: Reading | null }) {
+  const collection = part<{ complete: boolean; locations: { id: string; path: string | null; outcome: string; present: boolean | null; returned: number }[] }>(reading, 'collection');
+  if (!collection?.locations) return null;
+  return <details className={styles.rawDisclosure}>
+    <summary>{collection.complete ? 'Dump locations checked' : 'Dump locations · incomplete coverage'}</summary>
+    <Facts rows={collection.locations.map((source) => [
+      ({ minidump: 'Minidump', memory: 'Memory dump', live_kernel: 'Live kernel' } as Record<string, string>)[source.id] ?? source.id,
+      <span>{source.outcome === 'ok' ? `${source.returned} ${source.returned === 1 ? 'file' : 'files'} listed`
+        : source.outcome === 'empty' ? source.present === false ? 'Location not present' : 'No dump files found'
+        : `${source.outcome === 'denied' ? 'Access denied' : 'Could not fully read'} · ${source.returned} files listed; other files may be unseen`}
+        {source.path ? <><br /><span className={`${styles.path} ${styles.quiet}`}>{source.path}</span></> : null}</span>,
+    ])} />
+  </details>;
 }
 
 /** Read just the selected file's header when the person opens its detail. */
@@ -562,7 +581,8 @@ function DumpHeaderDetail({ path }: { path: string }) {
   return (
     <>
       <p className="label">Inside the dump</p>
-      <OutcomeLine taken={taken} noun="dump inspection" emptyText="This file is no longer in the dump inventory" />
+      <OutcomeLine taken={taken} noun="dump inspection" emptyText="No exact match in the observed dump inventory" />
+      <DumpCoverage reading={taken.reading} />
       {observed(taken.reading) && info ? <Facts rows={rows} /> : null}
       {observed(taken.reading) && info?.directory_status ? <DumpStreamDirectory status={info.directory_status} declared={info.streams} streams={streams} /> : null}
       {observed(taken.reading) && raw.length > 0 ? (

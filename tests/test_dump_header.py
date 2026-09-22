@@ -11,6 +11,7 @@ from sentinel.bridge import BridgeResult
 from sentinel.readings.dump_header import MAX_STREAMS, PREFIX_BYTES, decode_prefix, dump_header_script, take_dump_header
 from sentinel.redact import Redactor
 from tests.conftest import FakeBridge
+from tests.test_dump_inventory import dump_inventory
 
 PATH = r"C:\Windows\Minidump\example.dmp"
 
@@ -44,14 +45,14 @@ def test_short_or_other_format_never_invents_a_bugcheck():
 
 def test_one_selected_dump_is_opened_only_after_inventory_match():
     script = dump_header_script(PATH)
-    assert "$file = & {" in script and "Where-Object { $_.path -ieq $selected }" in script
+    assert "$inventory = & {" in script and "Where-Object { $_.path -ieq $selected }" in script
     assert "$stream.Read($buffer, $read, $length - $read)" in script
     assert f"[Math]::Min($lengthBefore, {PREFIX_BYTES})" in script
     assert f"$count -gt {MAX_STREAMS}" in script
     assert "$directory = Read-At $rva" in script
     assert "[IO.File]::Open($file.path" in script
     assert "[IO.File]::Open($selected" not in script
-    assert "C:\\Windows\\Minidump\\*.dmp" in script
+    assert "Join-Path $env:SystemRoot 'Minidump'" in script
     with pytest.raises(ValueError):
         dump_header_script("")
     with pytest.raises(ValueError):
@@ -61,16 +62,49 @@ def test_one_selected_dump_is_opened_only_after_inventory_match():
 
 def test_denial_and_bridge_failure_carry_no_false_sections():
     denied = take_dump_header(FakeBridge(BridgeResult("ok", items=[{"status": "denied"}])), {"path": PATH})
-    assert denied.outcome == "denied" and not denied.observed and denied.sections == []
+    assert denied.outcome == "denied" and not denied.observed and [s.name for s in denied.sections] == ["collection"]
     unavailable = take_dump_header(FakeBridge(BridgeResult("unavailable", error="interop down")), {"path": PATH})
     assert unavailable.outcome == "unavailable" and unavailable.sections == []
 
 
+@pytest.mark.parametrize(("failed_location", "expected"), [("minidump", "denied"), ("live_kernel", "empty")])
+def test_unlisted_header_path_depends_on_its_own_location(failed_location, expected):
+    coverage = dump_inventory()
+    source = next(row for row in coverage["locations"] if row["id"] == failed_location)
+    source.update(outcome="denied", present=None, error_count=1, errors=[{"kind": "denied", "detail": "synthetic denial"}])
+    item = {"status": "not_inventoried", "inventory": coverage}
+    reading = take_dump_header(FakeBridge(BridgeResult("ok", items=[item])), {"path": PATH})
+    assert reading.outcome == expected
+    assert reading.count == (0 if expected == "empty" else None)
+    assert reading.section("collection").data["complete"] is False
+    assert reading.section("header") is None and reading.warnings
+    if expected == "denied":
+        assert "unknown" in reading.error["detail"]
+
+
+@pytest.mark.parametrize("result", [BridgeResult("empty"), BridgeResult("ok", items=[{"status": "not_inventoried"}])])
+def test_missing_inventory_answer_cannot_establish_that_a_dump_is_gone(result):
+    reading = take_dump_header(FakeBridge(result), {"path": PATH})
+    assert reading.outcome == "failed" and reading.count is None
+    assert reading.section("header") is None
+
+
+def test_read_header_survives_unrelated_inventory_denial():
+    item = mdmp_item()
+    source = next(row for row in item["inventory"]["locations"] if row["id"] == "live_kernel")
+    source.update(outcome="denied", present=None, error_count=1, errors=[{"kind": "denied", "detail": "synthetic denial"}])
+    reading = take_dump_header(FakeBridge(BridgeResult("ok", items=[item])), {"path": PATH})
+    assert reading.outcome == "ok" and reading.count == 1 and reading.warnings
+    assert reading.section("inspection").data["exception"]["name"] == "access violation"
+    assert reading.section("collection").data["complete"] is False
+
+
 def test_a_read_header_has_raw_provenance_and_separate_interpretation():
     item = {"status": "ok", "name": "example.dmp", "path": PATH, "bytes": 4096, "modified": "2026-09-21T00:00:00Z", "prefix": base64.b64encode(header()).decode()}
+    item["inventory"] = dump_inventory([item])
     reading = take_dump_header(FakeBridge(BridgeResult("ok", items=[item])), {"path": PATH})
     assert reading.outcome == "ok" and reading.count == 1
-    assert [(s.name, s.cls) for s in reading.sections] == [("file", "raw"), ("header", "raw"), ("inspection", "derived")]
+    assert [(s.name, s.cls) for s in reading.sections] == [("file", "raw"), ("header", "raw"), ("inspection", "derived"), ("collection", "raw")]
     assert reading.section("inspection").data["bugcheck"]["code"] == "0x00000124"
     assert "prefix" not in reading.section("file").data
     assert reading.section("header").data["bytes_hex"] == header().hex(" ")
@@ -90,7 +124,7 @@ def mdmp_item() -> dict:
     struct.pack_into("<HHHBBIIIIII", data, 512, 9, 6, 0, 16, 1, 10, 0, 26200, 2, 0, 0)
     struct.pack_into("<I", data, 600, 12)
     struct.pack_into("<I", data, 604, 0)
-    return {
+    item = {
         "status": "ok", "name": "example.dmp", "path": PATH, "bytes": len(data), "modified": "2026-09-21T00:00:00Z",
         "prefix": base64.b64encode(data[:PREFIX_BYTES]).decode(),
         "directory": base64.b64encode(data[128:176]).decode(), "directory_status": "ok",
@@ -101,6 +135,8 @@ def mdmp_item() -> dict:
             {"index": 3, "data": base64.b64encode(data[604:608]).decode()},
         ],
     }
+    item["inventory"] = dump_inventory([item])
+    return item
 
 
 def test_minidump_exposes_bounded_raw_streams_and_a_useful_summary():
@@ -108,7 +144,7 @@ def test_minidump_exposes_bounded_raw_streams_and_a_useful_summary():
     reading = take_dump_header(FakeBridge(BridgeResult("ok", items=[item])), {"path": PATH})
     assert reading.outcome == "ok" and not reading.warnings
     assert [(section.name, section.cls) for section in reading.sections] == [
-        ("file", "raw"), ("header", "raw"), ("streams", "raw"), ("inspection", "derived"),
+        ("file", "raw"), ("header", "raw"), ("streams", "raw"), ("inspection", "derived"), ("collection", "raw"),
     ]
     raw = reading.section("streams").data
     assert raw["offset"] == 128 and len(raw["entries"]) == 4

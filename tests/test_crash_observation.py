@@ -66,7 +66,14 @@ def _body(mode: str, source: str) -> str:
 
 def _take(monkeypatch: pytest.MonkeyPatch, system: str, reports: str, *, before: str = "no_match", moment: str = "", count: int = 1) -> Reading:
     monkeypatch.setattr(sentinel.bridge, "POOL_SIZE", 0)
-    monkeypatch.setattr(crash, "DUMPS_SCRIPT", "return")
+    monkeypatch.setattr(crash, "DUMPS_SCRIPT", r"""
+[pscustomobject]@{ locations = @(
+    foreach ($spec in @(@{id='minidump'; leaf='Minidump'}, @{id='memory'; leaf='MEMORY.DMP'}, @{id='live_kernel'; leaf='LiveKernelReports'})) {
+        [pscustomobject]@{ id=$spec.id; path=(Join-Path $env:SystemRoot $spec.leaf); recursive=($spec.id -eq 'live_kernel');
+            present=$false; outcome='empty'; returned=0; files=@(); error_count=0; errors=@() }
+    }
+) }
+""")
     # CmdletBinding supplies ErrorAction; no branch delegates to the real Get-WinEvent.
     # The XML text distinguishes the two primary queries from the per-anchor lookup.
     script = (

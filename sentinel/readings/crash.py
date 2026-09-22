@@ -29,8 +29,8 @@ from typing import Any
 
 from ..bridge import Bridge
 from ..reading import Param, Reading, Section, Spec, from_bridge, from_object, register
+from .dumps import DUMPS_SCRIPT, inventory, missing_file
 from .events import _utc_stamp, record_projection, since_clause, winevent
-from .system import DUMPS_SCRIPT
 
 # The providers, spelled once. The same event id means different things under different providers:
 # 1001 is a bug check under WER-SystemErrorReporting and a report of any kind under Windows Error
@@ -265,11 +265,13 @@ STOPS_BASIS = (
     "larger count. started_at is the start's StartTime, stopped_at is Windows' own estimate from the 6008's binary "
     "value, reported_at is when the report was filed, and last_record_before is the last System record before the "
     "start of a stop the 41 announced. The dump is the file the 1001 names, else a .dmp the report attached, else "
-    "the newest dump written between the stop and half an hour past the start or the report, because the file is "
+    "the newest returned dump written between the stop and half an hour past the start or the report, because the file is "
     "written while the machine comes back; matched_by says which. Collection names each event-log query's "
     "outcome and bound. Missing queries preserve surviving evidence; no_bugcheck_recorded is null when "
     "incomplete queries cannot establish absence, and last_record_collection distinguishes a failed lookup "
-    "from an observed empty one."
+    "from an observed empty one. Dump locations carry their own coverage; an unmatched reported path "
+    "keeps its inventory outcome, without treating an unread location as an absent file. Each stop's "
+    "dump_inventory_complete qualifies a missing or time-matched dump when any location was unreadable."
 )
 
 FAULTS_BASIS = (
@@ -560,8 +562,8 @@ try {
     if ($reports_outcome -ne 'empty') { $reports_error = $_.Exception.Message }
 }
 
-$dumps = @()
-try { $dumps = @(& { {dumps} }) }
+$dump_inventory = $null
+try { $dump_inventory = & { {dumps} } }
 catch { $warnings += "The dump inventory did not read: $($_.Exception.Message)" }
 
 # The last System record before each next start: the last record before the start that announced it, or
@@ -603,7 +605,7 @@ foreach ($stop in $announced) {
 [pscustomobject]@{
     system   = $system
     reports  = $reports
-    dumps    = $dumps
+    dump_inventory = $dump_inventory
     before   = $before
     warnings = $warnings
     collection = [pscustomobject]@{
@@ -722,7 +724,7 @@ def compose(payload: dict[str, Any], count: int, moment: str | None) -> dict[str
     collection: dict[str, Any] = {}
     collection["system"], system = _query_result(coverage.get("system"), payload.get("system"), record_cap(count, moment))
     collection["reports"], reports = _query_result(coverage.get("reports"), payload.get("reports"), 3 * count + 6)
-    dumps = list(payload.get("dumps") or [])
+    dumps, collection["dumps"], dump_warnings = inventory(payload.get("dump_inventory"))
     before: dict[Any, dict[str, Any]] = {}
     before_collection: dict[Any, dict[str, Any]] = {}
     before_rows = payload.get("before")
@@ -744,6 +746,7 @@ def compose(payload: dict[str, Any], count: int, moment: str | None) -> dict[str
     collection["before"] = list(before_collection.values())
     records = system + reports
     warnings = [f"{label} did not answer: {collection[name]['error']}" for name, label in (("system", "System stop records"), ("reports", "Application bug check reports")) if not _observed(collection[name])]
+    warnings.extend(dump_warnings)
     warnings.extend(f"The record before start {source['anchor']} did not answer: {source['error']}" for source in collection["before"] if not _observed(source))
 
     found = sessions(system)
@@ -788,6 +791,14 @@ def compose(payload: dict[str, Any], count: int, moment: str | None) -> dict[str
         warnings.append("the bug check report bound was reached; older or later reports may be outside this reading")
 
     for stop in stops:
+        stop["dump_inventory_complete"] = collection["dumps"]["complete"]
+        dump = stop["dump"]
+        if dump and dump["bytes"] is None:
+            if any(_path_key(file["path"]) == _path_key(dump["path"]) for file in dumps):
+                outcome, detail = "ok", "A file with this path is inventoried, but was not matched to this stop."
+            else:
+                outcome, detail = missing_file(dump["path"], collection["dumps"])
+            dump["inventory"] = {"outcome": outcome, "detail": detail}
         stop.pop("_at", None)
         stop.pop("_session", None)
     return {"records": records, "decoded": [decode(r) for r in records], "stops": stops, "warnings": warnings, "collection": collection}
@@ -1000,8 +1011,7 @@ def _dump_from_report(facts: dict[str, Any], dumps: list[dict[str, Any]], at: An
 
 
 def _dump_entry(path: str, dumps: list[dict[str, Any]], matched_by: str) -> dict[str, Any]:
-    """A file the inventory holds, or the path alone: the report named it and the disk no longer
-    has it, which is a different fact from no dump at all."""
+    """A matched file or the reported path alone; collection coverage qualifies an unmatched path."""
     found = {_path_key(f.get("path")): f for f in dumps}.get(_path_key(path))
     if found:
         return {"name": found.get("name"), "path": found.get("path"), "bytes": found.get("bytes"), "modified": found.get("modified"), "matched_by": matched_by}
@@ -1143,7 +1153,7 @@ def take_crash(bridge: Bridge, params: dict[str, Any]) -> Reading:
         stops = composed.get("stops") or []
         reading.count = len(stops)
         reading.warnings.extend(composed.get("warnings") or [])
-        failures = [source for name, source in composed["collection"].items() if name != "before" and not _observed(source)]
+        failures = [composed["collection"][name] for name in ("system", "reports") if not _observed(composed["collection"][name])]
         if stops:
             reading.outcome = "ok"
         elif failures:

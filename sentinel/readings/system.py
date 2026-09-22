@@ -4,8 +4,7 @@
 fingerprint and the configuration, with the observations that follow from the
 configuration kept apart from it. The five ``hardware.*`` readings are the deep
 look at one subsystem each, taken on demand because each costs seconds.
-``drivers`` is what was most recently signed and dated; ``dumps`` is what the
-machine wrote down when it fell over.
+``drivers`` is what was most recently signed and dated.
 
 Every script here returns what Windows said and nothing else. The arithmetic and
 the observations are made below, in Python, where one function holds each rule
@@ -14,9 +13,7 @@ that otherwise answered comes back in the payload's ``warnings`` and is lifted
 into the envelope: an absence the tool could not look at is never silent.
 
 The queries are the old backend's, kept where they answer: ``collectors/system.py``,
-``services/system_info.py``, ``services/domains/hardware/`` and ``collectors/dumps.py``.
-The dump inventory is a PowerShell query rather than a directory walk, so nothing
-in Python touches the filesystem and a WSL path never has to become a Windows one.
+``services/system_info.py`` and ``services/domains/hardware/``.
 """
 
 from __future__ import annotations
@@ -424,29 +421,6 @@ Get-CimInstance Win32_PnPSignedDriver -ErrorAction Stop |
     )
 
 
-DUMPS_SCRIPT = r"""
-$found = @()
-foreach ($spec in @('C:\Windows\Minidump\*.dmp', 'C:\Windows\MEMORY.DMP')) {
-    $found += @(Get-ChildItem -Path $spec -File -ErrorAction SilentlyContinue)
-}
-$walk = $null
-$found += @(Get-ChildItem -Path 'C:\Windows\LiveKernelReports' -Recurse -File -Filter '*.dmp' -ErrorAction SilentlyContinue -ErrorVariable walk)
-foreach ($e in @($walk)) {
-    if ($e.CategoryInfo.Category -eq 'PermissionDenied') {
-        [Console]::Error.WriteLine('LiveKernelReports: a folder could not be read (permission denied).')
-    }
-}
-$found | Sort-Object LastWriteTimeUtc -Descending | ForEach-Object {
-    [pscustomobject]@{
-        name     = $_.Name
-        path     = $_.FullName
-        bytes    = $_.Length
-        modified = $_.LastWriteTimeUtc.ToString('o')
-    }
-}
-"""
-
-
 # ---------------------------------------------------------------------------
 # Arithmetic the derived sections are made of
 # ---------------------------------------------------------------------------
@@ -780,11 +754,6 @@ def take_drivers(bridge: Bridge, params: dict[str, Any]) -> Reading:
     return from_bridge("drivers", params, script, result, section="drivers")
 
 
-def take_dumps(bridge: Bridge, params: dict[str, Any]) -> Reading:
-    result = bridge.run(DUMPS_SCRIPT)
-    return from_bridge("dumps", params, DUMPS_SCRIPT, result, section="files")
-
-
 # ---------------------------------------------------------------------------
 # The catalog
 # ---------------------------------------------------------------------------
@@ -867,14 +836,5 @@ register(
         classes=("raw",),
         take=take_drivers,
         params=(Param("count", "int", 30, "How many of the most recently dated drivers."),),
-    )
-)
-
-register(
-    Spec(
-        name="dumps",
-        description="The crash-dump inventory: what is under the Windows minidump, full dump and live kernel report locations, newest first. An empty inventory is a finding.",
-        classes=("raw",),
-        take=take_dumps,
     )
 )

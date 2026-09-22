@@ -21,6 +21,7 @@ from sentinel.bridge import BridgeResult
 from sentinel.reading import REGISTRY, take
 from sentinel.readings import system as system_readings
 from tests.conftest import FakeBridge, real_bridge_or_skip
+from tests.test_dump_inventory import dump_inventory
 
 HARDWARE_DOMAINS = ("hardware.cpu", "hardware.gpu", "hardware.board", "hardware.storage", "hardware.network")
 
@@ -393,15 +394,15 @@ DUMP_FILES = [
 
 
 def test_dumps_lists_the_files_windows_wrote():
-    r = taken("dumps", FakeBridge(BridgeResult("ok", items=DUMP_FILES, took_ms=300)))
-    assert classes(r) == {"files": "raw"}
+    r = taken("dumps", FakeBridge(BridgeResult("ok", items=[dump_inventory(DUMP_FILES)], took_ms=300)))
+    assert classes(r) == {"files": "raw", "collection": "raw"}
     row = r.section("files").data[0]
     assert set(row) == {"name", "path", "bytes", "modified"}
     assert row["path"].startswith("C:\\Windows")  # kept: a path under Windows is not a person's path
 
 
 def test_an_empty_inventory_is_a_finding_not_a_failure():
-    r = taken("dumps", FakeBridge(BridgeResult("empty", took_ms=120)))
+    r = taken("dumps", FakeBridge(BridgeResult("ok", items=[dump_inventory()], took_ms=120)))
     assert r.outcome == "empty" and r.observed
     assert r.section("files").data == [] and r.count == 0
     assert r.error is None
