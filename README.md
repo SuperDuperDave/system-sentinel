@@ -36,6 +36,7 @@ Opening Performance also asks Windows which processes are using CPU time, privat
 | --- | --- |
 | `events`, `record` | Records from the System and Application logs by level, from a moment or from this session's start, and the records *before* a moment |
 | `crash`, `faults` | The stops the machine did not plan, each composed into one: when it stopped as Windows estimated it, when it came back, the bug check if one was written, the dump that belongs to it and the last System record before the next start — and, while it kept running, the programs that crashed or hung and the kernel's own live reports |
+| `changes` | On-demand Windows Update results, device configuration and MSI installation/removal results before a moment, with each log's coverage and safe raw event fields; available to the API and agents while its view is being designed |
 | `whea`, `storms` | Hardware-error records with their binary payload decoded beside them, and the same records over a window in wall-clock buckets, grouped by signature, with burst and acceleration flags |
 | `dumps`, `dump_header` | The crash-dump inventory and an on-demand structural readout of one file: its exact header bytes, kernel bug check or minidump streams and exception, with the raw readout available in Crashes |
 | `system`, `hardware`, `hardware.cpu`, `.gpu`, `.board`, `.storage`, `.network`, `drivers` | The snapshot, the fingerprint and configuration, one subsystem at a time, and the current signed driver inventory |

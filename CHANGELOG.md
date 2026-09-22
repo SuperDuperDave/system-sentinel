@@ -3,6 +3,7 @@
 ## [Unreleased] - 2026-09-22
 
 ### Added
+- An on-demand `changes` reading brings Windows Update results, device configuration records and MSI installation/removal results into one time-ordered answer before a chosen moment. Each log reports its own read outcome, retention reach and truncation. Raw rows keep only safe projected event fields with exact log and RecordId references; decoded entries label unsupported layouts and never treat proximity as a cause.
 - Application crash and hang details now expose supported process IDs and interpreted creation times, with exact FILETIME values, source layout, independent validity and explicit limits. Unknown layouts and malformed values keep their raw evidence; inconsistent timestamps are flagged without being discarded.
 - Recorded process identity in minidump inspection: process ID and creation time when their validity flags permit, with one-second time precision and the exact 24-byte metadata prefix retained for review. CPU times and unused fields remain in the raw evidence; PID reuse and timestamp precision still limit cross-record matching.
 - Application dumps from the current Windows user's default CrashDumps directory, with explicit location coverage, bounded MDMP interpretation and raw structural evidence. Custom destinations and other accounts remain outside the discovery scope; application files cannot become reboot dump matches.

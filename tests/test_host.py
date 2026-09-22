@@ -469,6 +469,36 @@ def test_process_pressure_answers_with_bounded_numeric_rows_on_windows():
     assert any(row["private_working_set_bytes"] is not None for row in rows)
 
 
+def test_change_history_keeps_log_coverage_and_private_device_ids_out_of_raw_records():
+    from sentinel.readings.changes import _stamp_key
+
+    bridge = real_bridge_or_skip()
+    reading = asyncio.run(take("changes", bridge, {"hours": 168, "count": 20}))
+    assert reading.outcome in OUTCOMES and reading.outcome != "unavailable", (reading.outcome, reading.error)
+    collection = reading.section("collection")
+    assert collection is not None, reading.error
+    assert set(("windows_update", "device_configuration", "msi")) <= set(collection.data)
+    assert all(collection.data[bound].endswith("0000Z") for bound in ("window_start", "window_end"))
+    assert collection.data["windows_update"]["outcome"] in ("ok", "empty")
+    assert collection.data["msi"]["outcome"] in ("ok", "empty")
+    reach = reading.section("coverage").data
+    for name in ("windows_update", "device_configuration", "msi"):
+        source = collection.data[name]
+        assert source["outcome"] in ("ok", "empty", "failed", "denied")
+        assert source["returned"] <= source["limit"] == 20
+        assert source["error"] != "the source result or record projection failed validation", name
+        if source["outcome"] in ("ok", "empty"):
+            oldest, start = _stamp_key(source["log_oldest"]), _stamp_key(collection.data["window_start"])
+            expected_complete = (source["log_enabled"] is True and source["log_mode"] == "Circular" and source["oldest_state"] == "ok" and oldest is not None and start is not None and oldest <= start and not source["truncated"])
+            assert reach[name]["complete"] is expected_complete
+        else:
+            assert reach[name]["complete"] is None
+    records = reading.section("records").data
+    assert all("Message" not in row and "Properties" not in row and "MachineName" not in row for row in records)
+    assert all("DeviceInstanceId" not in row.get("Data", {}) and "ParentDeviceInstanceId" not in row.get("Data", {}) for row in records)
+    assert all(change.get("kind") != "unmapped_event" for change in reading.section("changes").data)
+
+
 def test_process_response_limit_keeps_synthetic_leaders_from_all_three_metrics():
     from sentinel.readings.processes import PROCESS_SCRIPT
 

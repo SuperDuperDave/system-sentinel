@@ -1,0 +1,196 @@
+"""A change timeline must distinguish a logged result from a gap in one of its sources."""
+
+from __future__ import annotations
+
+import pytest
+
+from sentinel.bridge import BridgeResult
+from sentinel.readings.changes import _change, changes_script, take_changes
+from sentinel.redact import redact
+
+BEFORE = "2026-09-22T00:00:00Z"
+START = "2026-09-21T00:00:00Z"
+LOGS = {
+    "windows_update": ("System", "Microsoft-Windows-WindowsUpdateClient", 19),
+    "device_configuration": ("Microsoft-Windows-Kernel-PnP/Configuration", "Microsoft-Windows-Kernel-PnP", 400),
+    "msi": ("Application", "MsiInstaller", 1033),
+}
+
+
+def row(source: str, record_id: int, at: str, data: dict, *, event_id: int | None = None, version: int | None = None) -> dict:
+    log, provider, default_id = LOGS[source]
+    return {
+        "Log": log, "RecordId": record_id, "Id": event_id or default_id, "ProviderName": provider,
+        "Version": version if version is not None else (0 if source == "msi" else 1), "Level": 4,
+        "TimeCreated": at, "Data": data, "FieldCount": len(data), "OmittedFieldCount": 0, "ProjectionError": None,
+    }
+
+
+def source(name: str, records: list[dict] | None = None, *, outcome: str | None = None, truncated: bool = False, oldest: str = "2026-09-20T00:00:00Z") -> dict:
+    records = records or []
+    log = LOGS[name][0]
+    return {
+        "name": name, "log": log, "outcome": outcome or ("ok" if records else "empty"),
+        "error": "synthetic source failure" if outcome in ("failed", "denied") else None,
+        "returned": len(records), "limit": 3, "truncated": truncated, "records": records,
+        "log_enabled": True, "log_mode": "Circular", "log_state": "ok", "log_error": None,
+        "log_oldest": oldest, "oldest_state": "ok", "oldest_error": None,
+    }
+
+
+class FakeBridge:
+    def __init__(self, sources: list[dict]):
+        self.sources = sources
+
+    def run(self, script: str, *, depth: int) -> BridgeResult:
+        assert depth >= 8 and "Get-WinEvent" in script
+        return BridgeResult("ok", items=[{"window_start": START, "window_end": BEFORE, "sources": self.sources}])
+
+
+def take(sources: list[dict]):
+    return take_changes(FakeBridge(sources), {"before": BEFORE, "hours": 24, "count": 3})
+
+
+def test_three_source_results_keep_exact_events_and_explain_what_they_mean():
+    update = row("windows_update", 14, "2026-09-21T20:00:00Z", {"updateTitle": "Synthetic update (KB1234567)"})
+    device = row("device_configuration", 14, "2026-09-21T20:00:01Z", {"DriverName": "oem9.inf", "DriverVersion": "1.2", "DriverProvider": "Example", "DeviceUpdated": "false"})
+    failed_msi = row("msi", 8, "2026-09-21T20:00:02Z", {"[0]": "Example app", "[1]": "2.0", "[2]": "1033", "[3]": "1603", "[4]": "Example"})
+    reading = take([source("windows_update", [update]), source("device_configuration", [device]), source("msi", [failed_msi])])
+    assert reading.outcome == "ok" and reading.count == 3
+    assert [item["ref"] for item in reading.section("changes").data] == [
+        {"log": "System", "record_id": 14},
+        {"log": "Microsoft-Windows-Kernel-PnP/Configuration", "record_id": 14},
+        {"log": "Application", "record_id": 8},
+    ]
+    update_change, device_change, msi_change = reading.section("changes").data
+    assert update_change["kind"] == "update_installed" and update_change["kb"] == "KB1234567"
+    assert device_change["kind"] == "device_configured" and device_change["device_updated"] is False
+    assert device_change["subject"] == "oem9.inf" and device_change["publisher"] == "Example"
+    assert msi_change["kind"] == "msi_install_failed" and msi_change["status"] == 1603 and msi_change["publisher"] == "Example"
+    assert "caused" in reading.section("changes").basis
+
+
+def test_failure_and_retention_are_not_an_observed_absence():
+    reading = take([source("windows_update"), source("device_configuration", outcome="failed"), source("msi")])
+    assert reading.outcome == "failed" and reading.count is None
+    assert reading.section("collection").data["device_configuration"]["outcome"] == "failed"
+    assert any("device_configuration did not answer" in warning for warning in reading.warnings)
+
+    empty = take([source("windows_update"), source("device_configuration", oldest="2026-09-21T12:00:00Z"), source("msi")])
+    assert empty.outcome == "empty" and empty.count == 0
+    assert empty.section("coverage").data["device_configuration"] == {"covered_from": "2026-09-21T12:00:00Z", "covered_from_inclusive": True, "complete": False}
+    assert any("does not cover the whole requested window" in warning for warning in empty.warnings)
+
+
+def test_truncation_and_bad_collector_rows_are_visible():
+    latest = row("windows_update", 10, "2026-09-21T23:00:00Z", {"updateTitle": "Synthetic update"})
+    limited = source("windows_update", [latest], truncated=True)
+    limited["limit"] = 1
+    reading = take_changes(FakeBridge([limited, source("device_configuration"), source("msi")]), {"before": BEFORE, "hours": 24, "count": 1})
+    assert reading.outcome == "ok" and reading.count == 1
+    assert reading.section("coverage").data["windows_update"] == {"covered_from": "2026-09-21T23:00:00Z", "covered_from_inclusive": False, "complete": False}
+    assert any("reached its 1-record limit" in warning for warning in reading.warnings)
+
+    leaked = row("device_configuration", 1, "2026-09-21T10:00:00Z", {"DeviceInstanceId": "USB\\VID_0000\\SERIAL123"})
+    bad = take([source("windows_update"), source("device_configuration", [leaked]), source("msi")])
+    assert bad.outcome == "failed" and bad.count is None
+    assert bad.section("collection").data["device_configuration"]["outcome"] == "failed"
+    redacted, _ = redact(bad.to_dict())
+    assert "SERIAL123" not in str(redacted)
+
+    wrong_count = source("windows_update", [latest])
+    wrong_count["returned"] = 2
+    assert take([wrong_count, source("device_configuration"), source("msi")]).outcome == "failed"
+
+
+def test_unsupported_layout_stays_raw_with_an_error():
+    unsupported = row("msi", 7, "2026-09-21T12:00:00Z", {"[0]": "Example"}, version=1)
+    change = _change(unsupported)
+    assert change["kind"] == "unmapped_event" and change["error"]
+    assert change["fields"] == {"[0]": "Example"}
+
+
+def test_failed_update_and_msi_removal_are_distinct_from_successful_changes():
+    failed_update = row("windows_update", 6, "2026-09-21T12:00:00Z", {"updateTitle": "Synthetic update", "errorCode": "0x80070002"}, event_id=20)
+    removed = row("msi", 7, "2026-09-21T12:01:00Z", {"[0]": "Example", "[1]": "1.0", "[2]": "1033", "[3]": "3010", "[4]": "Example"}, event_id=1034)
+    assert _change(failed_update)["kind"] == "update_failed"
+    assert _change(failed_update)["error_code"] == "0x80070002"
+    result = _change(removed)
+    assert result["kind"] == "msi_removal_succeeded" and result["succeeded"] is True and result["status"] == 3010
+    assert result["restart"] == "required"
+    initiated = row("msi", 8, "2026-09-21T12:02:00Z", {"[0]": "Example", "[1]": "1.0", "[2]": "1033", "[3]": "1641", "[4]": "Example"})
+    assert _change(initiated)["restart"] == "initiated"
+
+
+def test_seven_digit_utc_fractions_do_not_invent_a_retention_gap():
+    start = "2026-09-21T00:00:00.1234567Z"
+    oldest = "2026-09-20T00:00:00.1234567Z"
+    bridge = FakeBridge([source(name, oldest=oldest) for name in LOGS])
+    bridge.run = lambda script, *, depth: BridgeResult("ok", items=[{"window_start": start, "window_end": BEFORE, "sources": bridge.sources}])
+    reading = take_changes(bridge, {"before": BEFORE, "hours": 24, "count": 3})
+    assert reading.outcome == "empty" and not reading.warnings
+    assert all(reach == {"covered_from": start, "covered_from_inclusive": True, "complete": True} for reach in reading.section("coverage").data.values())
+    assert all("covered_from" not in raw for raw in reading.section("collection").data.values() if isinstance(raw, dict))
+
+
+def test_seventh_digit_changes_reach_and_rejects_a_row_before_the_window():
+    start = "2026-09-21T00:00:00.1234561Z"
+    oldest = "2026-09-21T00:00:00.1234560Z"
+    bridge = FakeBridge([source(name, oldest=oldest) for name in LOGS])
+    bridge.run = lambda script, *, depth: BridgeResult("ok", items=[{"window_start": start, "window_end": BEFORE, "sources": bridge.sources}])
+    reading = take_changes(bridge, {"before": BEFORE, "hours": 24, "count": 3})
+    assert reading.section("coverage").data["windows_update"] == {"covered_from": start, "covered_from_inclusive": True, "complete": True}
+
+    old_row = row("windows_update", 2, oldest, {"updateTitle": "Synthetic update"})
+    bridge.sources[0] = source("windows_update", [old_row], oldest=oldest)
+    failed = take_changes(bridge, {"before": BEFORE, "hours": 24, "count": 3})
+    assert failed.section("collection").data["windows_update"]["outcome"] == "failed"
+    assert failed.section("coverage").data["windows_update"]["complete"] is None
+
+    later_oldest = "2026-09-21T00:00:00.1234562Z"
+    bridge.sources[0] = source("windows_update", oldest=later_oldest)
+    limited = take_changes(bridge, {"before": BEFORE, "hours": 24, "count": 3})
+    assert limited.section("coverage").data["windows_update"] == {"covered_from": later_oldest, "covered_from_inclusive": True, "complete": False}
+
+
+@pytest.mark.parametrize("metadata_key, metadata_value", [("log_enabled", False), ("log_mode", "AutoBackup"), ("oldest_state", "failed")])
+def test_an_empty_source_without_retention_evidence_is_not_complete(metadata_key: str, metadata_value: object):
+    uncertain = source("windows_update")
+    uncertain[metadata_key] = metadata_value
+    reading = take([uncertain, source("device_configuration"), source("msi")])
+    assert reading.outcome == "empty"
+    assert reading.section("coverage").data["windows_update"] == {"covered_from": None, "covered_from_inclusive": None, "complete": False}
+    assert any("windows_update does not cover" in warning for warning in reading.warnings)
+
+
+def test_a_failed_source_has_unknown_reach_and_surviving_records_remain_useful():
+    install = row("msi", 3, "2026-09-21T12:00:00Z", {"[0]": "Example", "[1]": "1.0", "[2]": "1033", "[3]": "0", "[4]": "Example"})
+    reading = take([source("windows_update", outcome="denied"), source("device_configuration"), source("msi", [install])])
+    assert reading.outcome == "ok" and reading.count == 1
+    assert reading.section("coverage").data["windows_update"] == {"covered_from": None, "covered_from_inclusive": None, "complete": None}
+    assert any("windows_update did not answer" in warning for warning in reading.warnings)
+
+
+def test_duplicate_source_results_and_projection_errors_never_claim_a_clean_history():
+    duplicated = take([source("windows_update"), source("windows_update"), source("device_configuration"), source("msi")])
+    assert duplicated.outcome == "failed" and duplicated.count is None
+    assert duplicated.section("collection").data["windows_update"]["outcome"] == "failed"
+
+    projected = row("windows_update", 9, "2026-09-21T12:00:00Z", {})
+    projected["ProjectionError"] = "the event data could not be projected"
+    reading = take([source("windows_update", [projected]), source("device_configuration"), source("msi")])
+    assert reading.outcome == "ok" and reading.count == 1
+    assert reading.section("changes").data[0]["kind"] == "unmapped_event"
+    assert reading.section("changes").data[0]["error"] == projected["ProjectionError"]
+
+
+def test_window_and_count_are_bounded_in_the_log_query():
+    script = changes_script(BEFORE, 24, 3)
+    assert "$until = $until.AddTicks(-($until.Ticks % 10000))" in script
+    assert script.count("Get-WinEvent -FilterXml") == 1  # one source query inside a three-source loop
+    assert "Microsoft-Windows-Kernel-PnP/Configuration" in script
+    assert "(EventID=19 or EventID=20)" in script and "(EventID=1033 or EventID=1034)" in script
+    assert "@SystemTime&gt;='$startIso' and @SystemTime&lt;'$endIso'" in script
+    for before, hours, count in (("not a time", 24, 3), (BEFORE, 0, 3), (BEFORE, 24, 501)):
+        with pytest.raises(ValueError):
+            changes_script(before, hours, count)

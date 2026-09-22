@@ -78,6 +78,34 @@ def test_dump_handoff_starts_with_interpretation_and_keeps_raw_bytes_available()
     assert "DE AD BE EF" not in summary and "DE AD BE EF" in full
 
 
+def test_change_handoff_leads_with_meaning_and_keeps_raw_selection_available():
+    envelope = {
+        "reading": "changes", "params": {}, "asked_at": "2026-09-21T00:00:00Z", "outcome": "ok", "count": 1,
+        "method": {"kind": "powershell"},
+        "sections": [
+            {"name": "records", "class": "raw", "data": [{"Log": "System", "RecordId": 7, "Id": 19, "Data": {"updateTitle": "Synthetic update"}}]},
+            {"name": "changes", "class": "derived", "basis": "Synthetic interpretation", "data": [{"at": "2026-09-20T00:00:00Z", "kind": "update_installed", "subject": "Synthetic update", "ref": {"log": "System", "record_id": 7}, "fields": {"updateTitle": "Synthetic update"}}]},
+            {"name": "summary", "class": "derived", "data": {"returned": 1}},
+            {"name": "collection", "class": "raw", "data": {"windows_update": {"outcome": "ok"}}},
+            {"name": "coverage", "class": "derived", "data": {"windows_update": {"complete": False}}},
+        ],
+    }
+    summary = "\n".join(_item_lines(1, {"kind": "reading", "title": "Changes", "reading": envelope, "verbosity": "summary"}))
+    selected = "\n".join(_item_lines(1, {"kind": "reading", "title": "Changes", "reading": envelope, "verbosity": "full", "ids": ["System:7"]}))
+    assert "update_installed" in summary and '"complete": false' in summary
+    assert '"fields"' not in summary and '"Id": 19' not in summary
+    assert "update_installed" in selected and '"Id": 19' in selected
+    assert selected.index('"kind": "update_installed"') < selected.index('"Id": 19')
+
+    malformed = {**envelope, "sections": [*envelope["sections"][:1], {"name": "changes", "class": "derived", "data": [{"ref": None}, 1]}]}
+    safe = "\n".join(_item_lines(1, {"kind": "selection", "title": "Malformed", "reading": malformed, "verbosity": "full", "ids": ["System:7"]}))
+    assert '"Id": 19' in safe
+
+    failed = {**envelope, "outcome": "failed", "error": {"detail": "one source failed"}}
+    unsuccessful = "\n".join(_item_lines(1, {"kind": "reading", "title": "Changes", "reading": failed, "verbosity": "summary"}))
+    assert "one source failed" in unsuccessful and '"complete": false' in unsuccessful
+
+
 def test_the_stack_starts_empty_with_a_prompt_chosen(client: TestClient):
     state = client.get("/api/stack", headers=AUTH).json()
     assert state["items"] == [] and state["system_prompt"] is True

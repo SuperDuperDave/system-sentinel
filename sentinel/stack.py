@@ -371,8 +371,12 @@ def _item_lines(position: int, item: dict[str, Any]) -> list[str]:
     if envelope.get("outcome") not in ("ok", "empty"):
         detail = (envelope.get("error") or {}).get("detail") or ""
         lines += [f"The machine was not observed{': ' + detail if detail else ''}.", ""]
+        if envelope.get("reading") == "changes":
+            lines += _json_block([section for section in envelope.get("sections") or [] if isinstance(section, dict) and section.get("name") in ("collection", "coverage")])
         return lines
-    if selected_signals is not None:
+    if envelope.get("reading") == "changes" and (item.get("verbosity") == "summary" or item.get("ids") is not None):
+        lines += _json_block(_change_handoff_sections(envelope, records if item.get("ids") is not None else None, item.get("verbosity") == "summary"))
+    elif selected_signals is not None:
         if item.get("verbosity") == "summary":
             selected_signals["data"] = [{k: s.get(k) for k in ("id", "class", "title", "summary", "readings")} for s in selected_signals["data"]]
         lines += _json_block(selected_signals)
@@ -412,6 +416,36 @@ def _records(envelope: dict[str, Any]) -> list[dict[str, Any]] | None:
         if isinstance(data, list) and data and all(isinstance(d, dict) and ("RecordId" in d or "TimeCreated" in d) for d in data):
             return data
     return None
+
+
+def _change_handoff_sections(envelope: dict[str, Any], selected: list[dict[str, Any]] | None, compact: bool) -> list[dict[str, Any]]:
+    """Carry interpreted changes and coverage into a handoff, with raw rows for full selections."""
+    wanted = {(row.get("Log"), row.get("RecordId")) for row in selected} if selected is not None else None
+    sections = []
+    raw_section = None
+    for section in envelope.get("sections") or []:
+        if not isinstance(section, dict):
+            continue
+        name = section.get("name")
+        if name == "records" and selected is not None and not compact:
+            raw_section = {**section, "data": selected}
+        elif name == "changes" and isinstance(section.get("data"), list):
+            entries = []
+            for entry in section["data"]:
+                if not isinstance(entry, dict):
+                    continue
+                ref = entry.get("ref")
+                if wanted is None or isinstance(ref, dict) and (ref.get("log"), ref.get("record_id")) in wanted:
+                    entries.append(entry)
+            if compact:
+                display = ("at", "source", "ref", "kind", "subject", "version", "publisher", "kb", "error_code", "status", "succeeded", "restart", "device_updated", "error")
+                entries = [{key: entry[key] for key in display if key in entry and entry[key] is not None} for entry in entries]
+            sections.append({**section, "data": entries})
+        elif name in ("collection", "coverage") or (name == "summary" and selected is None):
+            sections.append(section)
+    if raw_section is not None:
+        sections.append(raw_section)
+    return sections
 
 
 def _signal_section(envelope: dict[str, Any]) -> dict[str, Any] | None:
