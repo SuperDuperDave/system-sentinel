@@ -45,6 +45,7 @@ SUMMARY_FAULT_GROUPS = 10
 SUMMARY_FAULT_MODULES = 5
 SUMMARY_CRASH_ISSUES = 10
 SUMMARY_CRASH_STOPS = 20  # Today's crash.MAX_STOPS; excess saved stops get an explicit omitted count.
+LOG_READINGS = ("events", "record")
 STOP_REF_LOGS = {"start": "System", "power_41": "System", "eventlog_6008": "System", "wer_1001": "System"}
 
 
@@ -402,7 +403,7 @@ async def new_item(stack: Stack, bridge: Bridge, body: dict[str, Any], *, reader
         if kind == "selection":
             ids = _selection_ids(envelope, body.get("ids") or [])
 
-    large_log = bool(kind == "reading" and envelope and envelope.get("reading") in ("events", "record", "whea") and len(_records(envelope) or []) > SUMMARY_LOG_LIMIT)
+    large_log = bool(kind == "reading" and envelope and envelope.get("reading") in (*LOG_READINGS, "whea") and len(_records(envelope) or []) > SUMMARY_LOG_LIMIT)
     derived_summary = bool(kind == "reading" and envelope and envelope.get("reading") in ("storms", "whea_reports", "crash", "faults"))
     verbosity = requested_verbosity or ("summary" if derived_summary or large_log else "full")
 
@@ -478,7 +479,7 @@ def _item_lines(position: int, item: dict[str, Any]) -> list[str]:
     lines.append(f"- outcome: {_outcome_text(envelope)}")
     if isinstance(envelope.get("count"), int):
         lines.append(f"- reading count: {envelope['count']}")
-    if item.get("verbosity") == "summary" and envelope.get("reading") in ("events", "record", "whea", "faults"):
+    if item.get("verbosity") == "summary" and envelope.get("reading") in (*LOG_READINGS, "whea", "faults"):
         cutoff = next((section.get("data") for section in sections if section.get("name") == "collection"), None)
         if isinstance(cutoff, dict) and all(key in cutoff for key in ("limit", "returned", "truncated")):
             truncated = cutoff["truncated"]
@@ -504,7 +505,7 @@ def _item_lines(position: int, item: dict[str, Any]) -> list[str]:
             selected_signals = {**selected_signals, "data": [s for s in selected_signals["data"] if s.get("id") in wanted]}
             lines.append(f"- selected: {len(selected_signals['data'])} of the reading's signals, by signal id")
         elif records is not None:
-            records, ambiguous = _selected_records(records, item["ids"])
+            records, ambiguous = _selected_records(records, item["ids"], _known_log(envelope))
             if ambiguous:
                 lines += ["", "The saved record selection is ambiguous across logs. Select these records again using Log:RecordId.", ""]
                 return lines
@@ -542,6 +543,8 @@ def _item_lines(position: int, item: dict[str, Any]) -> list[str]:
                 lines.append(f"Showing the first and last {SUMMARY_LOG_EDGE} of {len(records)} returned records.")
             lines.append("")
         lines += _json_block(_whea_handoff_sections(envelope, records, compact))
+    elif envelope.get("reading") in LOG_READINGS and records is not None and (item.get("verbosity") == "summary" or item.get("ids") is not None):
+        lines += _log_handoff(envelope, records, selected=item.get("ids") is not None, compact=item.get("verbosity") == "summary")
     elif envelope.get("reading") == "storms" and item.get("verbosity") == "summary":
         lines += ["Bounded storm summary. Set this item to full for its stored buckets and signature samples; take `storms` again for a fresh observation.", ""]
         lines += _json_block(_storm_handoff_sections(envelope))
@@ -561,6 +564,8 @@ def _item_lines(position: int, item: dict[str, Any]) -> list[str]:
     elif item.get("ids") is not None and records is not None:
         lines += _json_block(records)
     else:
+        if item.get("verbosity") == "summary" and envelope.get("reading") not in LOG_READINGS:
+            lines += ["At summary verbosity this observation carries its full stored sections.", ""]
         lines += _json_block(envelope.get("sections") or [])
     lines.append("")
     return lines
@@ -638,6 +643,39 @@ def _source_context(named: dict[str, dict[str, Any]], compact: bool) -> list[dic
         {**named[name], "data": _clip_context(named[name].get("data"))} if compact else named[name]
         for name in ("collection", "coverage") if name in named
     ]
+
+
+def _known_log(envelope: dict[str, Any]) -> str | None:
+    """A single-log reading can identify its rows even when older records omit Log."""
+    if envelope.get("reading") not in LOG_READINGS:
+        return None
+    collection = _named_sections(envelope).get("collection", {}).get("data")
+    log = collection.get("log") if isinstance(collection, dict) else None
+    return log if log in ("System", "Application") else None
+
+
+def _log_handoff(envelope: dict[str, Any], records: list[dict[str, Any]], *, selected: bool, compact: bool) -> list[str]:
+    """Keep log reach beside bounded rows or an exact selected record."""
+    named = _named_sections(envelope)
+    lines: list[str] = []
+    for name in ("collection", "coverage"):
+        if name not in named:
+            lines.append(f"This stored reading has no {name} section; its {'source outcome' if name == 'collection' else 'retention reach'} is unknown.")
+    context = _source_context(named, compact)
+    if selected and compact and context:
+        lines += ["", *_json_block(context)]
+    if compact:
+        if selected:
+            lines.append("")
+        order = "oldest first; every row is strictly before the requested moment" if envelope.get("reading") == "record" else "newest first"
+        lines += [f"Returned rows are {order}.", "", *_log_summary(records, fallback_log=_known_log(envelope))]
+        if not selected and context:
+            lines += ["", *_json_block(context)]
+    elif selected:
+        raw = named.get("records")
+        selected_rows = {**raw, "data": records, "projection": "selected raw records"} if raw else {"name": "records", "class": "raw", "data": records, "projection": "selected raw records"}
+        lines += ["", *_json_block([*context, selected_rows])]
+    return lines
 
 
 def _source_log(row: dict[str, Any], reading: str) -> str | None:
@@ -1078,8 +1116,9 @@ def _canonical_ids(envelope: dict[str, Any], ids: list[int | str] | None) -> tup
     if not ids:
         return ()
     logs: dict[int, set[str]] = {}
+    fallback_log = _known_log(envelope)
     for row in _records(envelope) or []:
-        number, log = _record_id(row), row.get("Log")
+        number, log = _record_id(row), row.get("Log") or fallback_log
         if number is not None and isinstance(log, str) and log:
             logs.setdefault(number, set()).add(log)
     canonical = []
@@ -1113,11 +1152,12 @@ def _selection_ids(envelope: dict[str, Any], raw: Any) -> list[int | str]:
         by_number: dict[int, int] = {}
         canonical_by_number: dict[int, int | str] = {}
         qualified = set()
+        fallback_log = _known_log(envelope)
         for record in records:
             number = _record_id(record)
             if number is not None:
                 by_number[number] = by_number.get(number, 0) + 1
-                key = _qualified_record_id(record)
+                key = _qualified_record_id(record, fallback_log)
                 canonical_by_number[number] = key if key is not None else number
                 if key is not None:
                     qualified.add(key)
@@ -1151,12 +1191,12 @@ def _record_id(record: dict[str, Any]) -> int | None:
         return None
 
 
-def _qualified_record_id(record: dict[str, Any]) -> str | None:
-    log, number = record.get("Log"), _record_id(record)
+def _qualified_record_id(record: dict[str, Any], fallback_log: str | None = None) -> str | None:
+    log, number = record.get("Log") or fallback_log, _record_id(record)
     return f"{log}:{number}" if isinstance(log, str) and log and number is not None else None
 
 
-def _selected_records(records: list[dict[str, Any]], ids: list[int | str]) -> tuple[list[dict[str, Any]], bool]:
+def _selected_records(records: list[dict[str, Any]], ids: list[int | str], fallback_log: str | None = None) -> tuple[list[dict[str, Any]], bool]:
     """Resolve saved selections without silently widening an old numeric ID across logs."""
     numbers: dict[int, int] = {}
     for record in records:
@@ -1174,29 +1214,33 @@ def _selected_records(records: list[dict[str, Any]], ids: list[int | str]) -> tu
                 continue
     if any(numbers.get(number, 0) > 1 for number in numeric):
         return [], True
-    return [record for record in records if _record_id(record) in numeric or _qualified_record_id(record) in qualified], False
+    return [record for record in records if _record_id(record) in numeric or _qualified_record_id(record, fallback_log) in qualified], False
 
 
-def _table(records: list[dict[str, Any]]) -> list[str]:
-    lines = ["| Time | Level | Provider | Id | Message |", "| --- | --- | --- | --- | --- |"]
+def _table(records: list[dict[str, Any]], fallback_log: str | None = None) -> list[str]:
+    lines = ["| Time | Level | Provider | Id | Record | Message |", "| --- | --- | --- | --- | --- | --- |"]
     for record in records:
         message = (record.get("Message") or "").replace("\r", " ").replace("\n", " ").strip()
         clipped = message[:SUMMARY_MESSAGE] + ("…" if len(message) > SUMMARY_MESSAGE else "")
-        cells = [record.get("TimeCreated", ""), record.get("LevelDisplayName", ""), record.get("ProviderName", ""), record.get("Id", ""), clipped]
+        reference = _qualified_record_id(record, fallback_log)
+        if reference is None:
+            number = _record_id(record)
+            reference = str(number) if number is not None else ""
+        cells = [record.get("TimeCreated", ""), record.get("LevelDisplayName", ""), record.get("ProviderName", ""), record.get("Id", ""), reference, clipped]
         lines.append("| " + " | ".join(str(c).replace("|", "\\|") for c in cells) + " |")
     return lines
 
 
-def _log_summary(records: list[dict[str, Any]]) -> list[str]:
+def _log_summary(records: list[dict[str, Any]], *, fallback_log: str | None = None) -> list[str]:
     if len(records) <= SUMMARY_LOG_LIMIT:
-        return _table(records)
+        return _table(records, fallback_log)
     sources = Counter(str(record.get("ProviderName") or "unknown") for record in records)
     leading = ", ".join(f"{name} ({count})" for name, count in sources.most_common(5))
     return [
         f"Showing the first and last {SUMMARY_LOG_EDGE} of {len(records)} returned records. Set this Stack item to full for every stored row.",
         f"Leading sources: {leading}.",
         "",
-        *_table([*records[:SUMMARY_LOG_EDGE], *records[-SUMMARY_LOG_EDGE:]]),
+        *_table([*records[:SUMMARY_LOG_EDGE], *records[-SUMMARY_LOG_EDGE:]], fallback_log),
     ]
 
 

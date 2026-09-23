@@ -16,9 +16,12 @@ from mcp.shared.exceptions import MCPError
 
 from sentinel.app import State, create_app
 from sentinel.bridge import BridgeResult
+from sentinel.reading import take
 from sentinel.readings.crash import STOPS_BASIS
+from sentinel.readings.event_coverage import LOG_WINDOW_COVERAGE_BASIS
+from sentinel.readings.events import RECORD_COVERAGE_BASIS
 from sentinel.stack import PRESET_PROMPTS, STOP_REF_LOGS, Prompts, Stack, _item_lines
-from tests.conftest import FakeBridge, LogBridge, identity_result
+from tests.conftest import FakeBridge, LogBridge, identity_result, log_collector_result
 from tests.test_crash import collection_for, faults_fixture, payload
 from tests.test_crash import crash as take_crash_fixture
 from tests.test_crash import faults as take_faults_fixture
@@ -656,6 +659,81 @@ def test_large_log_defaults_to_a_bounded_summary_with_full_evidence_on_demand(cl
     assert "synthetic row 100" in full
 
 
+def test_log_handoffs_keep_retention_and_citable_rows(client: TestClient):
+    envelope = {
+        "reading": "events", "params": {"log": "System", "count": 2, "since": "boot"},
+        "asked_at": "2026-09-20T19:00:00Z", "outcome": "ok", "method": {"kind": "fixture"}, "count": 2,
+        "error": None, "warnings": [], "redacted": [],
+        "sections": [
+            {"name": "records", "class": "raw", "data": EVENTS},
+            {"name": "collection", "class": "raw", "data": {"log": "System", "limit": 2, "returned": 2, "truncated": False, "log_enabled": True, "log_mode": "Circular"}},
+            {"name": "coverage", "class": "derived", "basis": "Synthetic window reach", "data": {"log": "System", "complete": True, "covered_from": "2026-09-20T18:00:00Z", "retained_from": "2026-09-01T00:00:00Z"}},
+        ],
+    }
+    item = add(client, kind="reading", envelope=envelope, verbosity="summary")
+    summary = client.get("/api/stack/composed", headers=AUTH).json()["text"]
+    assert "| Time | Level | Provider | Id | Record | Message |" in summary
+    assert "System:307001" in summary and '"complete": true' in summary
+    assert '"retained_from": "2026-09-01T00:00:00Z"' in summary and "Synthetic window reach" in summary
+    assert "No bounded summary" not in summary
+    compact_selection = handoff(envelope, ids=["System:307001"])
+    assert "by log and RecordId" in compact_selection
+    assert compact_selection.index('"name": "coverage"') < compact_selection.index("| Time | Level")
+
+    selected = add(client, kind="selection", envelope=envelope, ids=["System:307001"])
+    selected_text = client.get("/api/stack/composed", headers=AUTH).json()["text"]
+    assert selected["verbosity"] == "full" and '"projection": "selected raw records"' in selected_text
+    assert '"RecordId": 307001' in selected_text and '"complete": true' in selected_text
+    duplicate = client.post("/api/stack/items", headers=AUTH, json={"kind": "selection", "envelope": envelope, "ids": [307001]})
+    assert duplicate.status_code == 409 and duplicate.json()["id"] == selected["id"]
+    assert client.patch(f"/api/stack/items/{item['id']}", headers=AUTH, json={"verbosity": "full"}).status_code == 200
+
+
+def test_record_handoff_keeps_before_reach_and_legacy_gaps(client: TestClient):
+    envelope = {
+        "reading": "record", "params": {"log": "Application", "count": 2, "before": "2026-09-20T19:00:00Z"},
+        "asked_at": "2026-09-20T19:00:00Z", "outcome": "ok", "method": {"kind": "fixture"}, "count": 2,
+        "sections": [
+            {"name": "records", "class": "raw", "data": [{**row, "RecordId": index} for index, row in enumerate(EVENTS, 1)]},
+            {"name": "collection", "class": "raw", "data": {"log": "Application", "limit": 2, "returned": 2, "truncated": None, "stopped": {"detail": "interrupted"}}},
+            {"name": "coverage", "class": "derived", "basis": "Synthetic before reach", "data": {"reaches_before": True, "retained_from": "2026-09-01T00:00:00Z"}},
+        ],
+    }
+    summary = handoff(envelope)
+    assert "truncated=unknown (query stopped early)" in summary and "Application:1" in summary
+    assert '"reaches_before": true' in summary and "Synthetic before reach" in summary
+    legacy = {**envelope, "sections": envelope["sections"][:1]}
+    text = handoff(legacy)
+    assert "no collection section" in text and "no coverage section" in text
+    assert "| 1 |" in text and "Application:1" not in text
+    assert client.post("/api/stack/items", headers=AUTH, json={"kind": "selection", "envelope": legacy, "ids": ["Application:1"]}).status_code == 422
+    assert add(client, kind="selection", envelope=legacy, ids=[1])["ids"] == [1]
+
+
+def test_real_log_collector_sections_survive_compact_handoffs():
+    events = asyncio.run(take("events", FakeBridge(log_collector_result(EVENTS, limit=2)), {"count": 2, "since": "2026-09-20T00:00:00Z"})).to_dict()
+    event_handoff = handoff(events)
+    assert LOG_WINDOW_COVERAGE_BASIS in event_handoff
+    assert '"complete": true' in event_handoff and '"queried_at"' in event_handoff
+    assert "Returned rows are newest first." in event_handoff
+
+    record = asyncio.run(take("record", FakeBridge(log_collector_result(EVENTS, limit=2, window_start=None)), {"count": 2, "before": "2026-09-20T19:00:00Z"})).to_dict()
+    record_handoff = handoff(record)
+    assert RECORD_COVERAGE_BASIS in record_handoff
+    assert '"reaches_before": true' in record_handoff and '"window_end"' in record_handoff
+    assert "strictly before the requested moment" in record_handoff
+
+
+def test_unprojected_summary_says_it_carries_full_sections():
+    envelope = {"reading": "health", "params": {}, "asked_at": "2026-09-20T19:00:00Z", "outcome": "ok", "method": {"kind": "fixture"},
+                "sections": [{"name": "status", "class": "derived", "data": {"alive": True}}]}
+    assert "summary verbosity this observation carries its full stored sections" in handoff(envelope).lower()
+    assert '"alive": true' in handoff(envelope)
+    assert "summary verbosity" not in handoff(envelope, verbosity="full").lower()
+    empty_whea = {**envelope, "reading": "whea", "outcome": "empty", "sections": [{"name": "records", "class": "raw", "data": []}]}
+    assert "summary verbosity this observation carries its full stored sections" in handoff(empty_whea).lower()
+
+
 def test_crash_summary_carries_stops_and_coverage_without_raw_event_rows(client: TestClient):
     envelope = crash_envelope(incomplete_reports=True)
     stops = next(section["data"] for section in envelope["sections"] if section["name"] == "stops")
@@ -674,7 +752,7 @@ def test_crash_summary_carries_stops_and_coverage_without_raw_event_rows(client:
     assert '"bound_reached": false' in summary and '"retained_from"' in summary
     assert "Display driver nvlddmkm" in summary
     assert '"Properties"' not in summary and '"Properties"' in full
-    assert "| Time | Level | Provider | Id | Message |" not in summary
+    assert "| Time | Level | Provider | Id | Record | Message |" not in summary
     issues = next(section for section in projected_sections(summary) if section["name"] == "decode_issues")
     assert issues["basis"] and issues["data"]["available"] is True
 
@@ -819,7 +897,7 @@ def test_the_composed_handoff(client: TestClient):
     assert "- record cutoff: limit=2, returned=2, truncated=" in text
     assert "- method: powershell" in text and "- class: raw" in text and "- kind: selection" in text
 
-    assert "| Time | Level | Provider | Id | Message |" in text
+    assert "| Time | Level | Provider | Id | Record | Message |" in text
     assert "| 2026-09-20T18:04:11.204Z | Critical | Microsoft-Windows-Kernel-Power | 41 |" in text
     assert "shutting down first. \\| on <host> for <us…" in text  # the message's own pipe cannot break the table; 80 characters of it are carried
     assert "TESTBOX" not in text and "tester" not in text
