@@ -195,7 +195,9 @@ def test_an_exact_whea_report_keeps_previous_session_meaning_in_compact_and_sele
         "sections": [
             {"name": "records", "class": "raw", "data": [record]},
             {"name": "identity", "class": "derived", "data": [
-                {"Log": channel, "RecordId": 73, "cper": {"severity": "fatal", "previous_session": True}}
+                {"Log": channel, "RecordId": 73, "cper": {"severity": "fatal", "previous_session": True,
+                 "header_time": {"bytes": "2218160018031A14", "as_integers": "2026-03-24T22:24:34",
+                                 "as_bcd": None, "reading": "as_integers", "precise": False, "reserved_bits": False}}}
             ]},
             {"name": "decoded", "class": "derived", "data": [{"Log": channel, "RecordId": 73, "error": "detail decoding deferred"}]},
             {"name": "collection", "class": "raw", "data": {"source": "kernel_whea", "outcome": "ok"}},
@@ -203,10 +205,12 @@ def test_an_exact_whea_report_keeps_previous_session_meaning_in_compact_and_sele
     }
     compact = "\n".join(_item_lines(1, {"kind": "reading", "title": "Exact report", "reading": envelope, "verbosity": "summary"}))
     assert '"previous_session": true' in compact and '"severity": "fatal"' in compact
+    assert '"header_time"' in compact and '"reading": "as_integers"' in compact
     assert "SYNTHETIC-CPER-BYTES" not in compact and "detail decoding deferred" in compact
     selected = "\n".join(_item_lines(1, {"kind": "selection", "title": "Exact report", "reading": envelope,
                                        "ids": [f"{channel}:73"], "verbosity": "full"}))
     assert '"previous_session": true' in selected and '"severity": "fatal"' in selected
+    assert '"header_time"' in selected and '"as_integers": "2026-03-24T22:24:34"' in selected
     assert "SYNTHETIC-CPER-BYTES" in selected and "detail decoding deferred" in selected
 
 

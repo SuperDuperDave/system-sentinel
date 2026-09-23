@@ -75,6 +75,15 @@ interface Decoded {
   error?: string;
 }
 
+interface WheaHeaderTime {
+  bytes: string;
+  precise: boolean;
+  reserved_bits: boolean;
+  as_integers: string | null;
+  as_bcd: string | null;
+  reading: 'as_integers' | 'as_bcd' | 'both' | null;
+}
+
 interface WheaIdentity {
   Log: string;
   RecordId: RecordId;
@@ -82,7 +91,7 @@ interface WheaIdentity {
     record_id: string;
     severity: string;
     previous_session: boolean;
-    timestamp: string | null;
+    header_time?: WheaHeaderTime | null;
   } | null;
   error: string | null;
 }
@@ -614,6 +623,28 @@ export function ReportDetail({ report, showMomentLink = true }: { report: Kernel
   </>;
 }
 
+function headerTimeFacts(time: WheaHeaderTime): [string, ReactNode][] {
+  const chosen = time.reading === 'as_bcd' ? time.as_bcd : time.reading ? time.as_integers : null;
+  const meaning = time.precise && !time.as_integers && !time.as_bcd
+    ? 'Precise flag set, but the header bytes form no calendar date'
+    : time.precise
+    ? 'Precise flag set: the record claims this time correlates to the error event'
+    : 'Precision flag clear: this may be when the information was collected or reported';
+  const timeText = chosen
+    ? `${chosen} · ${time.reading === 'both' ? 'same date under both encodings' : `only ${time.reading === 'as_bcd' ? 'BCD' : 'integer bytes'} form a date`} · no time zone recorded`
+    : time.as_integers && time.as_bcd
+      ? 'Encoding ambiguous; both calendar readings are shown below'
+      : 'Neither encoding forms a calendar date';
+  return [
+    ['Header time bytes', <Value value={time.bytes.match(/../g)?.join(' ') ?? time.bytes} />],
+    ['Header time', <Value value={timeText} />],
+    ...(!chosen && time.as_integers ? [['As integer bytes', <Value value={time.as_integers} />] as [string, ReactNode]] : []),
+    ...(!chosen && time.as_bcd ? [['As BCD', <Value value={time.as_bcd} />] as [string, ReactNode]] : []),
+    ['Time meaning', <Value value={meaning} />],
+    ...(time.reserved_bits ? [['Time flags', <Value value="Reserved bits are set; inspect the raw header" />] as [string, ReactNode]] : []),
+  ];
+}
+
 /** One source record in full, with the decoded structure of its payload beside it. */
 function RecordDetail({ record, identity, decoded, envelope, stackTitle, showMomentLink = true }: { record: EventRecord; identity?: WheaIdentity; decoded?: Decoded; envelope: Reading | null; stackTitle?: string; showMomentLink?: boolean }) {
   const cper = identity?.cper;
@@ -631,7 +662,7 @@ function RecordDetail({ record, identity, decoded, envelope, stackTitle, showMom
             ['CPER severity', <Value value={cper.severity} />],
             ['CPER record', <Value value={cper.record_id} />],
             ['PreviousError flag', <Value value={cper.previous_session ? 'Set: the error occurred in an earlier Windows session; this event reports it after a restart' : 'Not set; the error moment is not established by this report'} />],
-            ...(cper.timestamp ? [['Header time', <Value value={`${cper.timestamp} · as written, no time zone; not verified as the error moment`} />] as [string, ReactNode]] : []),
+            ...(cper.header_time ? headerTimeFacts(cper.header_time) : []),
           ] as [string, ReactNode][] : []),
         ]}
       />

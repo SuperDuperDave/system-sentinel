@@ -1,9 +1,12 @@
 # Changelog
 
-## Unreleased
+## [1.3.8] - 2026-09-23
 
 ### Added
 - `whea_reports` accepts an exclusive `before` anchor, so an old report-time window can be read without newer traffic consuming the cap. The host query time, actual bounded window and observed upper reach travel with the reading; future requested time cannot be called complete. Both `whea_reports` and `storms` use the preceding observed bucket when an exclusive end lands exactly on a bucket boundary. The Record moment frame can open this channel separately, inspect exact reports in place and add the anchored reading to Stack.
+
+### Changed
+- CPER header time no longer assumes one byte encoding. `identity.cper.timestamp` is removed from new readings and replaced by `header_time` with the stored bytes, integer and BCD calendar readings, and the separate precise flag. Older saved Stack readings retain their original shape. The exact-record view explains ambiguous or invalid dates and keeps Windows report time separate.
 
 ### Limits
 - Kernel-WHEA event time records when Windows filed a CPER report, not necessarily when the hardware error occurred. The channel retains history independently of the System log. A nearby report is a lead, not proof of a cause; an empty report-time window does not rule out an earlier error.

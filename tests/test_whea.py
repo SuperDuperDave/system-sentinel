@@ -349,13 +349,36 @@ def test_the_header_identity_is_read_locally_and_names_what_it_can_justify(no_de
     first, second, broken = sections(reading)["identity"]
     assert first == {"Log": whea.CHANNEL, "RecordId": 3, "error": None, "cper": {
         "record_id": "0x01dc00000000abcd", "severity": "fatal", "section_count": 1,
-        "notify_type": "e8f56ffe-919c-4cc5-ba88-65abe14913bb", "timestamp": "2026-03-24T22:24:34",
+        "notify_type": "e8f56ffe-919c-4cc5-ba88-65abe14913bb",
+        "header_time": {"bytes": "2218160018031A14", "precise": False, "reserved_bits": False,
+                        "as_integers": "2026-03-24T22:24:34", "as_bcd": None, "reading": "as_integers"},
         "flags": "0x00000002", "recovered": False, "previous_session": True, "simulated": False,
     }}
     assert second["cper"]["severity"] == "corrected" and second["cper"]["previous_session"] is False
-    assert second["cper"]["timestamp"] is None  # the valid bit is not set, so the time is not claimed
+    assert second["cper"]["header_time"] is None  # the valid bit is not set, so the time is not claimed
     assert broken["cper"] is None and broken["error"] == "the CPER header is shorter than 128 bytes"
     assert "PlatformId" not in json.dumps(sections(reading)["identity"])
+
+
+@pytest.mark.parametrize(("clock", "integers", "bcd", "reading", "precise", "reserved"), [
+    ((34, 24, 22, 0, 24, 3, 26, 20), "2026-03-24T22:24:34", None, "as_integers", False, False),
+    ((0x34, 0x24, 0x22, 1, 0x24, 0x03, 0x26, 0x20), None, "2026-03-24T22:24:34", "as_bcd", True, False),
+    ((0x22, 0x18, 0x16, 0, 0x18, 0x03, 0x19, 0x14), "2025-03-24T22:24:34", "1419-03-18T16:18:22", None, False, False),
+    ((1, 2, 3, 0, 4, 5, 6, 7), "0706-05-04T03:02:01", "0706-05-04T03:02:01", "both", False, False),
+    ((0x3C, 0x24, 0x22, 1, 0x24, 0x03, 0x26, 0x20), None, None, None, True, False),
+    ((1, 2, 3, 0, 0x13, 0x13, 6, 7), None, None, None, False, False),
+    ((34, 24, 22, 0, 24, 3, 126, 19), None, None, None, False, False),
+    ((0, 0, 0, 0, 0x30, 0x02, 0x26, 0x20), None, None, None, False, False),
+    ((34, 24, 22, 2, 24, 3, 26, 20), "2026-03-24T22:24:34", None, "as_integers", False, True),
+    ((34, 24, 22, 3, 24, 3, 26, 20), "2026-03-24T22:24:34", None, "as_integers", True, True),
+])
+def test_cper_header_time_keeps_both_conditional_calendar_readings_and_header_flags(clock, integers, bcd, reading, precise, reserved):
+    header, error = whea.cper_header(cper(1, when=clock))
+    assert error is None and header is not None
+    assert header["header_time"] == {
+        "bytes": bytes(clock).hex().upper(), "precise": precise, "reserved_bits": reserved,
+        "as_integers": integers, "as_bcd": bcd, "reading": reading,
+    }
 
 
 def test_a_record_without_a_payload_has_an_identity_error_not_a_guess(no_decoder_launch):

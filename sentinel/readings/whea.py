@@ -211,9 +211,13 @@ WHEA_COVERAGE_BASIS = (
 IDENTITY_BASIS = (
     "Read locally from each payload's 128-byte CPER header after the structural check: the record id "
     "(which Windows documents as unique only on the machine that created it), severity, section count, "
-    "notification type, flags, and the header time when its valid bit is set, as the header records it "
-    "(it carries no time zone). previous_session is the header's PreviousError flag: the error occurred "
-    "in an earlier session and was reported after a restart, so the record's time is that report, not "
+    "notification type, flags, and the eight header time bytes when their valid bit is set. The "
+    "header_time object keeps integer and BCD calendar interpretations separately; its reading "
+    "names one only when exactly one interpretation forms a calendar date, and both means they agree. "
+    "That choice does not establish the creator's encoding or a time zone. The precise bit is the "
+    "record's claim that the time correlates to the error event. previous_session is the header's "
+    "PreviousError flag: the error occurred in an earlier session and was reported after a restart, "
+    "so the Windows event's TimeCreated is that report, not "
     "the moment of the error. PlatformId, PartitionId and CreatorId are not reported here; the full "
     "payload stays in records."
 )
@@ -446,12 +450,13 @@ def cper_header(payload: Any) -> tuple[dict[str, Any] | None, str | None]:
     severity = int.from_bytes(data[12:16], "little")
     valid = int.from_bytes(data[16:20], "little")
     flags = int.from_bytes(data[104:108], "little")
+    header_time = _cper_time(data[24:32]) if valid & 0x2 else None
     return {
         "record_id": f"0x{int.from_bytes(data[96:104], 'little'):016x}",
         "severity": _SEVERITY.get(severity, f"unknown ({severity})"),
         "section_count": int.from_bytes(data[10:12], "little"),
         "notify_type": str(uuid.UUID(bytes_le=data[80:96])),
-        "timestamp": _cper_time(data[24:32]) if valid & 0x2 else None,
+        "header_time": header_time,
         "flags": f"0x{flags:08x}",
         "recovered": bool(flags & 0x1),
         "previous_session": bool(flags & 0x2),
@@ -459,12 +464,42 @@ def cper_header(payload: Any) -> tuple[dict[str, Any] | None, str | None]:
     }, None
 
 
-def _cper_time(raw: bytes) -> str | None:
-    seconds, minutes, hours, _precise, day, month, year, century = raw
-    try:
-        return datetime(century * 100 + year, month, day, hours, minutes, seconds).isoformat()
-    except ValueError:
-        return None
+def _cper_time(raw: bytes) -> dict[str, Any]:
+    """Keep both CPER calendar interpretations; the header does not identify its encoding."""
+    def calendar(fields: list[int | None]) -> str | None:
+        if any(value is None for value in fields):
+            return None
+        seconds, minutes, hours, day, month, year, century = [int(value) for value in fields if value is not None]
+        if year > 99 or century > 99:
+            return None
+        try:
+            return datetime(century * 100 + year, month, day, hours, minutes, seconds).isoformat()
+        except ValueError:
+            return None
+
+    def bcd(byte: int) -> int | None:
+        high, low = byte >> 4, byte & 0xF
+        return high * 10 + low if high <= 9 and low <= 9 else None
+
+    fields = [raw[index] for index in (0, 1, 2, 4, 5, 6, 7)]
+    integers = calendar(fields)
+    bcd_time = calendar([bcd(value) for value in fields])
+    if integers and bcd_time:
+        reading = "both" if integers == bcd_time else None
+    elif integers:
+        reading = "as_integers"
+    elif bcd_time:
+        reading = "as_bcd"
+    else:
+        reading = None
+    return {
+        "bytes": raw.hex().upper(),
+        "precise": bool(raw[3] & 0x1),
+        "reserved_bits": bool(raw[3] & 0xFE),
+        "as_integers": integers,
+        "as_bcd": bcd_time,
+        "reading": reading,
+    }
 
 
 def record_identity(record: dict[str, Any]) -> dict[str, Any]:
