@@ -335,6 +335,7 @@ interface Widened {
 function useBefore(moment: string): Widened {
   const [count, setCount] = useState(PAGE);
   const taken = useReading<EventRecord[]>('record', { before: moment, count });
+  const { retake } = taken;
   // Design for interrupted work: a wider take that did not observe the machine must not take the
   // narrower one's rows away with it. The frame stands on the last observed envelope.
   const [held, setHeld] = useState<Reading<EventRecord[]> | null>(null);
@@ -350,9 +351,9 @@ function useBefore(moment: string): Widened {
   const more = useCallback(() => {
     const first = list.current?.querySelector<HTMLElement>('[data-record]');
     place.current = first?.dataset.record ? { id: first.dataset.record, top: first.getBoundingClientRect().top } : null;
-    if (nextCount === count) taken.retake();
+    if (nextCount === count) retake();
     else setCount(nextCount);
-  }, [count, nextCount, taken.retake]);
+  }, [count, nextCount, retake]);
 
   useLayoutEffect(() => {
     const saved = place.current;
