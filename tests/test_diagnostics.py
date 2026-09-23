@@ -590,7 +590,7 @@ def _inputs(**over):
         "power": _reading("power", [("derived", "derived", {"fast_startup": True, "uptime_seconds": 30 * 86400, "link_power_management": {"ac": {"index": "0x2", "setting": "L1"}}, "ledger": {"counts": {"unexpected shutdown": 2, "wake": 1, "display driver reset": 1}, "window": {"first": "a", "last": "b"}}})]),
         "constraints": _reading("constraints", [("derived", "derived", constraints_derived(CONSTRAINT_DEVICES))]),
         "events": _reading("events", [("records", "raw", [{"ProviderName": "Service Control Manager", "TimeCreated": f"2026-09-0{i % 9 + 1}T00:00:00Z"} for i in range(30)] + [{"ProviderName": "Quiet", "TimeCreated": "2026-09-01T00:00:00Z"}])]),
-        "crash": _reading("crash", [("stops", "derived", STOPS)]),
+        "crash": _reading("crash", [("stops", "derived", STOPS), ("collection", "raw", {"system": {"outcome": "ok", "bound_reached": False}, "reports": {"outcome": "ok", "bound_reached": False}})]),
         "reliability": _reading("reliability", [("days", "derived", reliability_days(RELIABILITY_RECORDS, RELIABILITY_STABILITY))]),
     }
     base.update(over)
@@ -669,14 +669,74 @@ def test_stops_that_share_a_bug_check_and_stops_that_wrote_none_are_each_one_sig
     assert not any(s["id"] == "transition:repeated-stop:0x1a" for s in signals)  # one stop is a stop
 
 
-def test_the_unexpected_shutdown_signal_names_the_stops_when_crash_was_observed():
+def test_the_unexpected_shutdown_signal_counts_crash_stops_once():
     with_crash = next(s for s in take_signals_sync(_inputs())[0] if s["id"] == "transition:unexpected-shutdown")
-    assert with_crash["readings"] == ["power", "crash"]
+    assert with_crash["readings"] == ["crash"]
+    assert with_crash["title"] == "5 unplanned stops returned"
+    assert with_crash["evidence"]["returned"] == 5
+    assert with_crash["evidence"]["limit"] == 20
+    assert with_crash["evidence"]["limit_reached"] is False
+    assert with_crash["evidence"]["sources_complete"] is True
     assert with_crash["evidence"]["stops"] == [
-        {"started_at": s["started_at"], "code": (s["bugcheck"] or {}).get("code"), "name": (s["bugcheck"] or {}).get("name")} for s in STOPS
+        {"started_at": s["started_at"], "announced_at": None, "reported_at": None, "anchor_at": s["started_at"], "code": (s["bugcheck"] or {}).get("code"), "name": (s["bugcheck"] or {}).get("name")} for s in STOPS
     ]
-    without = next(s for s in take_signals_sync(_inputs(crash=None))[0] if s["id"] == "transition:unexpected-shutdown")
-    assert without["readings"] == ["power"] and "stops" not in without["evidence"]
+    without, _ = take_signals_sync(_inputs(crash=None))
+    assert not any(s["id"] == "transition:unexpected-shutdown" for s in without)
+    assert any(s["id"] == "gap:inputs" for s in without)
+
+
+def test_two_shutdown_records_and_one_crash_stop_are_one_lead():
+    power = _reading("power", [("derived", "derived", {"ledger": {"counts": {"unexpected shutdown": 6, "unexpected shutdown, logged at the next start": 6}}})])
+    crash = _reading("crash", [("stops", "derived", STOPS[:1]), ("collection", "raw", {"system": {"outcome": "ok", "bound_reached": False}, "reports": {"outcome": "ok", "bound_reached": False}})])
+    lead = next(s for s in take_signals_sync(_inputs(power=power, crash=crash))[0] if s["id"] == "transition:unexpected-shutdown")
+    assert lead["title"] == "1 unplanned stop returned"
+    assert lead["evidence"]["returned"] == 1 and lead["readings"] == ["crash"]
+
+
+def test_crash_stop_lead_survives_an_empty_power_ledger_but_marks_partial_crash_source():
+    power = _reading("power", [("derived", "derived", {"ledger": {"counts": {}, "window": {}}})])
+    crash = _reading("crash", [("stops", "derived", STOPS[:1]), ("collection", "raw", {"system": {"outcome": "failed", "bound_reached": None}, "reports": {"outcome": "ok", "bound_reached": False}})])
+    crash.warnings = ["System stop records did not answer"]
+    signals, basis = take_signals_sync(_inputs(power=power, crash=crash))
+    lead = next(s for s in signals if s["id"] == "transition:unexpected-shutdown")
+    assert lead["evidence"]["returned"] == 1 and lead["evidence"]["sources_complete"] is False and lead["evidence"]["limit_reached"] is False
+    assert "Observed with warnings: crash" in basis
+
+
+def test_stop_limit_is_a_returned_cap_even_when_both_sources_answer():
+    crash = _reading("crash", [("stops", "derived", STOPS[:1] * 20), ("collection", "raw", {"system": {"outcome": "ok", "bound_reached": False}, "reports": {"outcome": "ok", "bound_reached": False}})])
+    lead = next(s for s in take_signals_sync(_inputs(crash=crash))[0] if s["id"] == "transition:unexpected-shutdown")
+    assert lead["evidence"]["returned"] == 20 and lead["evidence"]["sources_complete"] is True and lead["evidence"]["limit_reached"] is True
+
+
+def test_a_report_only_or_power_only_stop_keeps_its_own_time_and_log_anchor():
+    report_only = dict(STOPS[0], started_at=None, reported_at="2026-09-20T01:00:00Z")
+    power_only = dict(STOPS[1], started_at=None, announced_at="2026-09-19T01:00:00Z")
+    crash = _reading("crash", [("stops", "derived", [report_only, power_only]), ("collection", "raw", {"system": {"outcome": "failed", "bound_reached": None}, "reports": {"outcome": "ok", "bound_reached": False}})])
+    lead = next(s for s in take_signals_sync(_inputs(crash=crash))[0] if s["id"] == "transition:unexpected-shutdown")
+    assert [s["anchor_at"] for s in lead["evidence"]["stops"]] == [report_only["reported_at"], power_only["announced_at"]]
+    assert lead["evidence"]["stops"][0]["reported_at"] == report_only["reported_at"]
+    assert lead["evidence"]["stops"][1]["announced_at"] == power_only["announced_at"]
+
+
+def test_missing_or_malformed_crash_collection_cannot_claim_complete_sources():
+    for sections in ([ ("stops", "derived", STOPS[:1]) ], [("stops", "derived", STOPS[:1]), ("collection", "raw", {"system": {"outcome": "ok", "bound_reached": "no"}, "reports": {"outcome": "ok", "bound_reached": False}})]):
+        crash = _reading("crash", sections)
+        lead = next(s for s in take_signals_sync(_inputs(crash=crash))[0] if s["id"] == "transition:unexpected-shutdown")
+        assert lead["evidence"]["sources_complete"] is False
+
+
+def test_stop_limit_comes_from_the_crash_reading_params():
+    crash = _reading("crash", [("stops", "derived", STOPS + STOPS[:2]), ("collection", "raw", {"system": {"outcome": "ok", "bound_reached": False}, "reports": {"outcome": "ok", "bound_reached": False}})])
+    crash.params = {"count": 7}
+    lead = next(s for s in take_signals_sync(_inputs(crash=crash))[0] if s["id"] == "transition:unexpected-shutdown")
+    assert lead["evidence"]["returned"] == 7 and lead["evidence"]["limit"] == 7 and lead["evidence"]["limit_reached"] is True
+
+
+def test_crash_answering_without_stops_does_not_create_a_stop_lead():
+    crash = _reading("crash", [("stops", "derived", []), ("collection", "raw", {"system": {"outcome": "empty", "bound_reached": False}, "reports": {"outcome": "empty", "bound_reached": False}})], outcome="empty")
+    signals, _ = take_signals_sync(_inputs(crash=crash))
+    assert not any(s["id"] == "transition:unexpected-shutdown" for s in signals)
 
 
 def test_the_index_fall_points_at_the_day_it_fell_not_the_lowest_day():
@@ -722,9 +782,34 @@ def test_signals_takes_every_input_and_carries_their_provenance():
     assert reading.method["kind"] == "readings"
     assert [r["name"] for r in reading.method["readings"]] == ["hardware", "pcie", "power", "constraints", "events", "crash", "reliability"]
     assert all("outcome" in r and "params" in r for r in reading.method["readings"])
+    power_input = next(r for r in reading.method["readings"] if r["name"] == "power")
+    assert power_input["warnings_total"] == 1
+    assert power_input["warnings"] == ["powercfg /a produced no output: the supported sleep states were not observed."]
+    assert any("power answered with 1 warning" in warning for warning in reading.warnings)
+    assert "Observed with warnings: power" in reading.section("signals").basis
     assert [(s.name, s.cls) for s in reading.sections] == [("signals", "inferred")]
     assert reading.section("signals").basis
     assert reading.outcome in ("ok", "empty")
+
+
+def test_signals_bounds_but_counts_input_warnings_for_the_agent():
+    bridge = payload_bridge()
+    warnings = ["first " + "word " * 80] + [f"warning {index}" for index in range(1, 7)]
+    bridge.by_marker["powercfg"] = BridgeResult("ok", items=[dict(POWER_PAYLOAD, warnings=warnings)])
+    reading = asyncio.run(take("signals", bridge, {}))
+    power_input = next(r for r in reading.method["readings"] if r["name"] == "power")
+    assert power_input["warnings_total"] == 7 and len(power_input["warnings"]) == 5
+    assert len(power_input["warnings"][0]) <= 300 and power_input["warnings"][0].endswith("...")
+    assert any("power answered with 7 warnings" in warning for warning in reading.warnings)
+
+
+def test_warning_preview_does_not_cut_through_a_machine_name():
+    bridge = payload_bridge()
+    warning = "read " + "x " * 145 + "DESKTOP-SYNTHETICNAME at the end"
+    bridge.by_marker["powercfg"] = BridgeResult("ok", items=[dict(POWER_PAYLOAD, warnings=[warning])])
+    reading = asyncio.run(take("signals", bridge, {}))
+    preview = next(r for r in reading.method["readings"] if r["name"] == "power")["warnings"][0]
+    assert "DESKTOP-" not in preview and preview.endswith("...")
 
 
 def test_signals_is_unavailable_and_says_nothing_when_no_input_observed():

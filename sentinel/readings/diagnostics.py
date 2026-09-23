@@ -710,13 +710,14 @@ def take_constraints(bridge: Bridge, params: dict[str, Any]) -> Reading:
 # signals
 # ---------------------------------------------------------------------------
 
+SIGNAL_STOP_LIMIT = 20
 SIGNAL_INPUTS: tuple[tuple[str, dict[str, Any]], ...] = (
     ("hardware", {}),
     ("pcie", {}),
     ("power", {}),
     ("constraints", {}),
     ("events", {"levels": [1, 2, 3, 4], "count": 200}),
-    ("crash", {"count": 20}),
+    ("crash", {"count": SIGNAL_STOP_LIMIT}),
     ("reliability", {}),
 )
 
@@ -759,6 +760,7 @@ def _why(name: str, reading: Reading | None, reasons: dict[str, str]) -> str:
 
 def _basis(readings: dict[str, Reading | None], reasons: dict[str, str]) -> str:
     seen = [name for name, r in readings.items() if r is not None and r.observed]
+    limited = [name for name, r in readings.items() if r is not None and r.observed and r.warnings]
     missed = [f"{name} ({_why(name, r, reasons)})" for name, r in readings.items() if r is None or not r.observed]
     parts = [
         "Each signal is a pattern noticed across the readings named on it, not a diagnosis; the rule is on the signal.",
@@ -766,6 +768,8 @@ def _basis(readings: dict[str, Reading | None], reasons: dict[str, str]) -> str:
     ]
     if missed:
         parts.append(f"Not observed, so anything they would have shown is absent from this reading: {', '.join(missed)}.")
+    if limited:
+        parts.append(f"Observed with warnings: {', '.join(limited)}; inspect each input's warnings in method.readings.")
     return " ".join(parts)
 
 
@@ -889,25 +893,30 @@ def _transitions(observed: dict[str, Reading]) -> list[dict[str, Any]]:
     counts = (derived.get("ledger") or {}).get("counts") or {}
     window = (derived.get("ledger") or {}).get("window") or {}
 
-    stops = _rows(observed.get("crash"), "stops")
-
-    unexpected = sum(count for name, count in counts.items() if "unexpected shutdown" in name)
-    if unexpected:
-        evidence: dict[str, Any] = {"records": unexpected, "window": window}
-        readings = ["power"]
-        if stops:
-            # The ledger counts the records; crash has already composed them into stops, so the
-            # signal can name them here rather than send the reader back to the log for them.
-            evidence["stops"] = [_stop_facts(stop) for stop in stops[:NEWEST_STOPS]]
-            readings.append("crash")
+    crash = observed.get("crash")
+    stops = _rows(crash, "stops")
+    if stops:
+        raw_limit = crash.params.get("count") if crash is not None else None
+        limit = raw_limit if type(raw_limit) is int and raw_limit > 0 else SIGNAL_STOP_LIMIT
+        collection = _section(crash, "collection")
+        sources = collection if isinstance(collection, dict) else {}
+        limit_reached = len(stops) >= limit
+        sources_complete = all(
+            isinstance(sources.get(name), dict)
+            and sources[name].get("outcome") in ("ok", "empty")
+            and sources[name].get("bound_reached") is False
+            for name in ("system", "reports")
+        )
         out.append(
             _signal(
                 "transitions",
                 "transition:unexpected-shutdown",
-                f"{unexpected} unexpected shutdown record(s) in the ledger",
-                "The machine stopped without a clean shutdown at least once in the window. Take the record reading before each of these moments to see what it was doing.",
-                evidence,
-                readings,
+                f"{len(stops)} unplanned {'stop' if len(stops) == 1 else 'stops'} returned",
+                "Crash composed these stops from its returned System and Application records. This is a returned count, not a lifetime total. Inspect the record before each stop for context."
+                if sources_complete and not limit_reached
+                else "Crash composed these stops from the sources that answered. A source or query bound may hide other stops; inspect its collection coverage before treating this as a complete count.",
+                {"returned": len(stops), "limit": limit, "limit_reached": limit_reached, "sources_complete": sources_complete, "stops": [_stop_facts(stop) for stop in stops[:NEWEST_STOPS]]},
+                ["crash"],
             )
         )
     out += _repeated_stops(stops)
@@ -940,7 +949,8 @@ def _transitions(observed: dict[str, Reading]) -> list[dict[str, Any]]:
 
 def _stop_facts(stop: dict[str, Any]) -> dict[str, Any]:
     bugcheck = stop.get("bugcheck") or {}
-    return {"started_at": stop.get("started_at"), "code": bugcheck.get("code"), "name": bugcheck.get("name")}
+    started, announced, reported = (stop.get(key) for key in ("started_at", "announced_at", "reported_at"))
+    return {"started_at": started, "announced_at": announced, "reported_at": reported, "anchor_at": started or announced or reported, "code": bugcheck.get("code"), "name": bugcheck.get("name")}
 
 
 def _repeated_stops(stops: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1068,7 +1078,14 @@ async def take_signals(bridge: Bridge, params: dict[str, Any]) -> Reading:
         method={
             "kind": "readings",
             "readings": [
-                {"name": name, "params": want, "outcome": _why(name, readings[name], reasons), "took_ms": (readings[name].took_ms if readings[name] is not None else None)}
+                {
+                    "name": name,
+                    "params": want,
+                    "outcome": _why(name, readings[name], reasons),
+                    "took_ms": (readings[name].took_ms if readings[name] is not None else None),
+                    "warnings": [_bounded_warning(w) for w in (readings[name].warnings if readings[name] is not None else [])[:5]],
+                    "warnings_total": len(readings[name].warnings) if readings[name] is not None else 0,
+                }
                 for name, want in wanted
             ],
         },
@@ -1084,7 +1101,17 @@ async def take_signals(bridge: Bridge, params: dict[str, Any]) -> Reading:
     for name, r in readings.items():
         if r is None or not r.observed:
             reading.warnings.append(f"{name} was not observed ({_why(name, r, reasons)}): what it would have shown is absent from these signals.")
+        elif r.warnings:
+            reading.warnings.append(f"{name} answered with {len(r.warnings)} {'warning' if len(r.warnings) == 1 else 'warnings'}; first: {_bounded_warning(r.warnings[0])}")
     return reading
+
+
+def _bounded_warning(value: Any) -> str:
+    warning = str(value)
+    if len(warning) <= 300:
+        return warning
+    cut = next((index for index in range(296, -1, -1) if warning[index].isspace()), None)
+    return warning[:cut] + "..." if cut else "Warning text exceeds 300 characters; take the source reading for full detail."
 
 
 async def _take_input(name: str, bridge: Bridge, params: dict[str, Any]) -> tuple[Reading | None, str | None]:

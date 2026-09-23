@@ -27,6 +27,14 @@ a.classCard:hover, a.classCard:focus-visible { background: var(--lit); text-deco
 .inputName { color: var(--body); }
 .inputOk, .inputLost { grid-column: 2; color: var(--muted); }
 .inputLost { color: var(--ink); }
+.inputWarnings { max-width: 76ch; margin: 13px 0 0; border-top: 1px solid var(--rule-soft); padding-top: 10px; }
+.inputWarnings > p:first-child { margin: 0 0 5px; }
+.inputWarnings details { border-bottom: 1px solid var(--rule-soft); }
+.inputWarnings summary { cursor: pointer; color: var(--body); min-height: 32px; display: list-item; padding: 7px 0; }
+.inputWarnings summary:hover, .inputWarnings summary:focus-visible { color: var(--ink); }
+.inputWarnings ul { margin: 0 0 10px; padding-left: 22px; color: var(--body); overflow-wrap: anywhere; }
+.inputWarnings li + li { margin-top: 6px; }
+.warningNote { margin: 8px 0 0; color: var(--muted); }
 
 .section { margin: 20px 0 0; }
 .group { margin: 22px 0 0; scroll-margin-top: 58px; }

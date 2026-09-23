@@ -199,7 +199,8 @@ def test_the_same_evidence_twice_is_refused(client: TestClient):
 def test_one_signal_can_be_handed_on_with_its_basis_and_evidence(client: TestClient):
     envelope = {
         "reading": "signals", "params": {}, "asked_at": "2026-09-21T00:00:00Z", "outcome": "ok", "count": 2,
-        "method": {"kind": "readings", "readings": [{"name": "events", "outcome": "ok"}, {"name": "whea", "outcome": "denied"}]},
+        "method": {"kind": "readings", "readings": [{"name": "events", "outcome": "ok"}, {"name": "power", "outcome": "ok", "warnings": ["transition query returned only part of its window"], "warnings_total": 1}, {"name": "whea", "outcome": "denied"}]},
+        "warnings": ["power answered with 1 warning; first: transition query returned only part of its window"],
         "sections": [{"name": "signals", "class": "inferred", "basis": "WHEA was not observed.", "data": [
             {"id": "pressure:events", "class": "pressure", "title": "The event log is busy", "summary": "A lead to inspect.", "readings": ["events"], "evidence": {"count": 12}},
             {"id": "gaps:whea", "class": "gaps", "title": "WHEA has a gap", "summary": "A missing input.", "readings": ["whea"], "evidence": {"reason": "denied"}},
@@ -209,6 +210,7 @@ def test_one_signal_can_be_handed_on_with_its_basis_and_evidence(client: TestCli
     assert item["title"] == "1 signal from signals" and item["ids"] == ["pressure:events"]
     text = client.get("/api/stack/composed", headers=AUTH).json()["text"]
     assert "- selected: 1 of the reading's signals, by signal id" in text
+    assert "power answered with 1 warning" in text
     assert "- reading count: 2" in text and "2 records" not in text
     assert '"basis": "WHEA was not observed."' in text and '"count": 12' in text
     assert "gaps:whea" not in text and "denied" not in text.split("```json")[-1]

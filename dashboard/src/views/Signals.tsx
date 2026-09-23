@@ -19,6 +19,8 @@ interface Input {
   params: Record<string, unknown>;
   outcome: string;
   took_ms: number;
+  warnings?: string[];
+  warnings_total?: number;
 }
 
 /**
@@ -37,6 +39,8 @@ export function Signals() {
   const head = observed(reading) ? reading?.sections.find((s) => s.name === 'signals') : undefined;
   const inputs = ((reading?.method ?? {}) as { readings?: Input[] }).readings ?? [];
   const missingInputs = inputs.some((input) => input.outcome !== 'ok' && input.outcome !== 'empty');
+  const warnedInputs = inputs.some((input) => warningCount(input) > 0);
+  const emptyLimit = missingInputs && warnedInputs ? 'missing inputs and input warnings limit this reading' : missingInputs ? 'missing inputs limit this reading' : warnedInputs ? 'input warnings may limit this reading' : '';
   const groups = CLASSES.map((cls) => [cls, signals.filter((s) => s.class === cls)] as const);
   const silent = groups.filter(([, found]) => found.length === 0).map(([cls]) => cls);
 
@@ -47,7 +51,7 @@ export function Signals() {
         Patterns the tool noticed across several readings at once. Each one is a lead to follow, never a finding about what is wrong; the rule that
         produced it and the evidence under it are both here.
       </p>
-      <OutcomeLine taken={taken} noun="signals" singular="signal" emptyText={missingInputs ? 'No signal found in the inputs that answered; missing inputs limit this reading' : 'No signal found in the inputs that answered'} />
+      <OutcomeLine taken={taken} noun="signals" singular="signal" emptyText={`No signal found in the inputs that answered${emptyLimit ? `; ${emptyLimit}` : ''}`} />
       {taken.reading && !observed(taken.reading) ? (
         <p className={styles.unobserved}>No input could be observed, so no rule could run. Signals are read from other readings, not from the machine directly.</p>
       ) : null}
@@ -143,8 +147,8 @@ function Jumps({ evidence }: { evidence: Record<string, unknown> }) {
   );
 }
 
-/** The keys whose value is a moment in the log: a window's last record, and a stop's start. */
-const MOMENT_KEYS = ['last', 'started_at'];
+/** The keys whose value frames the log: a window's last record or a stop's best returned anchor. */
+const MOMENT_KEYS = ['last', 'started_at', 'anchor_at'];
 
 function momentsIn(evidence: Record<string, unknown>): string[] {
   const found: string[] = [];
@@ -167,8 +171,11 @@ function momentsIn(evidence: Record<string, unknown>): string[] {
 }
 
 /** What each reading returned when the rules were run over it: a lead is only as observed as its inputs. */
+const warningCount = (input: Input): number => input.warnings_total ?? input.warnings?.length ?? 0;
+
 function Inputs({ inputs }: { inputs: Input[] }) {
   const answered = inputs.filter((i) => i.outcome === 'ok' || i.outcome === 'empty').length;
+  const warned = inputs.filter((i) => warningCount(i) > 0);
   return (
     <div className={styles.inputs}>
       <p className="label">Inputs · {answered} of {inputs.length} readings answered{answered < inputs.length ? ' · missing inputs limit these rules' : ''}</p>
@@ -179,10 +186,26 @@ function Inputs({ inputs }: { inputs: Input[] }) {
             <span className={styles.inputName}>{i.name}</span>
             <span className={i.outcome === 'ok' || i.outcome === 'empty' ? styles.inputOk : styles.inputLost}>
               {i.outcome === 'ok' ? 'answered' : i.outcome === 'empty' ? 'answered · empty' : `not observed · ${i.outcome}`}
+              {warningCount(i) > 0 ? ` · ${warningCount(i)} ${warningCount(i) === 1 ? 'warning' : 'warnings'}` : ''}
             </span>
           </li>
         ))}
       </ul>
+      {warned.length ? (
+        <div className={styles.inputWarnings}>
+          <p className="label">What the inputs warned about</p>
+          {warned.map((i) => (
+            <details key={i.name}>
+              <summary className="readout">{i.name} · {warningCount(i)} {warningCount(i) === 1 ? 'warning' : 'warnings'}</summary>
+              <ul className="readout">
+                {(i.warnings ?? []).map((warning, index) => <li key={index}>{warning}</li>)}
+                {warningCount(i) > (i.warnings?.length ?? 0) ? <li>More warnings are in the {i.name} reading.</li> : null}
+              </ul>
+            </details>
+          ))}
+          <p className={`${styles.warningNote} readout`}>These excerpts are bounded. Take an input reading for its full warning text and evidence.</p>
+        </div>
+      ) : null}
     </div>
   );
 }
