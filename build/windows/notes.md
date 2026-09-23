@@ -13,11 +13,11 @@ A stethoscope for a Windows computer. It gathers the record the machine keeps of
 
 ## New in {{VERSION}}
 
-**A second hardware-error timeline.** The existing storm lead counts System WHEA-Logger records. A new Kernel-WHEA trace counts the separate channel by the time Windows wrote each report, with its own retention reach and query limit. A CPER PreviousError flag marks a condition from an earlier Windows session, so a cluster after restart is not called a burst of new errors. The full reading is available to agents; Stack starts with a bounded summary. Exact CPER bytes remain available through the separate `whea` reading for its newest 500 records, on explicit unredacted request.
+**Open a particular hardware-error record.** `whea_record` asks Windows for one retained WHEA event by its log and RecordId, even when newer events push it outside the newest-500 list. The Hardware errors screen's exact-read action uses the same lookup. The result keeps its source outcome, log reach and CPER header facts; exact bytes require an explicit unredacted request. A missing record, a query failure and an ambiguous result are distinct. The event must still be retained, and its timestamp should be compared with the original reference because RecordIds can be reused.
 
-**A more accurate Fast Startup signal.** Power and Signals now label HiberbootEnabled as a preference. That setting alone does not show whether hibernation is available or how the machine last booted. The unsupported “no cold start” lead is gone; the observed uptime remains available.
+**Captures say what they can collect.** A bulk capture takes readings that need no exact event or file selection and names the omitted ones in its manifest. Its listing shows the omission count. A benchmark does the same by default, and an explicitly named selection-dependent reading is marked not taken rather than reported as a machine failure.
 
-**Update from 1.2.0 in the app.** Choose *Check for updates…* from the tray's version menu. From a source install, run `system-sentinel update`. The tool checks only when asked, verifies the downloaded file before starting it, and preserves the token, stack and prompts. An installed 1.0.1 still needs one manual download to gain this action.
+**Update from 1.1.0 or later in the app.** Choose *Check for updates…* from the tray's version menu. From a source install, run `system-sentinel update`. The tool checks only when asked, verifies the downloaded file before starting it, and preserves the token, stack and prompts. An installed 1.0.1 still needs one manual download to gain this action.
 
 ## Install
 

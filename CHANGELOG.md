@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.3.1] - 2026-09-23
+
+### Added
+- `whea_record` retrieves one retained WHEA event by its required log source and EventRecordID, including a report outside `whea`'s newest-record window. The query asks for one extra match to detect ambiguity and rejects binary properties over 1 MiB before serialization. The source outcome, log retention metadata, CPER header facts and exact raw fields remain available; default responses withhold CPER bytes. The Hardware errors screen's explicit exact-read action now uses this lookup, so newer events cannot silently push the selected row out of its re-read.
+
+### Changed
+- Captures and default benchmarks take readings that need no exact event or file selection. A capture's manifest names selection-dependent readings it omitted, while its listing exposes only the omission count. An explicitly named selection-dependent benchmark is marked not taken instead of creating a false machine failure. The catalog declares this requirement for agents and other clients.
+
+### Limits
+- The event must still be retained in its own Windows log, and a log-local RecordId can later refer to a different event; compare its timestamp with the original reference. Kernel-WHEA channel records still receive fixed-header interpretation only. This release does not infer a hardware cause.
+
 ## [1.3.0] - 2026-09-23
 
 ### Added
