@@ -47,6 +47,10 @@ def json_blocks(markdown):
     return [browser_json(body) for body in re.findall(r"```json\n(.*?)\n```", markdown, flags=re.DOTALL)]
 
 
+def selected_section(block, name):
+    return next(part["data"] for part in block if part["name"] == name)
+
+
 def tool(client, name, **arguments):
     result = rpc(client, "tools/call", {"name": name, "arguments": arguments})["result"]
     assert not result.get("isError"), result
@@ -192,8 +196,9 @@ def test_persisted_large_record_selection_survives_serving_and_browser_resubmiss
     assert added.json()["ids"] == [str(SECOND_ID)]
     composed = client.get("/api/stack/composed", headers=AUTH).json()["text"]
     blocks = json_blocks(composed)
-    assert [block[0]["RecordId"] for block in blocks] == [str(FIRST_ID), str(SECOND_ID)]
-    assert [block[0]["Properties"][9] for block in blocks] == [str(CREATED), str(CREATED + 1)]
+    assert [selected_section(block, "records")[0]["RecordId"] for block in blocks] == [str(FIRST_ID), str(SECOND_ID)]
+    assert [selected_section(block, "records")[0]["Properties"][9] for block in blocks] == [str(CREATED), str(CREATED + 1)]
+    assert [selected_section(block, "decoded")[0]["fields"]["ProcessCreationTime"] for block in blocks] == [str(CREATED), str(CREATED + 1)]
     mcp = rpc(client, "tools/call", {"name": "compose", "arguments": {}})["result"]
     assert not mcp.get("isError")
     assert mcp["content"][0]["text"] == mcp["structuredContent"]["text"] == composed
@@ -230,7 +235,9 @@ def test_new_capture_keeps_fresh_and_stored_evidence_exact_and_preserves_old_zip
     assert_exact_faults(stored["reading"])
     assert stored["ids"] == [str(FIRST_ID)]
     selected = json_blocks(members["composed.md"])[0]
-    assert selected[0]["RecordId"] == str(FIRST_ID) and selected[0]["Properties"][9] == str(CREATED)
+    assert selected_section(selected, "records")[0]["RecordId"] == str(FIRST_ID)
+    assert selected_section(selected, "records")[0]["Properties"][9] == str(CREATED)
+    assert selected_section(selected, "decoded")[0]["fields"]["ProcessCreationTime"] == str(CREATED)
     assert browser_json(members["manifest.json"])["unredacted"] is unredacted
     assert section(fresh, "records")[0]["MachineName"] == ("WORKBENCH" if unredacted else "<host>")
     assert state.stack.store.path.read_bytes() == stack_bytes and records == original_records

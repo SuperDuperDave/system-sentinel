@@ -40,6 +40,12 @@ SUMMARY_MESSAGE = 80
 """How much of a record's message a summary table carries."""
 SUMMARY_LOG_LIMIT = 100
 SUMMARY_LOG_EDGE = 5
+SUMMARY_CONTEXT_TEXT = 250
+SUMMARY_FAULT_GROUPS = 10
+SUMMARY_FAULT_MODULES = 5
+SUMMARY_CRASH_ISSUES = 10
+SUMMARY_CRASH_STOPS = 20  # Today's crash.MAX_STOPS; excess saved stops get an explicit omitted count.
+STOP_REF_LOGS = {"start": "System", "power_41": "System", "eventlog_6008": "System", "wer_1001": "System"}
 
 
 class Duplicate(Exception):
@@ -396,9 +402,9 @@ async def new_item(stack: Stack, bridge: Bridge, body: dict[str, Any], *, reader
         if kind == "selection":
             ids = _selection_ids(envelope, body.get("ids") or [])
 
-    large_log = bool(kind == "reading" and envelope and envelope.get("reading") in ("events", "record", "whea", "faults") and len(_records(envelope) or []) > SUMMARY_LOG_LIMIT)
-    is_timeline = bool(kind == "reading" and envelope and envelope.get("reading") in ("storms", "whea_reports"))
-    verbosity = requested_verbosity or ("summary" if is_timeline or large_log else "full")
+    large_log = bool(kind == "reading" and envelope and envelope.get("reading") in ("events", "record", "whea") and len(_records(envelope) or []) > SUMMARY_LOG_LIMIT)
+    derived_summary = bool(kind == "reading" and envelope and envelope.get("reading") in ("storms", "whea_reports", "crash", "faults"))
+    verbosity = requested_verbosity or ("summary" if derived_summary or large_log else "full")
 
     return Item(
         id=uuid.uuid4().hex,
@@ -502,6 +508,9 @@ def _item_lines(position: int, item: dict[str, Any]) -> list[str]:
             if ambiguous:
                 lines += ["", "The saved record selection is ambiguous across logs. Select these records again using Log:RecordId.", ""]
                 return lines
+            if not records:
+                lines += ["", "The saved record selection resolves to no returned raw records in this reading. Select records again from a current reading.", ""]
+                return lines
             selector = "log and RecordId" if any(isinstance(i, str) and ":" in i for i in item["ids"]) else "RecordId"
             lines.append(f"- selected: {len(records)} of the reading's records, by {selector}")
         else:
@@ -517,7 +526,13 @@ def _item_lines(position: int, item: dict[str, Any]) -> list[str]:
         if source_context:
             lines += _json_block(source_context)
         return lines
-    if envelope.get("reading") == "changes" and (item.get("verbosity") == "summary" or item.get("ids") is not None):
+    if envelope.get("reading") in ("crash", "faults") and (item.get("verbosity") == "summary" or item.get("ids") is not None):
+        compact = item.get("verbosity") == "summary"
+        if envelope.get("reading") == "crash":
+            lines += _crash_handoff(envelope, records if item.get("ids") is not None else None, compact)
+        else:
+            lines += _fault_handoff(envelope, records if item.get("ids") is not None else None, compact)
+    elif envelope.get("reading") == "changes" and (item.get("verbosity") == "summary" or item.get("ids") is not None):
         lines += _json_block(_change_handoff_sections(envelope, records if item.get("ids") is not None else None, item.get("verbosity") == "summary"))
     elif envelope.get("reading") in ("whea", "whea_record") and records is not None and (item.get("verbosity") == "summary" or item.get("ids") is not None):
         compact = item.get("verbosity") == "summary"
@@ -601,6 +616,279 @@ def _change_handoff_sections(envelope: dict[str, Any], selected: list[dict[str, 
     if raw_section is not None:
         sections.append(raw_section)
     return sections
+
+
+def _named_sections(envelope: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    return {section["name"]: section for section in _sections(envelope) if isinstance(section.get("name"), str)}
+
+
+def _clip_context(value: Any) -> Any:
+    """Bound free text in a compact projection without changing the stored reading or nulls."""
+    if isinstance(value, str):
+        return value[:SUMMARY_CONTEXT_TEXT] + ("…" if len(value) > SUMMARY_CONTEXT_TEXT else "")
+    if isinstance(value, list):
+        return [_clip_context(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _clip_context(item) for key, item in value.items()}
+    return value
+
+
+def _source_context(named: dict[str, dict[str, Any]], compact: bool) -> list[dict[str, Any]]:
+    return [
+        {**named[name], "data": _clip_context(named[name].get("data"))} if compact else named[name]
+        for name in ("collection", "coverage") if name in named
+    ]
+
+
+def _source_log(row: dict[str, Any], reading: str) -> str | None:
+    log = row.get("Log")
+    if isinstance(log, str) and log:
+        return log
+    if reading == "faults":
+        return "Application"  # The faults collector has only this source, including older saved rows.
+    if reading == "crash":
+        provider = row.get("ProviderName")
+        if provider == "Windows Error Reporting":
+            return "Application"  # The crash collector's BlueScreen report query.
+        if isinstance(provider, str) and provider:
+            return "System"  # All other records in the crash collector came from its System query.
+    return None
+
+
+def _row_refs(rows: list[dict[str, Any]], reading: str) -> tuple[set[tuple[str, int]], bool]:
+    refs: set[tuple[str, int]] = set()
+    unresolved = False
+    for row in rows:
+        number, log = _record_id(row), _source_log(row, reading)
+        if number is None or log is None:
+            unresolved = True
+        else:
+            refs.add((log, number))
+    return refs, unresolved
+
+
+def _crash_decoded_ref(entry: dict[str, Any], index: int, rows: list[dict[str, Any]], count: int) -> tuple[str, int] | None:
+    number = _record_id(entry)
+    log = entry.get("Log")
+    if number is None:
+        return None
+    if isinstance(log, str) and log:
+        return log, number
+    # The crash decoder is one-for-one with raw rows. Older saved envelopes can lack `Log` in
+    # both arrays; align them only when count and RecordId still agree.
+    if len(rows) == count and index < len(rows) and _record_id(rows[index]) == number:
+        inferred = _source_log(rows[index], "crash")
+        return (inferred, number) if inferred is not None else None
+    return None
+
+
+def _stop_refs(stop: dict[str, Any]) -> set[tuple[str, int]]:
+    records = stop.get("records")
+    if not isinstance(records, dict):
+        return set()
+    refs = set()
+    for key, log in STOP_REF_LOGS.items():
+        number = _record_id({"RecordId": records.get(key)})
+        if number is not None:
+            refs.add((log, number))
+    reports = records.get("report")
+    if isinstance(reports, list):
+        for value in reports:
+            number = _record_id({"RecordId": value})
+            if number is not None:
+                refs.add(("Application", number))
+    return refs
+
+
+def _crash_handoff(envelope: dict[str, Any], selected: list[dict[str, Any]] | None, compact: bool) -> list[str]:
+    """Carry composed stops and their source limits beside exact selected records."""
+    named = _named_sections(envelope)
+    source = named.get("stops")
+    raw_stops = source.get("data") if source else None
+    valid_stops = isinstance(raw_stops, list) and all(isinstance(stop, dict) for stop in raw_stops)
+    stops = raw_stops if valid_stops else []
+    wanted, unresolved = _row_refs(selected, "crash") if selected is not None else (None, False)
+    matched = [stop for stop in stops if wanted is None or _stop_refs(stop) & wanted]
+    lines = [
+        "Composed stops, with their source coverage. Stopped at is Windows' stop estimate; started at is the next start, announced at is the Kernel-Power record, and reported at is when WER filed a report. A report time alone does not establish stop time."
+        if selected is None else f"Composed stops referencing the selected records: {len(matched) if valid_stops else 'unknown'}. Their stop, start, announcement and report times are distinct. A report time alone does not establish stop time."
+    ]
+    if selected is not None and unresolved:
+        lines.append("Some selected record sources could not be identified; their stop association is unknown.")
+    if selected is not None and valid_stops and not matched and not unresolved:
+        lines.append("No composed stop in the stored reading references these records.")
+    lines.append("Set this item to full for every stored raw and decoded record." if compact and selected is None else "")
+    lines.append("")
+
+    sections: list[dict[str, Any]] = []
+    if source is not None:
+        if not valid_stops:
+            lines.append("The stored composed stop section is malformed; its stop count is unknown.")
+            sections.append({**source, "data": {"available": False, "reason": "invalid stored stop shape"}, "projection": "unavailable"})
+        elif compact:
+            shown = matched[:SUMMARY_CRASH_STOPS]
+            sections.append({**source, "data": {"returned": len(matched), "shown": _clip_context(shown), "omitted": len(matched) - len(shown)}, "projection": "bounded summary"})
+        else:
+            sections.append({**source, "data": matched, "projection": "selected stops"})
+    else:
+        lines.append("The stored reading has no composed stop section.")
+
+    decoded_section = named.get("decoded")
+    decoded = decoded_section.get("data") if decoded_section else None
+    raw_rows = named.get("records", {}).get("data")
+    valid_raw_rows = isinstance(raw_rows, list) and all(isinstance(row, dict) for row in raw_rows)
+    all_rows = raw_rows if valid_raw_rows else []
+    if compact:
+        if isinstance(decoded, list) and all(isinstance(entry, dict) for entry in decoded):
+            issues = []
+            unscoped = 0
+            for index, entry in enumerate(decoded):
+                if not entry.get("error"):
+                    continue
+                ref = _crash_decoded_ref(entry, index, all_rows, len(decoded))
+                if wanted is not None and ref is None:
+                    unscoped += 1
+                    continue
+                if wanted is not None and ref not in wanted:
+                    continue
+                issues.append({"Log": ref[0] if ref else entry.get("Log"), "RecordId": entry.get("RecordId"), "kind": entry.get("kind"), "error": entry["error"]})
+            shown = issues[:SUMMARY_CRASH_ISSUES]
+            complete = not unresolved and unscoped == 0 and valid_raw_rows and len(decoded) == len(all_rows)
+            issue_data = {"available": complete, "returned": len(issues) if complete else None, "shown": _clip_context(shown), "omitted": len(issues) - len(shown) if complete else None, "unscoped_errors": unscoped}
+        else:
+            issue_data = {"available": False, "reason": "the stored decoded section is missing or malformed", "returned": None, "shown": None, "omitted": None}
+        sections.append({"name": "decode_issues", "class": "derived", "basis": "Decoder errors in the stored crash reading, scoped to the selection when there is one; zero requires an available decoded section and identifiable selected sources.", "data": issue_data})
+    sections += _source_context(named, compact)
+
+    if selected is not None and not compact:
+        if isinstance(decoded, list) and decoded_section is not None:
+            matching = [entry for index, entry in enumerate(decoded) if isinstance(entry, dict) and _crash_decoded_ref(entry, index, all_rows, len(decoded)) in wanted]
+            sections.append({**decoded_section, "data": matching, "projection": "selected decoded records"})
+        raw = named.get("records")
+        if raw is not None:
+            sections.append({**raw, "data": selected, "projection": "selected raw records"})
+    lines += _json_block(sections)
+    if selected is not None and compact:
+        lines += ["", "Selected raw records, at log record time:", "", *_log_summary(selected)]
+    return lines
+
+
+def _fault_display(entry: dict[str, Any], times: dict[tuple[str, int], Any]) -> dict[str, Any]:
+    fields = entry.get("fields") if isinstance(entry.get("fields"), dict) else {}
+    process = entry.get("process") if isinstance(entry.get("process"), dict) else None
+    report = entry.get("report") if isinstance(entry.get("report"), dict) else None
+    number = _record_id(entry)
+    log = str(entry.get("Log") or "Application")
+    return _clip_context({
+        "ref": f"{log}:{number}" if number is not None else None,
+        "recorded_at": times.get((log, number)) if number is not None else None,
+        "kind": entry.get("kind"),
+        "application": fields.get("AppName") or fields.get("ExeFileName"),
+        "application_version": fields.get("AppVersion"),
+        "module": fields.get("ModuleName"),
+        "module_version": fields.get("ModuleVersion"),
+        "faulting_offset": fields.get("FaultingOffset"),
+        "hang_type": fields.get("HangType"),
+        "exception": entry.get("exception"),
+        "raw_exception_code": fields.get("ExceptionCode"),
+        "process": {key: process.get(key) for key in ("id", "id_status", "id_reason", "created_at", "creation_status", "creation_reason", "warnings")} if process else None,
+        "report": {key: report.get(key) for key in ("id", "code", "name", "parameters", "bucket", "dump_path", "records")} if report else None,
+        "error": entry.get("error"),
+    })
+
+
+def _fault_summary(data: Any) -> dict[str, Any]:
+    if not isinstance(data, dict):
+        return {"available": False, "reason": "the stored derived summary has an invalid shape"}
+    applications = data.get("applications")
+    apps_valid = isinstance(applications, list)
+    apps = [app for app in applications if isinstance(app, dict)] if apps_valid else []
+    bad_apps = len(applications) - len(apps) if apps_valid else None
+    count_valid = apps_valid and all(type(app.get("count")) is int and app["count"] >= 0 for app in apps)
+    shown_apps = []
+    for app in apps[:SUMMARY_FAULT_GROUPS]:
+        modules = app.get("modules")
+        names = modules if isinstance(modules, list) else []
+        shown_apps.append({**app, "modules": names[:SUMMARY_FAULT_MODULES], "other_modules": max(0, len(names) - SUMMARY_FAULT_MODULES)})
+    live = data.get("live_kernel")
+    reports_valid = isinstance(live, list)
+    reports = [row for row in live if isinstance(row, dict)] if reports_valid else []
+    bad_reports = len(live) - len(reports) if reports_valid else None
+    return _clip_context({
+        "available": isinstance(data.get("by_kind"), dict) and apps_valid and reports_valid and bad_apps == 0 and bad_reports == 0 and count_valid,
+        "by_kind": data.get("by_kind") if isinstance(data.get("by_kind"), dict) else None,
+        "applications": shown_apps if apps_valid else None,
+        "other_applications": max(0, len(apps) - len(shown_apps)) if apps_valid else None,
+        "other_application_entries": sum(app["count"] for app in apps[len(shown_apps):]) if count_valid else None,
+        "invalid_application_rows": bad_apps,
+        "live_kernel": reports[:SUMMARY_FAULT_GROUPS] if reports_valid else None,
+        "other_live_kernel": max(0, len(reports) - SUMMARY_FAULT_GROUPS) if reports_valid else None,
+        "invalid_live_kernel_rows": bad_reports,
+    })
+
+
+def _fault_handoff(envelope: dict[str, Any], selected: list[dict[str, Any]] | None, compact: bool) -> list[str]:
+    """Carry interpreted fault kinds, process validity and source reach with the selected raw rows."""
+    named = _named_sections(envelope)
+    decoded_section = named.get("decoded")
+    raw_decoded = decoded_section.get("data") if decoded_section else None
+    valid_decoded = isinstance(raw_decoded, list) and all(isinstance(entry, dict) for entry in raw_decoded)
+    decoded = raw_decoded if valid_decoded else []
+    raw_rows = named.get("records", {}).get("data")
+    rows = [row for row in raw_rows if isinstance(row, dict)] if isinstance(raw_rows, list) else []
+    times = {(str(row.get("Log") or "Application"), number): row.get("TimeCreated") for row in rows if (number := _record_id(row)) is not None}
+    wanted, unresolved = _row_refs(selected, "faults") if selected is not None else (None, False)
+
+    def belongs(entry: dict[str, Any]) -> bool:
+        if wanted is None:
+            return True
+        log, number = str(entry.get("Log") or "Application"), _record_id(entry)
+        if number is not None and (log, number) in wanted:
+            return True
+        report = entry.get("report")
+        references = report.get("records") if isinstance(report, dict) else None
+        return isinstance(references, list) and any((log, _record_id({"RecordId": ref})) in wanted for ref in references)
+
+    matching = [entry for entry in decoded if belongs(entry)]
+    lines = [
+        "Derived faults from returned Application records. Times are log record times; a live kernel report may be filed after its underlying event. One live kernel entry can represent several records."
+        if selected is None else f"Derived fault entries referencing the selected records: {len(matching) if valid_decoded else 'unknown'}. Times are log record times, which may lag the underlying event."
+    ]
+    if selected is not None and unresolved:
+        lines.append("Some selected record IDs could not be read; their fault association is unknown.")
+    if selected is not None and valid_decoded and not matching and not unresolved:
+        lines.append("No decoded fault entry in the stored reading references these records.")
+    if compact and selected is None:
+        lines.append("Set this item to full for every stored raw and decoded record.")
+    lines.append("")
+
+    sections: list[dict[str, Any]] = []
+    if compact and selected is None:
+        summary = named.get("summary")
+        if summary is not None:
+            sections.append({**summary, "data": _fault_summary(summary.get("data")), "projection": "bounded summary; counts describe decoded entries from returned records"})
+        else:
+            lines.append("The stored reading has no derived fault summary section; grouped counts are unknown.")
+    if decoded_section is not None:
+        if not valid_decoded:
+            lines.append("The stored decoded fault section is malformed; its entry count is unknown.")
+            sections.append({**decoded_section, "data": {"available": False, "reason": "invalid stored decoded shape"}, "projection": "unavailable"})
+        elif compact:
+            chosen = matching if len(matching) <= 2 * SUMMARY_LOG_EDGE else [*matching[:SUMMARY_LOG_EDGE], *matching[-SUMMARY_LOG_EDGE:]]
+            sections.append({**decoded_section, "data": {"entries": len(matching), "shown": [_fault_display(entry, times) for entry in chosen], "omitted_entries": len(matching) - len(chosen)}, "projection": "bounded interpreted entries"})
+        else:
+            sections.append({**decoded_section, "data": matching, "projection": "selected decoded entries"})
+    else:
+        lines.append("The stored reading has no decoded fault section.")
+    sections += _source_context(named, compact)
+    if selected is not None and not compact:
+        raw = named.get("records")
+        if raw is not None:
+            sections.append({**raw, "data": selected, "projection": "selected raw records"})
+    lines += _json_block(sections)
+    if selected is not None and compact:
+        lines += ["", "Selected raw records, at log record time:", "", *_log_summary(selected)]
+    return lines
 
 
 def _whea_handoff_sections(envelope: dict[str, Any], records: list[dict[str, Any]], compact: bool) -> list[dict[str, Any]]:

@@ -1,6 +1,7 @@
 """The stack: what it accepts, what it refuses, what it composes, and that it outlives the process."""
 
 import asyncio
+import copy
 import json
 import os
 import time
@@ -15,8 +16,12 @@ from mcp.shared.exceptions import MCPError
 
 from sentinel.app import State, create_app
 from sentinel.bridge import BridgeResult
-from sentinel.stack import PRESET_PROMPTS, Prompts, Stack, _item_lines
+from sentinel.readings.crash import STOPS_BASIS
+from sentinel.stack import PRESET_PROMPTS, STOP_REF_LOGS, Prompts, Stack, _item_lines
 from tests.conftest import FakeBridge, LogBridge, identity_result
+from tests.test_crash import collection_for, faults_fixture, payload
+from tests.test_crash import crash as take_crash_fixture
+from tests.test_crash import faults as take_faults_fixture
 
 TOKEN = "test-token-0123456789"
 AUTH = {"Authorization": f"Bearer {TOKEN}"}
@@ -69,6 +74,26 @@ def add(client: TestClient, **body) -> dict:
     response = client.post("/api/stack/items", headers=AUTH, json=body)
     assert response.status_code == 201, response.text
     return response.json()
+
+
+def crash_envelope(*, incomplete_reports: bool = False) -> dict:
+    body = payload()
+    body["collection"] = collection_for(body, 5)
+    if incomplete_reports:
+        body["collection"]["reports"]["log_oldest"] = "2026-09-20T00:00:00Z"
+    return take_crash_fixture(body, count=5).to_dict()
+
+
+def faults_envelope() -> dict:
+    return take_faults_fixture(faults_fixture(), count=30, since="2026-09-01T00:00:00Z").to_dict()
+
+
+def handoff(envelope: dict, *, ids: list[int | str] | None = None, verbosity: str = "summary") -> str:
+    return "\n".join(_item_lines(1, {"kind": "selection" if ids is not None else "reading", "reading": envelope, "ids": ids, "verbosity": verbosity}))
+
+
+def projected_sections(text: str) -> list[dict]:
+    return json.loads(text.split("```json\n", 1)[1].split("\n```", 1)[0])
 
 
 def test_dump_handoff_starts_with_interpretation_and_keeps_raw_bytes_available():
@@ -629,6 +654,154 @@ def test_large_log_defaults_to_a_bounded_summary_with_full_evidence_on_demand(cl
     assert client.patch(f"/api/stack/items/{item['id']}", headers=AUTH, json={"verbosity": "full"}).status_code == 200
     full = client.get("/api/stack/composed", headers=AUTH).json()["text"]
     assert "synthetic row 100" in full
+
+
+def test_crash_summary_carries_stops_and_coverage_without_raw_event_rows(client: TestClient):
+    envelope = crash_envelope(incomplete_reports=True)
+    stops = next(section["data"] for section in envelope["sections"] if section["name"] == "stops")
+    assert set(stops[0]["records"]) == set(STOP_REF_LOGS) | {"report"}
+    assert stops[3]["no_bugcheck_recorded"] is None  # The report log's retained boundary is too recent.
+    summary = handoff(envelope)
+    full = handoff(envelope, verbosity="full")
+    assert add(client, kind="reading", envelope=envelope)["verbosity"] == "summary"
+    routed = client.get("/api/stack/composed", headers=AUTH)
+    assert routed.status_code == 200 and '"no_bugcheck_recorded": null' in routed.json()["text"]
+    assert len(summary) < len(full) * 0.4
+    assert STOPS_BASIS in summary
+    assert '"stopped_at": "2026-09-12T06:11:02.000Z"' in summary
+    assert '"reported_at": "2026-07-04T09:00:00.000Z"' in summary
+    assert '"no_bugcheck_recorded": null' in summary
+    assert '"bound_reached": false' in summary and '"retained_from"' in summary
+    assert "Display driver nvlddmkm" in summary
+    assert '"Properties"' not in summary and '"Properties"' in full
+    assert "| Time | Level | Provider | Id | Message |" not in summary
+    issues = next(section for section in projected_sections(summary) if section["name"] == "decode_issues")
+    assert issues["basis"] and issues["data"]["available"] is True
+
+
+def test_saved_crash_with_more_than_twenty_stops_names_the_omission():
+    envelope = crash_envelope()
+    stops = next(section["data"] for section in envelope["sections"] if section["name"] == "stops")
+    stops.extend(copy.deepcopy(stops[0]) for _ in range(20))
+    summary = handoff(envelope)
+    projected = next(section for section in projected_sections(summary) if section["name"] == "stops")["data"]
+    assert projected["returned"] == 25 and len(projected["shown"]) == 20 and projected["omitted"] == 5
+    assert len(summary) < 40_000
+
+
+def test_selected_crash_stop_carries_its_interpretation_and_exact_rows(client: TestClient):
+    envelope = crash_envelope(incomplete_reports=True)
+    stops = next(section["data"] for section in envelope["sections"] if section["name"] == "stops")
+    assert stops[3]["no_bugcheck_recorded"] is None
+    selected = handoff(envelope, ids=["System:900"], verbosity="full")
+    selected_summary = handoff(envelope, ids=["System:900"], verbosity="summary")
+    assert add(client, kind="selection", envelope=envelope, ids=["System:900"])["verbosity"] == "full"
+    assert "Composed stops referencing the selected records: 1" in selected
+    assert '"no_bugcheck_recorded": null' in selected
+    assert '"no_bugcheck_recorded": null' in selected_summary
+    assert '"RecordId": 900' in selected and '"RecordId": 1301' not in selected
+    assert '"collection"' in selected and '"coverage"' in selected
+    assert '"Properties"' in selected
+    clean = handoff(envelope, ids=["System:1100"], verbosity="full")
+    assert "No composed stop in the stored reading references these records." in clean
+    report_only = handoff(envelope, ids=["Application:2100"], verbosity="full")
+    assert '"stopped_at": null' in report_only and '"reported_at": "2026-07-04T09:00:00.000Z"' in report_only
+    assert "A report time alone does not establish stop time." in report_only
+    decoded = next(section["data"] for section in envelope["sections"] if section["name"] == "decoded")
+    next(entry for entry in decoded if entry["RecordId"] == 900)["error"] = "synthetic property mismatch"
+    selected_with_issue = handoff(envelope, ids=["System:900"], verbosity="summary")
+    assert '"error": "synthetic property mismatch"' in selected_with_issue
+    assert next(section for section in projected_sections(selected_with_issue) if section["name"] == "decode_issues")["data"]["available"] is True
+
+
+def test_fault_summary_carries_grouped_meaning_and_retention(client: TestClient):
+    envelope = faults_envelope()
+    summary = handoff(envelope)
+    full = handoff(envelope, verbosity="full")
+    assert add(client, kind="reading", envelope=envelope)["verbosity"] == "summary"
+    routed = client.get("/api/stack/composed", headers=AUTH)
+    assert routed.status_code == 200 and '"by_kind"' in routed.json()["text"]
+    assert len(summary) < len(full) / 2
+    assert '"by_kind"' in summary and '"applications"' in summary
+    assert '"name": "example.exe"' in summary and "ucrtbase.dll" in summary
+    assert '"name": "access violation"' in summary and '"code": "0x141"' in summary
+    assert '"complete": true' in summary and '"retained_from": "2026-01-01T00:00:00.0000000Z"' in summary
+    assert "Leading sources" not in summary and '"Properties"' not in summary
+
+
+def test_selected_fault_report_keeps_grouping_and_raw_record():
+    envelope = faults_envelope()
+    selected = handoff(envelope, ids=["Application:3999"], verbosity="full")
+    selected_summary = handoff(envelope, ids=["Application:3999"], verbosity="summary")
+    assert "Derived fault entries referencing the selected records: 1" in selected
+    assert '"RecordId": 4000' in selected and '"RecordId": 3999' in selected
+    assert '"code": "0x141"' in selected and '"bucket": "LKD_0x141_Tdr:6_IMAGE_nvlddmkm.sys_Ampere"' in selected
+    assert '"coverage"' in selected and '"Properties"' in selected
+    assert '"code": "0x141"' in selected_summary and "Selected raw records" in selected_summary
+
+
+def test_older_selected_rows_without_log_keep_inferable_interpretations():
+    crash = crash_envelope()
+    for section in crash["sections"]:
+        if section["name"] in ("records", "decoded"):
+            for row in section["data"]:
+                row.pop("Log", None)
+    selected_stop = handoff(crash, ids=[900], verbosity="full")
+    assert "Composed stops referencing the selected records: 1" in selected_stop
+    projected = projected_sections(selected_stop)
+    assert len(next(section for section in projected if section["name"] == "decoded")["data"]) == 1
+    report_only = handoff(crash, ids=[2100], verbosity="full")
+    assert '"reported_at": "2026-07-04T09:00:00.000Z"' in report_only
+    raw = next(section["data"] for section in crash["sections"] if section["name"] == "records")
+    next(row for row in raw if row["RecordId"] == 900).pop("ProviderName", None)
+    unknown_source = handoff(crash, ids=[900], verbosity="full")
+    assert "stop association is unknown" in unknown_source and "No composed stop" not in unknown_source
+
+    faults = faults_envelope()
+    for section in faults["sections"]:
+        if section["name"] in ("records", "decoded"):
+            for row in section["data"]:
+                row.pop("Log", None)
+    selected_report = handoff(faults, ids=[3999], verbosity="full")
+    assert "Derived fault entries referencing the selected records: 1" in selected_report
+    assert '"RecordId": 4000' in selected_report
+
+
+def test_large_fault_projection_names_the_groups_and_entries_it_omits():
+    envelope = faults_envelope()
+    summary = next(section["data"] for section in envelope["sections"] if section["name"] == "summary")
+    summary["applications"] = [
+        {"name": f"app-{index}.exe", "count": 1, "first": None, "last": None, "modules": [f"module-{part}" for part in range(8)]}
+        for index in range(150)
+    ]
+    decoded = next(section["data"] for section in envelope["sections"] if section["name"] == "decoded")
+    decoded.extend({"Log": "Application", "RecordId": 10000 + index, "kind": "application crash", "fields": {"AppName": f"app-{index}.exe"}} for index in range(150))
+    text = handoff(envelope)
+    assert '"other_applications": 140' in text and '"other_application_entries": 140' in text
+    assert '"other_modules": 3' in text and '"entries": 156' in text and '"omitted_entries": 146' in text
+    assert '"application": "app-149.exe"' in text and '"application": "app-70.exe"' not in text
+    assert len(text) < 13_000
+
+
+def test_malformed_saved_derived_sections_do_not_claim_zero_findings():
+    crash = crash_envelope()
+    next(section for section in crash["sections"] if section["name"] == "stops")["data"] = {"broken": True}
+    crash_text = handoff(crash)
+    assert "stop count is unknown" in crash_text and '"available": false' in crash_text
+    crash = crash_envelope()
+    next(section for section in crash["sections"] if section["name"] == "decoded")["data"].pop()
+    issues = next(section for section in projected_sections(handoff(crash)) if section["name"] == "decode_issues")
+    assert issues["data"]["available"] is False and issues["data"]["returned"] is None
+    faults = faults_envelope()
+    next(section for section in faults["sections"] if section["name"] == "decoded")["data"] = {"broken": True}
+    faults_text = handoff(faults)
+    assert "entry count is unknown" in faults_text and '"available": false' in faults_text
+    next(section for section in faults["sections"] if section["name"] == "summary")["data"] = {"by_kind": {"application crash": 3}, "applications": "broken"}
+    malformed_grouping = handoff(faults)
+    assert '"applications": null' in malformed_grouping and '"other_applications": null' in malformed_grouping
+    assert '"available": false' in malformed_grouping
+    faults["sections"] = [section for section in faults["sections"] if section["name"] != "summary"]
+    assert "grouped counts are unknown" in handoff(faults)
 
 
 def test_the_composed_handoff(client: TestClient):
