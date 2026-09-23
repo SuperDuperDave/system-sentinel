@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## [1.3.6] - 2026-09-23
 
 ### Changed
 - Stack now distinguishes later observations of the same reading from retries of one held observation. Duplicate responses identify the existing item and observation time; selected log rows use the same identity whether supplied by numeric RecordId or its qualified `Log:RecordId` form.
