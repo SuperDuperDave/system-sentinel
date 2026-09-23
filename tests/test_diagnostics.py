@@ -3,9 +3,7 @@ transition is named by its provider as well as its id, the reliability rollup is
 and signals says what it could not see.
 
 The unit tests hold the derivations to fixtures, because the shapes that matter on this
-machine (a root port with two endpoints under it, a WHEA record in the ledger, a disabled
-device) are not all present here: this machine holds no WHEA-Logger record at all, so the
-non-empty ledger path is tested here and only the empty one is observed on the host.
+machine (a root port with two endpoints under it and a disabled device) are not all present.
 """
 
 import asyncio
@@ -27,6 +25,7 @@ from sentinel.readings.diagnostics import (
     pcie_topology,
     power_derived,
     power_script,
+    power_source,
     sleep_model,
     take_constraints,
     take_signals_sync,
@@ -55,6 +54,8 @@ PCI_DEVICES = [
 RELATIONS_OK = {"exit_code": 0, "parsed": True, "listed": 40, "mapped": 40}
 
 POWER_PAYLOAD = {
+    "sources": {key: {"outcome": "ok"} for key in ("sleep_states", "aspm", "wake_armed", "hiberboot", "boot_time", "transitions")}
+    | {"batteries": {"outcome": "empty"}, "transitions": {"outcome": "ok", "limit": 120, "limit_reached": False, "returned": 5}},
     "sleep_states": [
         "The following sleep states are available on this system:", "Standby (S3)", "Hibernate", "Fast Startup",
         "The following sleep states are not available on this system:", "Standby (S0 Low Power Idle)", "The system firmware does not support this standby state.",
@@ -80,11 +81,8 @@ MEMORY_PAYLOAD = {
         {"BankLabel": "P0 CHANNEL B", "DeviceLocator": "DIMM 1", "Manufacturer": "Kingston", "PartNumber": "KF432", "serial_number": "BBBB",
          "Capacity": 8589934592, "Speed": 3200, "ConfiguredClockSpeed": 3200, "ConfiguredVoltage": 1350, "TotalWidth": 72, "DataWidth": 64},
     ],
-    "array": {"MaxCapacity": 134217728, "MemoryDevices": 4, "MemoryErrorCorrection": 3},
-    "ledger": [
-        {"RecordId": 5, "Id": 17, "LevelDisplayName": "Warning", "ProviderName": "Microsoft-Windows-WHEA-Logger", "TimeCreated": "2026-09-01T00:00:00.000Z", "Kind": "whea"},
-    ],
-    "ledger_days": 30,
+    "arrays": [{"MaxCapacity": 134217728, "MemoryDevices": 4, "MemoryErrorCorrection": 3, "Use": 3}],
+    "sources": {key: {"outcome": "ok"} for key in ("modules", "arrays", "diagnostic", "log_begins")},
     "diagnostic": {
         "Id": 1201,
         "TimeCreated": "2026-07-04T02:11:09.000Z",
@@ -323,26 +321,81 @@ def test_the_link_power_setting_is_the_documented_index():
 def test_power_counts_the_ledger_and_reports_the_window_it_covers():
     derived = power_derived(POWER_PAYLOAD)
     assert derived["sleep_model"] == "legacy standby (S3)"
-    assert derived["power_source"] == "mains (no battery is present)"
+    assert derived["power_source"] == "mains (no battery reported)"
     assert derived["fast_startup"] is True
     assert derived["wake_armed"] == [] and derived["wake_armed_count"] == 0  # powercfg prints NONE for nothing armed
     assert derived["ledger"]["counts"] == {"display driver reset": 1, "log started": 1, "unexpected shutdown": 1, "unnamed transition": 1, "wake": 1}
     assert derived["ledger"]["window"] == {"first": "2026-09-16T10:00:00.000Z", "last": "2026-09-20T10:00:00.000Z"}
+    assert derived["ledger"]["limit"] == 120 and derived["ledger"]["limit_reached"] is False
     assert derived["uptime_seconds"] > 0
 
 
 def test_power_lifts_a_sub_query_failure_into_the_envelope():
     reading = asyncio.run(take("power", payload_bridge(), {}))
     assert reading.outcome == "ok"
-    assert [(s.name, s.cls) for s in reading.sections] == [("raw", "raw"), ("derived", "derived")]
+    assert [(s.name, s.cls) for s in reading.sections] == [("raw", "raw"), ("derived", "derived"), ("collection", "raw")]
     assert any("powercfg /a" in w for w in reading.warnings)
     assert "warnings" not in reading.section("raw").data  # a warning is not a finding
+
+
+def test_power_failed_sources_do_not_claim_mains_wake_devices_or_empty_transitions():
+    payload = dict(POWER_PAYLOAD, sources={**POWER_PAYLOAD["sources"],
+        "batteries": {"outcome": "failed"}, "wake_armed": {"outcome": "failed"}, "transitions": {"outcome": "failed"}},
+        batteries=[], wake_armed=[], transitions=[])
+    derived = power_derived(payload)
+    assert derived["power_source"] is None
+    assert derived["wake_armed"] is None and derived["wake_armed_count"] is None
+    assert derived["ledger"]["records"] is None and derived["ledger"]["counts"] is None
+    assert derived["sleep_model"] == "legacy standby (S3)"  # independent source remains visible
+    assert power_derived({"batteries": []})["power_source"] is None  # missing provenance is a failure
+
+
+def test_power_battery_status_only_names_a_source_when_windows_reports_one():
+    assert power_source([{"BatteryStatus": 1}]) == "battery (discharging)"
+    assert power_source([{"BatteryStatus": 2}]) == "mains (battery present)"
+    assert power_source([{"BatteryStatus": 6}]) == "mains (battery charging)"
+    assert "unknown" in power_source([{"BatteryStatus": 3}])
+    assert "disagree" in power_source([{"BatteryStatus": 1}, {"BatteryStatus": 2}])
+    assert power_source([{"BatteryStatus": 1}, {"BatteryStatus": 3}]) == "battery (discharging)"
+    assert power_source([{"BatteryStatus": 2}, {"BatteryStatus": 3}]) == "mains (battery present)"
+
+
+@pytest.mark.parametrize("source, field, derived_path", [
+    ("sleep_states", "sleep_states", ("sleep_model",)),
+    ("aspm", "aspm", ("link_power_management", "ac")),
+    ("hiberboot", "hiberboot_enabled", ("fast_startup",)),
+    ("boot_time", "boot_time", ("uptime_seconds",)),
+])
+def test_power_a_failed_independent_source_cannot_use_stale_raw_values(source: str, field: str, derived_path: tuple[str, ...]):
+    payload = dict(POWER_PAYLOAD, sources={**POWER_PAYLOAD["sources"], source: {"outcome": "failed"}})
+    assert payload[field] is not None  # stale values deliberately remain in the synthetic payload
+    value = power_derived(payload)
+    for key in derived_path:
+        value = value[key]
+    assert value is None
+
+
+def test_power_with_no_answered_sources_keeps_only_failure_provenance():
+    payload = dict(POWER_PAYLOAD, sources={name: {"outcome": "failed"} for name in POWER_PAYLOAD["sources"]},
+        sleep_states=None, wake_armed=None, batteries=None, transitions=None)
+    reading = asyncio.run(take("power", FakeBridge(BridgeResult("ok", items=[payload])), {}))
+    assert reading.outcome == "failed" and reading.count is None
+    assert [section.name for section in reading.sections] == ["collection"]
+
+
+def test_power_mismatched_transition_metadata_cannot_certify_returned_counts():
+    payload = dict(POWER_PAYLOAD, sources={**POWER_PAYLOAD["sources"], "transitions": {"outcome": "ok", "limit": 120, "limit_reached": False, "returned": 6}})
+    reading = asyncio.run(take("power", FakeBridge(BridgeResult("ok", items=[payload])), {}))
+    assert reading.outcome == "ok"
+    assert reading.section("collection").data["transitions"]["outcome"] == "failed"
+    assert reading.section("derived").data["ledger"]["records"] is None
+    assert any("transitions source" in warning for warning in reading.warnings)
 
 
 # ---------------------------------------------------------------- memory
 
 
-def test_memory_reads_the_slots_the_kit_and_the_ledger():
+def test_memory_reads_the_slots_and_the_kit():
     derived = memory_derived(MEMORY_PAYLOAD)
     assert derived["installed_gb"] == 16.0
     assert (derived["slots_used"], derived["slots_total"], derived["slots_free"]) == (2, 4, 2)
@@ -350,12 +403,12 @@ def test_memory_reads_the_slots_the_kit_and_the_ledger():
     assert derived["modules"][0]["error_correction"] is False and derived["modules"][1]["error_correction"] is True
     assert derived["mixed_kit"] is True and derived["kits"] == ["Corsair CMK16", "Kingston KF432"]
     assert derived["below_rated_speed"] == ["DIMM 1"]
-    assert derived["ledger"] == {"window_days": 30, "records": 1, "counts": {"whea": 1}, "most_recent": "2026-09-01T00:00:00.000Z"}
+    assert "ledger" not in derived
 
 
 def test_memory_does_not_invent_empty_slots_when_the_array_count_is_unknown_or_inconsistent():
     for count in (None, 0, 1):
-        payload = dict(MEMORY_PAYLOAD, array={"MemoryDevices": count})
+        payload = dict(MEMORY_PAYLOAD, arrays=[{"MemoryDevices": count}])
         derived = memory_derived(payload)
         assert derived["slots_used"] == 2
         assert derived["slots_total"] is None
@@ -374,9 +427,9 @@ def test_memory_does_not_turn_missing_module_capacity_into_zero_gigabytes():
 
 
 def test_the_bug_check_half_of_the_ledger_belongs_to_the_crash_reading_now():
-    assert "Microsoft-Windows-WHEA-Logger" in MEMORY_SCRIPT
+    assert "Microsoft-Windows-WHEA-Logger" not in MEMORY_SCRIPT
     assert "WER-SystemErrorReporting" not in MEMORY_SCRIPT
-    assert "crash reading" in MEMORY_BASIS
+    assert "crash" in MEMORY_BASIS and "whea" in MEMORY_BASIS
 
 
 def test_the_memory_diagnostic_carries_how_far_back_no_result_reaches():
@@ -388,24 +441,72 @@ def test_the_memory_diagnostic_carries_how_far_back_no_result_reaches():
         "Message": "The Windows Memory Diagnostic tested the computer's memory and detected no errors.",
     }
     assert diagnostic["log_begins"] == "2026-07-01T06:15:00.000Z"
+    assert diagnostic["outcome"] == "ok"
     assert "never run" in MEMORY_BASIS  # a null result is not proof the test was never run
 
 
 def test_no_diagnostic_result_is_a_null_beside_the_logs_reach_not_a_silence():
-    payload = dict(MEMORY_PAYLOAD, diagnostic=None)
-    assert memory_derived(payload)["memory_diagnostic"] == {"last_result": None, "log_begins": "2026-07-01T06:15:00.000Z"}
-    assert memory_derived({})["memory_diagnostic"] == {"last_result": None, "log_begins": None}
+    payload = dict(MEMORY_PAYLOAD, diagnostic=None, sources={**MEMORY_PAYLOAD["sources"], "diagnostic": {"outcome": "empty"}})
+    assert memory_derived(payload)["memory_diagnostic"] == {"outcome": "empty", "last_result": None, "log_begins": "2026-07-01T06:15:00.000Z"}
+    assert memory_derived({})["memory_diagnostic"] == {"outcome": "failed", "last_result": None, "log_begins": None}
 
 
-def test_an_empty_ledger_is_a_finding_not_an_absence():
-    derived = memory_derived({"modules": MEMORY_PAYLOAD["modules"], "array": MEMORY_PAYLOAD["array"], "ledger": [], "ledger_days": 30})
-    assert derived["ledger"]["records"] == 0 and derived["ledger"]["most_recent"] is None
+def test_an_unobserved_module_inventory_is_unknown_not_zero():
+    payload = dict(MEMORY_PAYLOAD, modules=[], sources={**MEMORY_PAYLOAD["sources"], "modules": {"outcome": "failed"}})
+    derived = memory_derived(payload)
+    assert derived["slots_used"] is None and derived["modules"] is None and derived["mixed_kit"] is None
+    assert derived["slots_total"] == 4 and derived["slots_free"] is None
+    assert memory_derived({"modules": [], "sources": {"modules": {"outcome": "empty"}}})["slots_used"] == 0
+
+
+def test_memory_missing_inventory_fields_fail_the_source_without_erasing_other_data():
+    payload = dict(MEMORY_PAYLOAD)
+    del payload["modules"]
+    bridge = FakeBridge(BridgeResult("ok", items=[payload]))
+    reading = asyncio.run(take("memory", bridge, {}))
+    assert reading.outcome == "ok" and reading.count is None
+    assert reading.section("collection").data["modules"]["outcome"] == "failed"
+    assert reading.section("derived").data["slots_used"] is None
+    assert reading.section("derived").data["slots_total"] == 4
+    assert any("modules source" in warning for warning in reading.warnings)
+    empty = asyncio.run(take("memory", FakeBridge(BridgeResult("ok", items=[{}])), {}))
+    assert empty.outcome == "failed" and empty.count is None
+    assert [section.name for section in empty.sections] == ["collection"]
+    null_inventory = asyncio.run(take("memory", FakeBridge(BridgeResult("ok", items=[dict(MEMORY_PAYLOAD, modules=None)])), {}))
+    assert null_inventory.section("collection").data["modules"]["outcome"] == "failed"
+    assert null_inventory.section("derived").data["slots_used"] is None
+
+
+def test_memory_diagnostic_failure_is_not_a_negative_test_result():
+    payload = dict(MEMORY_PAYLOAD, sources={**MEMORY_PAYLOAD["sources"], "diagnostic": {"outcome": "failed"}})
+    result = memory_derived(payload)["memory_diagnostic"]
+    assert result["outcome"] == "failed" and result["last_result"] is None
+
+
+@pytest.mark.parametrize("code, expected", [(0, None), (1, None), (2, None), (3, False), (4, False), (5, True), (6, True), (7, None)])
+def test_array_error_correction_uses_the_documented_windows_codes(code: int, expected: bool | None):
+    payload = dict(MEMORY_PAYLOAD, arrays=[{**MEMORY_PAYLOAD["arrays"][0], "MemoryErrorCorrection": code}])
+    derived = memory_derived(payload)
+    assert derived["array_error_correction"] is expected
+    assert derived["array_error_correction_type"] is not None
+
+
+def test_multiple_system_memory_arrays_contribute_all_slots_and_require_ecc_agreement():
+    first = {"MemoryDevices": 8, "MemoryErrorCorrection": 5, "Use": 3}
+    second = {"MemoryDevices": 8, "MemoryErrorCorrection": 5, "Use": 3}
+    derived = memory_derived(dict(MEMORY_PAYLOAD, arrays=[first, second]))
+    assert derived["slots_total"] == 16 and derived["slots_free"] == 14
+    assert derived["array_error_correction"] is True and derived["array_error_correction_type"] == "single-bit ECC"
+    mixed = memory_derived(dict(MEMORY_PAYLOAD, arrays=[first, {**second, "MemoryErrorCorrection": 3}]))
+    assert mixed["slots_total"] == 16 and mixed["array_error_correction"] is None and mixed["array_error_correction_type"] is None
+    missing = memory_derived(dict(MEMORY_PAYLOAD, arrays=[first, {**second, "MemoryDevices": None}]))
+    assert missing["slots_total"] is None and missing["slots_free"] is None
 
 
 def test_memory_returns_raw_and_derived_and_counts_its_modules():
     reading = asyncio.run(take("memory", payload_bridge(), {}))
     assert reading.outcome == "ok" and reading.count == 2
-    assert [(s.name, s.cls) for s in reading.sections] == [("raw", "raw"), ("derived", "derived")]
+    assert [(s.name, s.cls) for s in reading.sections] == [("raw", "raw"), ("derived", "derived"), ("collection", "raw")]
     assert reading.section("raw").data["modules"][0]["serial_number"] == "AAAA"  # redaction happens at the boundary, not here
 
 
@@ -693,6 +794,12 @@ def test_two_shutdown_records_and_one_crash_stop_are_one_lead():
     assert lead["evidence"]["returned"] == 1 and lead["readings"] == ["crash"]
 
 
+def test_signals_handles_an_unknown_power_transition_ledger():
+    power = _reading("power", [("derived", "derived", {"ledger": {"counts": None, "window": None}})])
+    signals, _ = take_signals_sync(_inputs(power=power))
+    assert not any(signal["id"] == "transition:display-reset-near-wake" for signal in signals)
+
+
 def test_crash_stop_lead_survives_an_empty_power_ledger_but_marks_partial_crash_source():
     power = _reading("power", [("derived", "derived", {"ledger": {"counts": {}, "window": {}}})])
     crash = _reading("crash", [("stops", "derived", STOPS[:1]), ("collection", "raw", {"system": {"outcome": "failed", "bound_reached": None}, "reports": {"outcome": "ok", "bound_reached": False}})])
@@ -844,7 +951,7 @@ def test_the_six_readings_are_registered_with_what_they_carry():
 
 def test_the_scripts_ask_for_what_the_readings_claim():
     assert "Get-PnpDevice -PresentOnly" in PCIE_SCRIPT and "/enum-devices /connected /relations /format xml" in PCIE_SCRIPT
-    assert "Win32_PhysicalMemoryArray" in MEMORY_SCRIPT and "Microsoft-Windows-WHEA-Logger" in MEMORY_SCRIPT
+    assert "Win32_PhysicalMemoryArray" in MEMORY_SCRIPT and "Microsoft-Windows-WHEA-Logger" not in MEMORY_SCRIPT
     assert "Microsoft-Windows-MemoryDiagnostics-Results" in MEMORY_SCRIPT and "-LogName System -Oldest -MaxEvents 1" in MEMORY_SCRIPT
     assert "Win32_ReliabilityStabilityMetrics" in RELIABILITY_SCRIPT_TEMPLATE and "Win32_ReliabilityRecords" in RELIABILITY_SCRIPT_TEMPLATE
     assert "CM_PROB_NONE" in CONSTRAINTS_SCRIPT
@@ -892,4 +999,6 @@ def test_the_transition_ledger_on_this_machine_names_every_record_it_returns():
     if reading.outcome != "ok":
         pytest.skip("power was not observed")
     counts = reading.section("derived").data["ledger"]["counts"]
+    if counts is None:
+        pytest.skip("transition records were not observed")
     assert "unnamed transition" not in counts, counts

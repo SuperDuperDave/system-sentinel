@@ -10,16 +10,16 @@ interface Module {
 
 export interface MemorySummary {
   installed_gb: number | null;
-  slots_used: number;
+  slots_used: number | null;
   slots_total: number | null;
   slots_free: number | null;
-  modules: Module[];
+  modules: Module[] | null;
 }
 
-/** A visual entry into the derived memory ledger; exact raw and derived fields stay below. */
+/** A visual entry into the returned module inventory; exact fields stay below. */
 export function MemoryMap({ data }: { data: MemorySummary }) {
   const { modules, slots_total: total, slots_used: used } = data;
-  const occupancy = total != null && total > 0 && used > 0 ? Math.min(100, (used / total) * 100) : null;
+  const occupancy = total != null && total > 0 && used != null && used > 0 ? Math.min(100, (used / total) * 100) : null;
 
   return (
     <section className={styles.map} aria-labelledby="memory-map-title">
@@ -36,14 +36,14 @@ export function MemoryMap({ data }: { data: MemorySummary }) {
           <span className="readout">installed capacity</span>
         </div>
         <div className={styles.population}>
-          <div className={`${styles.populationLine} readout`}><span>{used} {used === 1 ? 'module' : 'modules'} returned</span><span>{total == null ? 'Total slots unknown' : `${total} slots reported`}</span></div>
-          <div className={styles.track} role={occupancy == null ? undefined : 'meter'} aria-label={occupancy == null ? undefined : 'Reported slot population'} aria-valuemin={occupancy == null ? undefined : 0} aria-valuemax={occupancy == null ? undefined : total ?? undefined} aria-valuenow={occupancy == null ? undefined : used} aria-valuetext={occupancy == null ? undefined : `${used} of ${total} reported slots have returned modules`}>
+          <div className={`${styles.populationLine} readout`}><span>{used == null ? 'Module inventory unavailable' : `${used} ${used === 1 ? 'module' : 'modules'} returned`}</span><span>{total == null ? 'Total slots unknown' : `${total} slots reported`}</span></div>
+          <div className={styles.track} role={occupancy == null ? undefined : 'meter'} aria-label={occupancy == null ? undefined : 'Reported slot population'} aria-valuemin={occupancy == null ? undefined : 0} aria-valuemax={occupancy == null ? undefined : total ?? undefined} aria-valuenow={occupancy == null ? undefined : used ?? undefined} aria-valuetext={occupancy == null ? undefined : `${used} of ${total} reported slots have returned modules`}>
             {occupancy == null ? null : <span style={{ width: `${occupancy}%` }} />}
           </div>
           <p className={`${styles.free} readout`}>{data.slots_free == null ? 'Free slot count not established' : `${data.slots_free} ${data.slots_free === 1 ? 'slot' : 'slots'} not populated in this inventory`}</p>
         </div>
       </div>
-      {modules.length ? (
+      {modules?.length ? (
         <div className={styles.modules}>
           {modules.map((module, index) => {
             const rated = module.rated_mhz;
@@ -62,8 +62,8 @@ export function MemoryMap({ data }: { data: MemorySummary }) {
             );
           })}
         </div>
-      ) : <p className={styles.noModules}>No memory module inventory was returned.</p>}
-      {modules.length ? <p className={`${styles.speedNote} readout`}>Speed bars compare configured and rated clocks. They do not measure performance or health.</p> : null}
+      ) : <p className={styles.noModules}>{modules == null ? 'The module inventory was not observed.' : 'Windows returned no memory modules.'}</p>}
+      {modules?.length ? <p className={`${styles.speedNote} readout`}>Speed bars compare configured and rated clocks. They do not measure performance or health.</p> : null}
       <div className={`${styles.links} readout`}><a href="#diagnostic-memory-derived">Derived fields ↗</a><a href="#diagnostic-memory-raw">Windows fields ↗</a></div>
     </section>
   );

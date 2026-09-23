@@ -16,9 +16,11 @@ from pathlib import Path, PureWindowsPath
 import pytest
 
 import sentinel.bridge
+import sentinel.readings.diagnostics as diagnostics
 from sentinel import readings  # noqa: F401
 from sentinel.bridge import OUTCOMES, Bridge, Session, sessions_report
 from sentinel.reading import REGISTRY, Section, from_bridge, from_object, take
+from sentinel.readings.diagnostics import MEMORY_SCRIPT, memory_derived, power_derived, power_script
 from sentinel.readings.health import learn_identity
 from tests.conftest import real_bridge_or_skip
 
@@ -313,9 +315,91 @@ def test_memory_carries_windows_own_memory_test_and_how_far_back_it_looked():
         pytest.skip("memory was not observed")
     derived = r.section("derived").data
     diagnostic = derived["memory_diagnostic"]
-    assert set(diagnostic) == {"last_result", "log_begins"}
+    arrays = r.section("raw").data["arrays"]
+    assert r.section("collection").data["arrays"]["outcome"] in ("ok", "empty")
+    assert isinstance(arrays, list)
+    assert set(diagnostic) == {"outcome", "last_result", "log_begins"}
     assert diagnostic["last_result"] is None or {"Id", "TimeCreated", "Message"} <= set(diagnostic["last_result"])
-    assert "bugcheck" not in derived["ledger"]["counts"]  # the stops are the crash reading's
+    assert "ledger" not in derived  # hardware errors belong to whea, not memory
+
+
+def test_memory_module_query_failure_does_not_become_zero_modules():
+    bridge = real_bridge_or_skip()
+    script = MEMORY_SCRIPT.replace("Win32_PhysicalMemory -ErrorAction Stop", "Win32_SystemSentinelMissingMemory -ErrorAction Stop")
+    result = bridge.run(script, depth=8)
+    assert result.outcome == "ok" and len(result.items) == 1
+    payload = result.items[0]
+    assert payload["sources"]["modules"]["outcome"] == "failed"
+    assert memory_derived(payload)["slots_used"] is None
+    assert any("Win32_PhysicalMemory did not answer" in warning for warning in payload["warnings"])
+
+
+def test_memory_module_failure_survives_the_whole_reading_boundary(monkeypatch: pytest.MonkeyPatch):
+    bridge = real_bridge_or_skip()
+    script = MEMORY_SCRIPT.replace("Win32_PhysicalMemory -ErrorAction Stop", "Win32_SystemSentinelMissingMemory -ErrorAction Stop")
+    monkeypatch.setattr(diagnostics, "MEMORY_SCRIPT", script)
+    reading = asyncio.run(take("memory", bridge, {}))
+    assert reading.outcome == "ok" and reading.count is None
+    assert reading.section("collection").data["modules"]["outcome"] == "failed"
+    assert reading.section("raw").data["modules"] is None
+    assert reading.section("derived").data["slots_used"] is None
+    assert any("Win32_PhysicalMemory did not answer" in warning for warning in reading.warnings)
+
+
+def test_memory_diagnostic_query_failure_is_not_no_retained_result():
+    bridge = real_bridge_or_skip()
+    script = MEMORY_SCRIPT.replace("LogName='System'; ProviderName='Microsoft-Windows-MemoryDiagnostics-Results'", "LogName='SystemSentinelMissingLog'; ProviderName='Microsoft-Windows-MemoryDiagnostics-Results'")
+    result = bridge.run(script, depth=8)
+    assert result.outcome == "ok" and len(result.items) == 1
+    payload = result.items[0]
+    assert payload["sources"]["diagnostic"]["outcome"] == "failed"
+    assert memory_derived(payload)["memory_diagnostic"]["outcome"] == "failed"
+    assert any("memory diagnostic result did not read" in warning for warning in payload["warnings"])
+
+
+def test_power_failed_battery_and_wake_queries_do_not_become_mains_or_a_device():
+    bridge = real_bridge_or_skip()
+    script = power_script().replace("Win32_Battery -ErrorAction Stop", "Win32_SystemSentinelMissingBattery -ErrorAction Stop")
+    script = script.replace("powercfg.exe /devicequery wake_armed", "powercfg.exe /devicequery sentinel_missing_query")
+    result = bridge.run(script, depth=8)
+    assert result.outcome == "ok" and len(result.items) == 1
+    payload = result.items[0]
+    assert payload["sources"]["batteries"]["outcome"] == "failed"
+    assert payload["sources"]["wake_armed"]["outcome"] == "failed"
+    derived = power_derived(payload)
+    assert derived["power_source"] is None and derived["wake_armed_count"] is None
+    assert payload["wake_armed"] is None
+    assert len(payload["warnings"]) >= 2
+
+
+def test_power_failed_transition_query_does_not_claim_a_quiet_ledger():
+    bridge = real_bridge_or_skip()
+    script = power_script().replace("Get-WinEvent -FilterXml ([xml]$query) -MaxEvents 121", "Get-WinEvent -LogName 'SystemSentinelMissingLog' -MaxEvents 121")
+    result = bridge.run(script, depth=8)
+    assert result.outcome == "ok" and len(result.items) == 1
+    payload = result.items[0]
+    assert payload["sources"]["transitions"]["outcome"] == "failed"
+    assert payload["transitions"] is None
+    assert power_derived(payload)["ledger"]["records"] is None
+    assert any("transition ledger did not read" in warning for warning in payload["warnings"])
+
+
+def test_power_transition_bound_marks_older_matches_unknown():
+    bridge = real_bridge_or_skip()
+    synthetic_events = r"""
+function Get-WinEvent {
+    param($FilterXml, $MaxEvents)
+    1..121 | ForEach-Object {
+        [pscustomobject]@{ RecordId = $_; Id = 6005; ProviderName = 'EventLog'; LevelDisplayName = 'Information'; TimeCreated = [datetime]::UtcNow; Message = 'synthetic transition' }
+    }
+}
+"""
+    result = bridge.run(synthetic_events + power_script(), depth=8)
+    assert result.outcome == "ok" and len(result.items) == 1
+    payload = result.items[0]
+    assert payload["sources"]["transitions"] == {"outcome": "ok", "limit": 120, "limit_reached": True, "returned": 120}
+    assert len(payload["transitions"]) == 120
+    assert power_derived(payload)["ledger"]["limit_reached"] is True
 
 
 def test_the_power_ledger_names_the_logs_own_start_and_stop_when_they_are_there():
@@ -323,6 +407,8 @@ def test_the_power_ledger_names_the_logs_own_start_and_stop_when_they_are_there(
     r = asyncio.run(take("power", bridge, {}))
     if r.outcome != "ok":
         pytest.skip("power was not observed")
+    if r.section("collection").data["transitions"]["outcome"] not in ("ok", "empty"):
+        pytest.skip("transition records were not observed")
     records = r.section("raw").data["transitions"]
     counts = r.section("derived").data["ledger"]["counts"]
     for event_id, name in ((6005, "log started"), (6006, "log stopped")):

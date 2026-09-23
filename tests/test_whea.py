@@ -1075,6 +1075,29 @@ def test_the_screenshot_fixture_never_feeds_a_truncated_cper_to_the_real_decoder
     assert whea.cper_header(channel[1]["RawData"])[1] is not None
 
 
+def test_the_screenshot_fixture_routes_memory_and_power_to_their_own_sources(monkeypatch):
+    from runpy import run_path
+
+    from sentinel.readings.diagnostics import MEMORY_SCRIPT, memory_derived, power_derived, power_script
+
+    fixture = run_path(str(Path(__file__).parents[1] / "docs/screens/fixtures/fixture-server.py"))
+    bridge = fixture["FixtureBridge"]()
+    memory = bridge.run(MEMORY_SCRIPT, depth=8).items[0]
+    power = bridge.run(power_script(), depth=8).items[0]
+    assert memory["sources"]["modules"]["outcome"] == "ok"
+    assert memory_derived(memory)["slots_used"] == 1
+    assert power["sources"]["batteries"]["outcome"] == "empty"
+    assert power_derived(power)["power_source"] == "mains (no battery reported)"
+
+    monkeypatch.setenv("SENTINEL_FIXTURE_DIAGNOSTIC_FAILURES", "1")
+    failed_memory = bridge.run(MEMORY_SCRIPT, depth=8).items[0]
+    failed_power = bridge.run(power_script(), depth=8).items[0]
+    assert failed_memory["sources"]["modules"]["outcome"] == "failed"
+    assert memory_derived(failed_memory)["slots_used"] is None
+    assert failed_power["sources"]["batteries"]["outcome"] == "failed"
+    assert power_derived(failed_power)["power_source"] is None
+
+
 def _ran(entry: dict[str, Any]) -> dict[str, Any]:
     """WSL failing to hand the process over is the environment, not an answer about the record."""
     if str(entry.get("error", "")).startswith("WSL could not start"):

@@ -39,8 +39,8 @@ from typing import Any
 from ..bridge import Bridge
 from ..reading import REGISTRY, Reading, Section, Spec, from_object, register, take
 
-# The fabric and the memory ledger nest deeper than the bridge's default depth:
-# a group holds members which hold their upstream chains.
+# The fabric nests deeper than the bridge's default depth: a group holds members
+# which hold their upstream chains.
 DEEP = 8
 
 # ---------------------------------------------------------------------------
@@ -121,37 +121,57 @@ $devices = @(foreach ($d in $present) {
 
 POWER_SCRIPT_TEMPLATE = r"""
 $warnings = @()
+$sources = @{}
 
-$sleep_states = @()
+$sleep_states = $null
 try {
-    $sleep_states = @((& powercfg.exe /a 2>&1 | Out-String) -split "`r?`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    $global:LASTEXITCODE = $null
+    $text = (& powercfg.exe /a 2>&1 | Out-String)
+    if ($LASTEXITCODE -ne 0) { throw "exit code $LASTEXITCODE" }
+    $sleep_states = @($text -split "`r?`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    $sources.sleep_states = @{ outcome = $(if ($sleep_states.Count) { 'ok' } else { 'empty' }) }
     if ($sleep_states.Count -eq 0) { $warnings += 'powercfg /a produced no output: the supported sleep states were not observed.' }
-} catch { $warnings += "powercfg /a did not run: $($_.Exception.Message)" }
+} catch { $sources.sleep_states = @{ outcome = 'failed' }; $warnings += "powercfg /a did not run: $($_.Exception.Message)" }
 
 $aspm_ac = $null
 $aspm_dc = $null
 try {
-    foreach ($line in ((& powercfg.exe /query SCHEME_CURRENT SUB_PCIEXPRESS ASPM 2>&1 | Out-String) -split "`r?`n")) {
+    $global:LASTEXITCODE = $null
+    $text = (& powercfg.exe /query SCHEME_CURRENT SUB_PCIEXPRESS ASPM 2>&1 | Out-String)
+    if ($LASTEXITCODE -ne 0) { throw "exit code $LASTEXITCODE" }
+    foreach ($line in ($text -split "`r?`n")) {
         if ($line -match 'AC Power Setting Index:\s*(0x[0-9a-fA-F]+)') { $aspm_ac = $Matches[1] }
         if ($line -match 'DC Power Setting Index:\s*(0x[0-9a-fA-F]+)') { $aspm_dc = $Matches[1] }
     }
+    $sources.aspm = @{ outcome = $(if ($null -ne $aspm_ac -or $null -ne $aspm_dc) { 'ok' } else { 'empty' }) }
     if ($null -eq $aspm_ac -and $null -eq $aspm_dc) { $warnings += 'powercfg reported no PCI Express link state power management setting for the active scheme.' }
-} catch { $warnings += "powercfg /query did not run: $($_.Exception.Message)" }
+} catch { $sources.aspm = @{ outcome = 'failed' }; $warnings += "powercfg /query did not run: $($_.Exception.Message)" }
 
-$wake_armed = @()
-try { $wake_armed = @((& powercfg.exe /devicequery wake_armed 2>&1) | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ }) }
-catch { $warnings += "powercfg /devicequery did not run: $($_.Exception.Message)" }
+$wake_armed = $null
+try {
+    $global:LASTEXITCODE = $null
+    $text = (& powercfg.exe /devicequery wake_armed 2>&1 | Out-String)
+    if ($LASTEXITCODE -ne 0) { throw "exit code $LASTEXITCODE" }
+    $wake_armed = @($text -split "`r?`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    $sources.wake_armed = @{ outcome = $(if ($wake_armed.Count) { 'ok' } else { 'empty' }) }
+} catch { $sources.wake_armed = @{ outcome = 'failed' }; $warnings += "powercfg /devicequery did not run: $($_.Exception.Message)" }
 
 $hiberboot = $null
 $entry = Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Power' -Name HiberbootEnabled -ErrorAction SilentlyContinue
-if ($null -ne $entry) { $hiberboot = [int]$entry.HiberbootEnabled } else { $warnings += 'HiberbootEnabled was not readable: the fast startup setting was not observed.' }
+if ($null -ne $entry) { $hiberboot = [int]$entry.HiberbootEnabled; $sources.hiberboot = @{ outcome = 'ok' } }
+else { $sources.hiberboot = @{ outcome = 'failed' }; $warnings += 'HiberbootEnabled was not readable: the fast startup setting was not observed.' }
 
-$batteries = @()
-try { $batteries = @(Get-CimInstance Win32_Battery -ErrorAction Stop | Select-Object Name, BatteryStatus, EstimatedChargeRemaining) }
-catch { $warnings += "Win32_Battery did not answer: $($_.Exception.Message)" }
+$batteries = $null
+try {
+    $batteries = @(Get-CimInstance Win32_Battery -ErrorAction Stop | Select-Object Name, BatteryStatus, EstimatedChargeRemaining)
+    $sources.batteries = @{ outcome = $(if ($batteries.Count) { 'ok' } else { 'empty' }) }
+} catch { $sources.batteries = @{ outcome = 'failed' }; $warnings += "Win32_Battery did not answer: $($_.Exception.Message)" }
 
 $boot = $null
-try { $boot = (Get-CimInstance Win32_OperatingSystem -ErrorAction Stop).LastBootUpTime } catch { $warnings += "Win32_OperatingSystem did not answer: $($_.Exception.Message)" }
+try {
+    $boot = (Get-CimInstance Win32_OperatingSystem -ErrorAction Stop).LastBootUpTime
+    $sources.boot_time = @{ outcome = $(if ($boot) { 'ok' } else { 'empty' }) }
+} catch { $sources.boot_time = @{ outcome = 'failed' }; $warnings += "Win32_OperatingSystem did not answer: $($_.Exception.Message)" }
 
 # Every transition the machine records: start and shutdown, sleep and resume, the
 # shutdowns it did not plan, and the display driver resets that sit beside them. Each
@@ -161,14 +181,20 @@ try { $boot = (Get-CimInstance Win32_OperatingSystem -ErrorAction Stop).LastBoot
 $query = @'
 {query}
 '@
-$transitions = @()
+$transitions = $null
+$transition_limit = 120
+$transition_limit_reached = $false
 try {
-    $transitions = @(Get-WinEvent -FilterXml ([xml]$query) -MaxEvents 120 -ErrorAction Stop |
+    $found = @(Get-WinEvent -FilterXml ([xml]$query) -MaxEvents 121 -ErrorAction Stop |
         Select-Object RecordId, Id, ProviderName, LevelDisplayName,
             @{Name='TimeCreated'; Expression={ $_.TimeCreated.ToUniversalTime().ToString('o') }},
             Message)
+    $transition_limit_reached = $found.Count -gt $transition_limit
+    $transitions = @($found | Select-Object -First $transition_limit)
+    $sources.transitions = @{ outcome = $(if ($transitions.Count) { 'ok' } else { 'empty' }); limit = $transition_limit; limit_reached = $transition_limit_reached; returned = $transitions.Count }
 } catch {
-    if ($_.FullyQualifiedErrorId -notlike 'NoMatchingEventsFound*') { $warnings += "The transition ledger did not read: $($_.Exception.Message)" }
+    if ($_.FullyQualifiedErrorId -like 'NoMatchingEventsFound*') { $transitions = @(); $sources.transitions = @{ outcome = 'empty'; limit = $transition_limit; limit_reached = $false; returned = 0 } }
+    else { $sources.transitions = @{ outcome = 'failed'; limit = $transition_limit; limit_reached = $null; returned = $null }; $warnings += "The transition ledger did not read: $($_.Exception.Message)" }
 }
 
 [pscustomobject]@{
@@ -179,64 +205,61 @@ try {
     batteries    = $batteries
     boot_time    = $(if ($boot) { $boot.ToUniversalTime().ToString('o') } else { $null })
     transitions  = $transitions
+    sources      = $sources
     warnings     = $warnings
 }
 """
 
 MEMORY_SCRIPT = r"""
 $warnings = @()
+$sources = @{}
 
-$modules = @()
+$modules = $null
 try {
     $modules = @(Get-CimInstance Win32_PhysicalMemory -ErrorAction Stop | Select-Object BankLabel, DeviceLocator, Manufacturer, PartNumber,
         @{Name='serial_number'; Expression={ $_.SerialNumber }},
         Capacity, Speed, ConfiguredClockSpeed, ConfiguredVoltage, MinVoltage, MaxVoltage, SMBIOSMemoryType, TotalWidth, DataWidth)
+    $sources.modules = @{ outcome = $(if ($modules.Count) { 'ok' } else { 'empty' }) }
     if ($modules.Count -eq 0) { $warnings += 'Win32_PhysicalMemory returned no modules.' }
-} catch { $warnings += "Win32_PhysicalMemory did not answer: $($_.Exception.Message)" }
+} catch { $sources.modules = @{ outcome = 'failed' }; $warnings += "Win32_PhysicalMemory did not answer: $($_.Exception.Message)" }
 
-$array = $null
-try { $array = @(Get-CimInstance Win32_PhysicalMemoryArray -ErrorAction Stop | Select-Object MaxCapacityEx, MaxCapacity, MemoryDevices, MemoryErrorCorrection)[0] }
-catch { $warnings += "Win32_PhysicalMemoryArray did not answer: $($_.Exception.Message)" }
-
-# What the machine has said about this memory. The records themselves, decoded, are the
-# whea reading; here they are the count and the moments, addressable by their record id.
-# A stop the machine did not plan is the crash reading's, not a second ledger here.
-$since = (Get-Date).AddDays(-30)
-$ledger = @()
+$arrays = $null
 try {
-    $ledger = @(Get-WinEvent -FilterHashtable @{LogName='System'; ProviderName='Microsoft-Windows-WHEA-Logger'; StartTime=$since} -ErrorAction Stop |
-        Select-Object RecordId, Id, LevelDisplayName, ProviderName,
-            @{Name='TimeCreated'; Expression={ $_.TimeCreated.ToUniversalTime().ToString('o') }},
-            @{Name='Kind'; Expression={ 'whea' }})
-} catch {
-    if ($_.FullyQualifiedErrorId -notlike 'NoMatchingEventsFound*') { $warnings += "The WHEA ledger did not read: $($_.Exception.Message)" }
-}
-$ledger = @($ledger | Sort-Object TimeCreated -Descending | Select-Object -First 100)
+    $allArrays = @(Get-CimInstance Win32_PhysicalMemoryArray -ErrorAction Stop | Select-Object MaxCapacityEx, MaxCapacity, MemoryDevices, MemoryErrorCorrection, Use)
+    $arrays = @($allArrays | Where-Object { $_.Use -eq 3 })
+    $sources.arrays = @{ outcome = $(if ($arrays.Count) { 'ok' } else { 'empty' }) }
+    if ($arrays.Count -eq 0) { $warnings += 'Win32_PhysicalMemoryArray returned no system-memory array.' }
+} catch { $sources.arrays = @{ outcome = 'failed' }; $warnings += "Win32_PhysicalMemoryArray did not answer: $($_.Exception.Message)" }
 
-# Windows' own test of this memory, whenever it last ran. The result lands in the System log,
-# so how far back "no result" reaches is the log's oldest record, not the life of the machine.
+# Windows' own memory test result, whenever it last ran. A clean no-match means
+# no result within System-log retention; a failed query means its absence is unknown.
 $diagnostic = $null
 try {
     $diagnostic = @(Get-WinEvent -FilterHashtable @{LogName='System'; ProviderName='Microsoft-Windows-MemoryDiagnostics-Results'} -MaxEvents 1 -ErrorAction Stop |
         Select-Object Id, LevelDisplayName, Message,
             @{Name='TimeCreated'; Expression={ $_.TimeCreated.ToUniversalTime().ToString('o') }})[0]
+    $sources.diagnostic = @{ outcome = $(if ($diagnostic) { 'ok' } else { 'empty' }) }
 } catch {
-    if ($_.FullyQualifiedErrorId -notlike 'NoMatchingEventsFound*') { $warnings += "The memory diagnostic result did not read: $($_.Exception.Message)" }
+    if ($_.FullyQualifiedErrorId -like 'NoMatchingEventsFound*') { $sources.diagnostic = @{ outcome = 'empty' } }
+    else { $sources.diagnostic = @{ outcome = 'failed' }; $warnings += "The memory diagnostic result did not read: $($_.Exception.Message)" }
 }
 
 $log_begins = $null
-try { $log_begins = (Get-WinEvent -LogName System -Oldest -MaxEvents 1 -ErrorAction Stop).TimeCreated.ToUniversalTime().ToString('o') }
+try {
+    $log_begins = (Get-WinEvent -LogName System -Oldest -MaxEvents 1 -ErrorAction Stop).TimeCreated.ToUniversalTime().ToString('o')
+    $sources.log_begins = @{ outcome = $(if ($log_begins) { 'ok' } else { 'empty' }) }
+}
 catch {
-    if ($_.FullyQualifiedErrorId -notlike 'NoMatchingEventsFound*') { $warnings += "The System log's oldest record did not read, so how far back it reaches is unknown: $($_.Exception.Message)" }
+    if ($_.FullyQualifiedErrorId -like 'NoMatchingEventsFound*') { $sources.log_begins = @{ outcome = 'empty' } }
+    else { $sources.log_begins = @{ outcome = 'failed' }; $warnings += "The System log's oldest record did not read, so how far back it reaches is unknown: $($_.Exception.Message)" }
 }
 
 [pscustomobject]@{
     modules      = $modules
-    array        = $array
-    ledger       = $ledger
-    ledger_days  = 30
+    arrays       = $arrays
     diagnostic   = $diagnostic
     log_begins   = $log_begins
+    sources      = $sources
     warnings     = $warnings
 }
 """
@@ -426,10 +449,12 @@ def take_pcie(bridge: Bridge, params: dict[str, Any]) -> Reading:
 
 POWER_BASIS = (
     "The sleep model is read from the states powercfg lists as available; the link state power "
-    "management setting is the documented index (0 off, 1 L0s, 2 L1, 3 L0s and L1); fast startup "
-    "is HiberbootEnabled; the power source is the battery's status, or mains where the machine has "
-    "no battery. Each ledger record is named by its provider and event id together, and the window "
-    "is the span the returned records actually cover."
+    "management setting is the documented index (0 off, 1 L0s, 2 L1, 3 L0s and L1); the fast startup "
+    "setting is HiberbootEnabled. The power source is inferred from a returned battery query: "
+    "discharge or AC when status identifies it, or external power when no battery was reported. "
+    "Each ledger record is named by its provider and event "
+    "id together. Counts cover only the returned records; limit_reached means older matches may "
+    "exist. A failed source makes its dependent derived values unknown, not empty."
 )
 
 # What the machine records a transition as: the provider and the event id together, because
@@ -502,15 +527,78 @@ def _aspm(index: Any) -> dict[str, Any] | None:
     return {"index": index, "setting": ASPM.get(value)}
 
 
+def _source_answered(payload: dict[str, Any], name: str, field: str) -> bool:
+    source = (payload.get("sources") or {}).get(name) or {}
+    return source.get("outcome") in ("ok", "empty") and _valid_source_field(payload, field, source.get("outcome"))
+
+
+def _valid_source_field(payload: dict[str, Any], field: str, outcome: str | None) -> bool:
+    if field not in payload:
+        return False
+    value = payload[field]
+    if field in ("sleep_states", "wake_armed", "batteries", "transitions", "modules", "arrays"):
+        if outcome in ("failed", "denied") and value is None:
+            return True
+        if not isinstance(value, list):
+            return False
+        if (outcome == "ok" and not value) or (outcome == "empty" and bool(value)):
+            return False
+        if field == "transitions" and outcome in ("ok", "empty"):
+            source = (payload.get("sources") or {}).get("transitions") or {}
+            if not (isinstance(source.get("returned"), int) and not isinstance(source.get("returned"), bool)
+                    and source["returned"] == len(value) and isinstance(source.get("limit"), int)
+                    and source["limit"] > 0 and isinstance(source.get("limit_reached"), bool)):
+                return False
+        return all(isinstance(item, dict) for item in value) if field in ("batteries", "transitions", "modules", "arrays") else True
+    if field == "aspm":
+        return isinstance(value, dict)
+    if outcome == "ok" and field == "diagnostic":
+        return isinstance(value, dict)
+    if outcome == "empty" and field in ("diagnostic", "boot_time", "log_begins"):
+        return value is None
+    if outcome == "ok" and field in ("boot_time", "log_begins"):
+        return isinstance(value, str) and bool(value)
+    if outcome == "ok" and field == "hiberboot_enabled":
+        return value is not None
+    return True
+
+
+def _collection(payload: dict[str, Any], fields: dict[str, str]) -> list[str]:
+    """A missing collector field or source report is a failed observation, never an empty one."""
+    reported = payload.get("sources") if isinstance(payload.get("sources"), dict) else {}
+    missing = []
+    sources = {}
+    for name, field in fields.items():
+        source = reported.get(name)
+        if not isinstance(source, dict) or source.get("outcome") not in ("ok", "empty", "failed", "denied") or not _valid_source_field(payload, field, source.get("outcome")):
+            sources[name] = {"outcome": "failed", "reason": "Collector omitted its source outcome or returned an unexpected field shape."}
+            missing.append(name)
+        else:
+            sources[name] = source
+    payload["sources"] = sources
+    return missing
+
+
+POWER_FIELDS = {
+    "sleep_states": "sleep_states", "aspm": "aspm", "wake_armed": "wake_armed",
+    "hiberboot": "hiberboot_enabled", "batteries": "batteries", "boot_time": "boot_time", "transitions": "transitions",
+}
+MEMORY_FIELDS = {"modules": "modules", "arrays": "arrays", "diagnostic": "diagnostic", "log_begins": "log_begins"}
+
+
 def power_source(batteries: list[dict[str, Any]]) -> str:
     if not batteries:
-        return "mains (no battery is present)"
-    status = batteries[0].get("BatteryStatus")
-    if status == 1:
+        return "mains (no battery reported)"
+    statuses = {_int(battery.get("BatteryStatus")) for battery in batteries}
+    discharge = 1 in statuses
+    ac = bool(statuses & {2, 6, 7, 8, 9})
+    if discharge and ac:
+        return "battery statuses disagree; power source unknown"
+    if discharge:
         return "battery (discharging)"
-    if status == 2:
-        return "mains (battery present)"
-    return "battery present, status not reported as charging or discharging"
+    if ac:
+        return "mains (battery charging)" if statuses & {6, 7, 8, 9} else "mains (battery present)"
+    return "battery present; power source unknown from reported status"
 
 
 def transition_kind(record: dict[str, Any]) -> str:
@@ -522,23 +610,29 @@ def transition_kind(record: dict[str, Any]) -> str:
 
 
 def power_derived(payload: dict[str, Any]) -> dict[str, Any]:
-    transitions = list(payload.get("transitions") or [])
+    transitions_known = _source_answered(payload, "transitions", "transitions")
+    transitions = list(payload.get("transitions") or []) if transitions_known else []
     stamps = sorted(str(t.get("TimeCreated")) for t in transitions if t.get("TimeCreated"))
     counts = Counter(transition_kind(t) for t in transitions)
-    armed = [str(w) for w in (payload.get("wake_armed") or []) if str(w).strip().lower() != _NONE]
+    armed_known = _source_answered(payload, "wake_armed", "wake_armed")
+    armed = [str(w) for w in (payload.get("wake_armed") or []) if str(w).strip().lower() != _NONE] if armed_known else None
     hiberboot = payload.get("hiberboot_enabled")
+    aspm = (payload.get("aspm") or {}) if _source_answered(payload, "aspm", "aspm") else {}
+    transition_source = (payload.get("sources") or {}).get("transitions") or {}
     return {
-        "sleep_model": sleep_model(payload.get("sleep_states") or []),
-        "power_source": power_source(list(payload.get("batteries") or [])),
-        "link_power_management": {"ac": _aspm((payload.get("aspm") or {}).get("ac_index")), "dc": _aspm((payload.get("aspm") or {}).get("dc_index"))},
-        "fast_startup": None if hiberboot is None else bool(hiberboot),
+        "sleep_model": sleep_model(payload.get("sleep_states") or []) if _source_answered(payload, "sleep_states", "sleep_states") else None,
+        "power_source": power_source(list(payload.get("batteries") or [])) if _source_answered(payload, "batteries", "batteries") else None,
+        "link_power_management": {"ac": _aspm(aspm.get("ac_index")), "dc": _aspm(aspm.get("dc_index"))},
+        "fast_startup": bool(hiberboot) if _source_answered(payload, "hiberboot", "hiberboot_enabled") and hiberboot is not None else None,
         "wake_armed": armed,
-        "wake_armed_count": len(armed),
-        "uptime_seconds": _seconds_since(payload.get("boot_time")),
+        "wake_armed_count": len(armed) if armed is not None else None,
+        "uptime_seconds": _seconds_since(payload.get("boot_time")) if _source_answered(payload, "boot_time", "boot_time") else None,
         "ledger": {
-            "records": len(transitions),
-            "counts": dict(sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))),
-            "window": {"first": stamps[0] if stamps else None, "last": stamps[-1] if stamps else None},
+            "records": len(transitions) if transitions_known else None,
+            "counts": dict(sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))) if transitions_known else None,
+            "window": {"first": stamps[0] if stamps else None, "last": stamps[-1] if stamps else None} if transitions_known else None,
+            "limit": transition_source.get("limit", 120),
+            "limit_reached": transition_source.get("limit_reached") if transitions_known else None,
         },
     }
 
@@ -546,11 +640,18 @@ def power_derived(payload: dict[str, Any]) -> dict[str, Any]:
 def take_power(bridge: Bridge, params: dict[str, Any]) -> Reading:
     script = power_script()
     result = bridge.run(script, depth=DEEP)
+    missing: list[str] = []
 
     def build(payload: dict[str, Any]) -> list[Section]:
-        return [Section("raw", "raw", payload), Section("derived", "derived", power_derived(payload), basis=POWER_BASIS)]
+        missing.extend(_collection(payload, POWER_FIELDS))
+        derived = power_derived(payload)
+        sources = payload.pop("sources", {})
+        return [Section("raw", "raw", payload), Section("derived", "derived", derived, basis=POWER_BASIS), Section("collection", "raw", sources)]
 
-    return from_object("power", params, script, result, build)
+    reading = from_object("power", params, script, result, build)
+    reading.warnings.extend(f"The {name} source did not return its expected fields or outcome." for name in missing)
+    _all_sources_failed(reading)
+    return reading
 
 
 # ---------------------------------------------------------------------------
@@ -558,47 +659,54 @@ def take_power(bridge: Bridge, params: dict[str, Any]) -> Reading:
 # ---------------------------------------------------------------------------
 
 MEMORY_BASIS = (
-    "Populated slots are counted from returned modules. Total slots are reported only when the "
-    "physical array names a plausible total; free slots also require returned modules. An unreadable "
+    "Populated slots are counted from an observed module inventory. Total slots are reported only when the "
+    "system-memory arrays name plausible totals; free slots also require returned modules. An unreadable "
     "or contradictory total is unknown. Installed capacity requires a reported capacity for every module. "
-    "The kit is the set of "
-    "distinct manufacturer and part numbers, so more than one is a mixed kit. Error correction is "
-    "read from the module's total width exceeding its data width. A module runs below its rating "
-    "where its configured clock is under its rated speed. The ledger counts the WHEA records over "
-    "the window; the records themselves, decoded, are the whea reading, and the stops the machine "
-    "did not plan are the crash reading. The memory diagnostic is the latest "
-    "Microsoft-Windows-MemoryDiagnostics-Results record in the System log: no result means no "
-    "result since the log's oldest record, stated beside it, and not that the test was never run."
+    "Known kit identities are distinct manufacturer and part-number pairs; a missing identity "
+    "makes the mixed-kit answer unknown unless two known identities already disagree. Error correction is "
+    "read from the module's total width exceeding its data width. Array correction uses the "
+    "documented Windows code only when every returned system-memory array agrees; the exact "
+    "reported type remains visible. A module runs below its rating "
+    "where its configured clock is under its rated speed. Hardware errors belong to the whea "
+    "reading; unplanned stops belong to crash. The memory diagnostic is the latest "
+    "Microsoft-Windows-MemoryDiagnostics-Results record in the System log. An empty result means "
+    "none was found within the retained log, not that the test was never run; a failed query leaves "
+    "the result unknown. Each source's outcome is in collection."
 )
 
-_ECC_NONE = (2, 3)  # Win32_PhysicalMemoryArray: 2 none, 3 parity
+_ECC_TRUE = (5, 6)  # single-bit and multi-bit ECC
+_ECC_FALSE = (3, 4)  # none and parity
+_ECC_TYPES = {0: "reserved", 1: "other", 2: "unknown", 3: "none", 4: "parity", 5: "single-bit ECC", 6: "multi-bit ECC", 7: "CRC"}
 
 
 def memory_derived(payload: dict[str, Any]) -> dict[str, Any]:
-    modules = list(payload.get("modules") or [])
-    array = payload.get("array") or {}
-    ledger = list(payload.get("ledger") or [])
+    modules_known = _source_answered(payload, "modules", "modules")
+    modules = list(payload.get("modules") or []) if modules_known else []
+    arrays_known = _source_answered(payload, "arrays", "arrays")
+    arrays = list(payload.get("arrays") or []) if arrays_known else []
 
-    slots_used = len(modules)
-    reported_slots = _int(array.get("MemoryDevices"))
-    slots_total = reported_slots if reported_slots is not None and reported_slots > 0 and reported_slots >= slots_used else None
+    slots_used = len(modules) if modules_known else None
+    reported_counts = [_int(array.get("MemoryDevices")) for array in arrays]
+    reported_slots = sum(value for value in reported_counts if value is not None) if reported_counts and all(value is not None and value > 0 for value in reported_counts) else None
+    slots_total = reported_slots if reported_slots is not None and reported_slots > 0 and (slots_used is None or reported_slots >= slots_used) else None
     capacities = [_int(m.get("Capacity")) for m in modules]
     capacity_known = bool(capacities) and all(value is not None and value > 0 for value in capacities)
-    kits = sorted({f"{m.get('Manufacturer') or '?'} {m.get('PartNumber') or '?'}".strip() for m in modules})
+    identities = [f"{m.get('Manufacturer')} {m.get('PartNumber')}".strip() if m.get("Manufacturer") and m.get("PartNumber") else None for m in modules]
+    kits = sorted({identity for identity in identities if identity})
     below_rating = [
         m.get("DeviceLocator")
         for m in modules
         if _int(m.get("Speed")) and _int(m.get("ConfiguredClockSpeed")) and _int(m.get("ConfiguredClockSpeed")) < _int(m.get("Speed"))
     ]
-    counts = Counter(str(e.get("Kind")) for e in ledger)
-    stamps = sorted(str(e.get("TimeCreated")) for e in ledger if e.get("TimeCreated"))
-    diagnostic = payload.get("diagnostic") if isinstance(payload.get("diagnostic"), dict) else None
+    diagnostic = payload.get("diagnostic") if _source_answered(payload, "diagnostic", "diagnostic") and isinstance(payload.get("diagnostic"), dict) else None
+    correction_codes = {_int(array.get("MemoryErrorCorrection")) for array in arrays}
+    correction = next(iter(correction_codes)) if arrays and len(correction_codes) == 1 else None
 
     return {
         "installed_gb": round(sum(value or 0 for value in capacities) / 1024**3, 2) if capacity_known else None,
         "slots_used": slots_used,
         "slots_total": slots_total,
-        "slots_free": slots_total - slots_used if slots_total is not None and modules else None,
+        "slots_free": slots_total - slots_used if slots_total is not None and slots_used is not None and modules else None,
         "modules": [
             {
                 "locator": _locator(m),
@@ -609,20 +717,16 @@ def memory_derived(payload: dict[str, Any]) -> dict[str, Any]:
                 "error_correction": _ecc(m),
             }
             for index, m in enumerate(modules)
-        ],
-        "kits": kits,
-        "mixed_kit": len(kits) > 1,
-        "below_rated_speed": below_rating,
-        "array_error_correction": _int(array.get("MemoryErrorCorrection")) not in _ECC_NONE if array.get("MemoryErrorCorrection") is not None else None,
-        "ledger": {
-            "window_days": payload.get("ledger_days"),
-            "records": len(ledger),
-            "counts": dict(sorted(counts.items())),
-            "most_recent": stamps[-1] if stamps else None,
-        },
+        ] if modules_known else None,
+        "kits": kits if modules_known else None,
+        "mixed_kit": True if len(kits) > 1 else False if modules_known and bool(modules) and all(identities) else None,
+        "below_rated_speed": below_rating if modules_known else None,
+        "array_error_correction": True if correction in _ECC_TRUE else False if correction in _ECC_FALSE else None,
+        "array_error_correction_type": _ECC_TYPES.get(correction),
         "memory_diagnostic": {
+            "outcome": ((payload.get("sources") or {}).get("diagnostic") or {}).get("outcome", "failed"),
             "last_result": {key: diagnostic.get(key) for key in ("Id", "TimeCreated", "LevelDisplayName", "Message")} if diagnostic else None,
-            "log_begins": payload.get("log_begins"),
+            "log_begins": payload.get("log_begins") if _source_answered(payload, "log_begins", "log_begins") else None,
         },
     }
 
@@ -645,15 +749,30 @@ def _ecc(module: dict[str, Any]) -> bool | None:
 
 def take_memory(bridge: Bridge, params: dict[str, Any]) -> Reading:
     result = bridge.run(MEMORY_SCRIPT, depth=DEEP)
+    missing: list[str] = []
 
     def build(payload: dict[str, Any]) -> list[Section]:
-        return [Section("raw", "raw", payload), Section("derived", "derived", memory_derived(payload), basis=MEMORY_BASIS)]
+        missing.extend(_collection(payload, MEMORY_FIELDS))
+        derived = memory_derived(payload)
+        sources = payload.pop("sources", {})
+        return [Section("raw", "raw", payload), Section("derived", "derived", derived, basis=MEMORY_BASIS), Section("collection", "raw", sources)]
 
     reading = from_object("memory", params, MEMORY_SCRIPT, result, build)
+    reading.warnings.extend(f"The {name} source did not return its expected fields or outcome." for name in missing)
+    _all_sources_failed(reading)
     raw = reading.section("raw")
     if raw is not None:
-        reading.count = len(raw.data.get("modules") or [])
+        reading.count = len(raw.data.get("modules") or []) if _source_answered({**raw.data, "sources": reading.section("collection").data}, "modules", "modules") else None
     return reading
+
+
+def _all_sources_failed(reading: Reading) -> None:
+    collection = reading.section("collection")
+    if collection is not None and not any(source.get("outcome") in ("ok", "empty") for source in collection.data.values()):
+        reading.outcome = "failed"
+        reading.error = {"kind": "failed", "detail": "Every source in this reading failed; no machine state was observed."}
+        reading.sections = [collection]
+        reading.count = None
 
 
 # ---------------------------------------------------------------------------

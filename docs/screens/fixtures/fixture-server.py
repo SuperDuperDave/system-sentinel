@@ -10,6 +10,8 @@ Answers:
     exercise fatal previous-session and unavailable-header presentation
   - the System log (``events``, ``record``): docs/screens/fixtures/system-log.json, filtered
     and paged the way Get-WinEvent would be
+  - Memory and Power: synthetic source-outcome examples, optionally with selected source
+    failures when ``SENTINEL_FIXTURE_DIAGNOSTIC_FAILURES=1`` is set
   - anything else: empty
 
 Run: SYSTEM_SENTINEL_HOME=<scratch dir> ./.venv/bin/python fixture-server.py --port 8021
@@ -262,6 +264,33 @@ class FixtureBridge:
                 "log_oldest": _powershell_stamp(_parse_stamp(start) - 86400), "oldest_state": "ok", "oldest_error": None,
             }
             return BridgeResult("ok", items=[{"window_start": start, "window_end": end, "source": source}], took_ms=412)
+        if "Win32_PhysicalMemory -ErrorAction Stop" in script:
+            failed = os.environ.get("SENTINEL_FIXTURE_DIAGNOSTIC_FAILURES") == "1"
+            modules = None if failed else [{"BankLabel": "CHANNEL A", "DeviceLocator": "DIMM 1", "Manufacturer": "Example", "PartNumber": "EXAMPLE-16",
+                "serial_number": "SYNTHETIC", "Capacity": 17179869184, "Speed": 3200, "ConfiguredClockSpeed": 3200,
+                "ConfiguredVoltage": 1200, "TotalWidth": 64, "DataWidth": 64}]
+            payload = {
+                "modules": modules, "arrays": [{"MemoryDevices": 2, "MemoryErrorCorrection": 3, "Use": 3}],
+                "diagnostic": None, "log_begins": "2026-09-01T00:00:00Z",
+                "sources": {"modules": {"outcome": "failed" if failed else "ok"}, "arrays": {"outcome": "ok"},
+                    "diagnostic": {"outcome": "empty"}, "log_begins": {"outcome": "ok"}},
+                "warnings": ["The module inventory did not answer in this synthetic example."] if failed else [],
+            }
+            return BridgeResult("ok", items=[payload], took_ms=26)
+        if "powercfg.exe /devicequery wake_armed" in script:
+            failed = os.environ.get("SENTINEL_FIXTURE_DIAGNOSTIC_FAILURES") == "1"
+            payload = {
+                "sleep_states": ["The following sleep states are available on this system:", "Standby (S3)"],
+                "aspm": {"ac_index": "0x00000002", "dc_index": "0x00000000"},
+                "wake_armed": None if failed else [], "hiberboot_enabled": 1, "batteries": None if failed else [], "boot_time": "2026-09-01T00:00:00Z",
+                "transitions": [],
+                "sources": {"sleep_states": {"outcome": "ok"}, "aspm": {"outcome": "ok"},
+                    "wake_armed": {"outcome": "failed" if failed else "empty"}, "hiberboot": {"outcome": "ok"},
+                    "batteries": {"outcome": "failed" if failed else "empty"}, "boot_time": {"outcome": "ok"},
+                    "transitions": {"outcome": "empty", "returned": 0, "limit": 120, "limit_reached": False}},
+                "warnings": ["The battery and wake-device queries did not answer in this synthetic example."] if failed else [],
+            }
+            return BridgeResult("ok", items=[payload], took_ms=24)
         if "WHEA-Logger" in script:
             cap = _MAXEVENTS_RE.search(script)
             return BridgeResult("ok", items=whea_records(time.time(), int(cap.group(1)) if cap else None), took_ms=412)

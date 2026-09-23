@@ -24,7 +24,7 @@ export function Diagnostics() {
       </p>
       <Panel name="pcie" title="PCIe" what="The present PCI device inventory, with upstream groups where Windows reported enough parent relationships to establish them." />
       <Panel name="power" title="Power" what="The sleep states the firmware offers, what Windows chose, what may wake the machine, and how it has moved between states." />
-      <Panel name="memory" title="Memory" what="Which modules Windows returned, their reported capacity and speed, recent hardware-error records, and Windows' own memory test result." />
+      <Panel name="memory" title="Memory" what="Which modules Windows returned, their reported capacity and speed, and Windows' own memory test result. Hardware error records are in Hardware errors." />
       <Panel name="constraints" title="Constraints" what="What the machine is not using and why: devices that are present and not operating, with the problem each one reports." />
     </section>
   );
@@ -57,7 +57,7 @@ function Panel({ name, title, what }: { name: string; title: string; what: strin
       {memory ? <MemoryMap data={memory} /> : null}
       {orderedSections.map((s) => (
         <div key={s.name} className={styles.section} id={`diagnostic-${name}-${s.name}`}>
-          <Section title={sectionTitle(s.name)} cls={s.class} basis={s.basis}>
+          <Section title={sectionTitle(s.name, name)} cls={s.class} basis={s.basis}>
             <Payload name={name} section={s} pcieCoverage={pcieCoverage} />
           </Section>
         </div>
@@ -167,13 +167,13 @@ const stamp = (iso: string): string => {
 };
 
 /** A section named for what it holds keeps its name; one named for its class says what that means. */
-function sectionTitle(name: string): string {
+function sectionTitle(name: string, reading: string): string {
   if (name === 'raw') return 'As Windows reported it';
   if (name === 'derived') return 'Computed from it';
   if (name === 'groups') return 'Reported upstream groups';
   if (name === 'devices') return 'PCI devices Windows returned';
   if (name === 'coverage') return 'Parent relation coverage';
-  if (name === 'collection') return 'Relation source';
+  if (name === 'collection') return reading === 'pcie' ? 'Relation source' : 'Query outcomes';
   return name;
 }
 
@@ -190,6 +190,7 @@ const EMPTY: Record<string, string> = {
   constraints: 'Every present device is working: nothing is disabled or in error',
 };
 const nounFor = (name: string, count: number | null): string => {
+  if (name === 'memory' && count == null) return 'module inventory not observed';
   const pair = NOUNS[name] ?? ['record', 'records'];
   return count === 1 ? pair[0] : pair[1];
 };
