@@ -174,10 +174,15 @@ def test_final_shutdown_ends_a_running_one_shot_on_the_windows_host(monkeypatch)
     worker.start()
     try:
         deadline = time.monotonic() + 15
-        while not local_marker.exists() and time.monotonic() < deadline:
-            time.sleep(0.05)
-        assert local_marker.exists(), "the synthetic one-shot child did not record its PID"
-        windows_pid = int(local_marker.read_text(encoding="ascii").strip())
+        marker_error = None
+        while time.monotonic() < deadline:
+            try:
+                windows_pid = int(local_marker.read_text(encoding="ascii").strip())
+                break
+            except (FileNotFoundError, PermissionError, ValueError) as exc:
+                marker_error = exc
+                time.sleep(0.05)
+        assert windows_pid is not None, f"the synthetic one-shot child did not record a readable PID: {marker_error!r}"
         sentinel.bridge.shutdown_sessions()
         worker.join(5)
         assert not worker.is_alive() and errors == [], errors
