@@ -28,11 +28,11 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from ..bridge import Bridge
-from ..reading import Param, Reading, Section, Spec, from_bridge, from_object, register
+from ..reading import Param, Reading, Section, Spec, from_object, register
 from .dumps import DUMPS_SCRIPT, inventory, missing_file
 from .event_coverage import LOG_METADATA_SCRIPT, stamp_key
 from .event_coverage import metadata as log_metadata
-from .events import _utc_stamp, bounded_log_records, record_projection, since_clause, winevent
+from .events import _utc_stamp, from_log_collector, log_records_script, record_projection, since_clause
 from .fault_process import APPLICATION_ERROR, APPLICATION_ERROR_1000, APPLICATION_HANG, APPLICATION_HANG_1002, process_identity
 
 # The providers, spelled once. The same event id means different things under different providers:
@@ -264,7 +264,7 @@ CRASH_COVERAGE_BASIS = (
 FAULTS_BASIS = (
     "the positional properties mapped from the Windows event manifests used by this build; the exception "
     "code named from Microsoft's NTSTATUS reference; a live kernel event is one entry per report id, taken from "
-    "that report's latest record, carrying every record id it was written across. Application process facts "
+    "that report's latest returned record, carrying the record ids returned for it. Application process facts "
     "require a supported provider GUID, event ID, version and property count. Start values are interpreted as "
     "FILETIME with the per-provider basis in process.source; each field retains its own validation status. "
     "Encoding resolution is not clock accuracy, and PID/start time does not certify a unique process identity."
@@ -658,17 +658,8 @@ def record_cap(count: int, moment: str | None) -> int:
 
 def faults_script(count: int, since: str) -> str:
     prelude, clause = since_clause(since)
-    return (
-        prelude
-        + f"""$xml = @"
-{faults_query(clause)}
-"@
-"""
-        + winevent(
-            f"""Get-WinEvent -FilterXml ([xml]$xml) -MaxEvents {int(count) + 1} -ErrorAction Stop |
-    {record_projection("Log = $_.LogName")}"""
-        )
-    )
+    start = "$since" if since.strip().lower() == "boot" else (f"'{_utc_stamp(since)}'" if since.strip() else "$null")
+    return log_records_script("Application", faults_query(clause), count, prelude=prelude, window_start=start, projection=record_projection("Log = $_.LogName"))
 
 
 # ---------------------------------------------------------------------------
@@ -1230,7 +1221,7 @@ def take_faults(bridge: Bridge, params: dict[str, Any]) -> Reading:
     except ValueError as exc:
         raise ValueError(f"parameter 'since': {exc}") from exc
 
-    reading = bounded_log_records(from_bridge("faults", params, script, bridge.run(script)), count, window=bool(params.get("since", "").strip()))
+    reading = from_log_collector("faults", params, script, bridge.run(script, depth=8), "Application", count, window=bool(params.get("since", "").strip()))
     if not reading.observed:
         return reading
     record_section = reading.section("records")
@@ -1405,16 +1396,16 @@ register(
     Spec(
         name="faults",
         description=(
-            "What went wrong while the machine kept running: the programs that crashed or hung, and the kernel's "
-            "own live reports (a GPU timeout, a watchdog) that did not stop it, each with the application, the "
-            "module and the exception named. Supported application records include process ID and interpreted "
-            "creation time, with exact source values, per-field validity and interpretation limits."
+            "Application-log reports of programs that crashed or hung and Windows Error Reporting entries for "
+            "live kernel events, by filing time. Returned records name the application, module and exception "
+            "where supported; process ID and creation time carry per-field validity. Retention reach refers "
+            "only to the Application log, not every live kernel event that occurred."
         ),
         classes=("raw", "derived"),
         take=take_faults,
         params=(
             Param("count", "int", 30, f"How many of the most recent records; 1 to {MAX_FAULTS}.", minimum=1, maximum=MAX_FAULTS),
-            Param("since", "str", "", "ISO timestamp, or the word 'boot' for this session only. Empty for the most recent records."),
+            Param("since", "str", "", "ISO timestamp, or 'boot' for Windows' reported kernel-session start. Empty for the most recent records."),
         ),
         private=("AppPath", "ModulePath", "ExeFileName", "AttachedFiles", "StorePath", "user names inside Message"),
     )

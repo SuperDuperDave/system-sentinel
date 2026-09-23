@@ -13,7 +13,7 @@ from sentinel import bench, cli, readings  # noqa: F401 - importing readings fil
 from sentinel.bench import Attempt, Report, Row
 from sentinel.bridge import BridgeResult
 from sentinel.reading import from_bridge
-from tests.conftest import FakeBridge
+from tests.conftest import FakeBridge, LogBridge
 
 # The shapes CI greps for in tracked files, written out here rather than imported: a guard that
 # checked itself with its own pattern would pass whatever it was changed to.
@@ -185,7 +185,8 @@ def test_a_reading_that_raises_is_reported_and_does_not_end_the_bench(monkeypatc
 
 
 def test_the_moment_a_record_needs_is_supplied_so_the_reading_can_be_taken():
-    report = asyncio.run(bench.measure(FakeBridge(), names=["record"], runs=1, transport="one-shot"))
+    record = {"RecordId": 1, "Id": 41, "TimeCreated": "2026-09-20T00:00:00.000Z"}
+    report = asyncio.run(bench.measure(LogBridge(BridgeResult("ok", items=[record])), names=["record"], runs=1, transport="one-shot"))
     assert report.rows[0].outcome == "ok" and report.rows[0].note is None
 
 

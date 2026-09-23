@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from sentinel.app import State, create_app
 from sentinel.bridge import BridgeResult
 from sentinel.stack import PRESET_PROMPTS, _item_lines
-from tests.conftest import FakeBridge, identity_result
+from tests.conftest import FakeBridge, LogBridge, identity_result
 
 TOKEN = "test-token-0123456789"
 AUTH = {"Authorization": f"Bearer {TOKEN}"}
@@ -45,7 +45,7 @@ def app_for(bridge: FakeBridge) -> TestClient:
 
 @pytest.fixture
 def bridge() -> FakeBridge:
-    return FakeBridge(
+    return LogBridge(
         result=BridgeResult("ok", items=EVENTS, took_ms=5),
         by_marker={"$env:COMPUTERNAME": identity_result("TESTBOX", "tester")},
     )
@@ -449,6 +449,11 @@ def test_large_log_defaults_to_a_bounded_summary_with_full_evidence_on_demand(cl
     assert "synthetic row 1" in summary and "synthetic row 200" in summary
     assert "synthetic row 100" not in summary and "- record cutoff: limit=200, returned=200, truncated=true" in summary
     assert "Leading sources: Synthetic-Provider (200)." in summary
+    stopped = {**envelope, "sections": [envelope["sections"][0], {
+        "name": "collection", "class": "raw", "data": {"limit": 200, "returned": 200, "truncated": None, "stopped": {"kind": "failed", "detail": "interrupted"}},
+    }]}
+    stopped_summary = "\n".join(_item_lines(1, {"kind": "reading", "title": "Stopped frame", "reading": stopped, "verbosity": "summary"}))
+    assert "truncated=unknown (query stopped early)" in stopped_summary
     assert client.patch(f"/api/stack/items/{item['id']}", headers=AUTH, json={"verbosity": "full"}).status_code == 200
     full = client.get("/api/stack/composed", headers=AUTH).json()["text"]
     assert "synthetic row 100" in full

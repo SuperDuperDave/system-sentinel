@@ -10,7 +10,7 @@ from sentinel.bridge import BridgeResult
 from sentinel.readings.crash import decode, decode_faults, faults_script
 from sentinel.readings.events import RECORD_SELECT
 from sentinel.readings.fault_process import process_identity
-from tests.conftest import FakeBridge, identity_result
+from tests.conftest import LogBridge, identity_result
 from tests.test_crash import faults_fixture
 from tests.test_mcp import AUTH, TOKEN, rpc
 
@@ -203,7 +203,7 @@ def test_api_and_mcp_keep_process_facts_and_raw_ticks_exact_on_client_roundtrip(
     records = [fault(), fault(3010)]
     records[1]["Properties"][3] = EXAMPLE_TICKS + 1
     before = deepcopy(records)
-    bridge = FakeBridge(
+    bridge = LogBridge(
         result=BridgeResult("unavailable", error="no synthetic answer"),
         by_marker={
             "$env:COMPUTERNAME": identity_result("WORKBENCH", "someone"),

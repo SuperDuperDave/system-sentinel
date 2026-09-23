@@ -45,13 +45,14 @@ function Read-LogMetadata([string]$log) {
 COVERAGE_BASIS = (
     "For each observed source, compare the requested UTC start with the log's oldest retained "
     "record and the oldest validated in-window match returned when the query stopped early or reached its cap. Complete "
-    "means this retained circular log was enabled, had a record before the requested start and "
-    "returned all matching records within the per-source limit without stopping early. For storms, "
-    "an event whose projected time cannot be read also prevents complete coverage. A boundary at the oldest retained "
+    "means this retained circular log was enabled, had a record before the requested start, and "
+    "returned all matching records within the per-source limit without stopping early. An event whose "
+    "projected time cannot be read also prevents complete coverage. A boundary at the oldest retained "
     "or oldest returned record is exclusive: earlier records can share its timestamp. The time "
     "reach assumes event timestamps have not moved backward across retained record order; it does "
     "not prove Windows emitted every event."
 )
+LOG_WINDOW_COVERAGE_BASIS = COVERAGE_BASIS + " For events and faults, a requested start at or after the machine's query time cannot establish a complete window."
 
 
 def metadata(value: dict[str, Any]) -> dict[str, Any]:
@@ -79,7 +80,7 @@ def covered_from(source: dict[str, Any], rows: list[dict[str, Any]], start: str,
     oldest_text = source.get("log_oldest")
     oldest = stamp_key(oldest_text)
     window_start, window_end = stamp_key(start), stamp_key(end)
-    if not isinstance(oldest_text, str) or oldest is None or window_start is None or window_end is None or oldest >= window_end:
+    if not isinstance(oldest_text, str) or oldest is None or window_start is None or window_end is None or window_start >= window_end or oldest >= window_end:
         return None
     candidates: list[str] = [start, oldest_text]
     if stopped_early(source):

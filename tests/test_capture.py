@@ -18,7 +18,7 @@ from sentinel.capture import MAX_LIST_MANIFEST_BYTES, STALE_PENDING_SECONDS, lis
 from sentinel.paths import captures_dir
 from sentinel.reading import REGISTRY, Reading
 from sentinel.stack import Prompts, Stack
-from tests.conftest import FakeBridge, identity_result, real_bridge_or_skip
+from tests.conftest import FakeBridge, LogBridge, identity_result, real_bridge_or_skip
 from tests.test_stack import EVENTS
 
 TOKEN = "test-token-0123456789"
@@ -27,7 +27,7 @@ AUTH = {"Authorization": f"Bearer {TOKEN}"}
 
 @pytest.fixture
 def client():
-    bridge = FakeBridge(
+    bridge = LogBridge(
         result=BridgeResult("ok", items=EVENTS, took_ms=5),
         by_marker={"$env:COMPUTERNAME": identity_result("TESTBOX", "tester")},
     )

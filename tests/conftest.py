@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import stat
 from pathlib import Path
 from typing import Any
@@ -200,6 +201,51 @@ class FakeBridge:
             if marker in script:
                 return result
         return self.result
+
+
+def log_collector_marker(log: str) -> str:
+    """Select only the single-object log collector, not another reading's metadata probe."""
+    return f"$meta = Read-LogMetadata '{log}'"
+
+
+def log_collector_result(
+    records: list[dict[str, Any]], *, log: str = "System", oldest: str = "2026-01-01T00:00:00.0000000Z",
+    window_start: str | None = "2026-09-20T00:00:00.000Z", window_end: str | None = None,
+    queried_at: str = "2026-09-21T00:00:00.000Z", limit: int | None = None, took_ms: int = 5,
+) -> BridgeResult:
+    """The object Windows PowerShell returns even when the matching query is empty."""
+    meta = {
+        "log": log, "log_enabled": True, "log_mode": "Circular", "log_state": "ok", "log_error": None,
+        "log_oldest": oldest, "oldest_state": "ok", "oldest_error": None,
+    }
+    cap = limit if limit is not None else max(1, len(records))
+    kept = records[:cap]
+    return BridgeResult("ok", items=[{
+        "log": log, "outcome": "ok" if kept else "empty", "error": None, "records": kept,
+        "returned": len(kept), "limit": cap, "truncated": len(records) > cap, "stopped": None,
+        "metadata": meta, "window_start": window_start, "window_end": window_end, "queried_at": queried_at,
+    }], took_ms=took_ms)
+
+
+class LogBridge(FakeBridge):
+    """Broad integration fake: adapt its canned rows to the log collector's Windows object.
+
+    Focused source tests use ``FakeBridge`` with an explicit object, so malformed collector
+    shapes still have an independent failure test rather than being repaired by this adapter.
+    """
+
+    def run(self, script: str, *, timeout: float = 60, depth: int = 6) -> BridgeResult:
+        result = super().run(script, timeout=timeout, depth=depth)
+        if "$found = [System.Collections.Generic.List[object]]::new()" not in script or "records = @($records)" not in script:
+            return result
+        if result.outcome not in ("ok", "empty"):
+            return result
+        if result.items and isinstance(result.items[0], dict) and "records" in result.items[0]:
+            return result
+        log = "Application" if log_collector_marker("Application") in script else "System"
+        cap = re.search(r"Get-WinEvent -FilterXml \(\[xml\]\$xml\) -MaxEvents (\d+)", script)
+        limit = int(cap.group(1)) - 1 if cap else max(1, len(result.items))
+        return log_collector_result(result.items, log=log, limit=limit, took_ms=result.took_ms)
 
 
 @pytest.fixture

@@ -37,7 +37,7 @@ from sentinel.readings.crash import (
     named,
     since_clause,
 )
-from tests.conftest import FakeBridge, identity_result, real_bridge_or_skip
+from tests.conftest import FakeBridge, identity_result, log_collector_marker, log_collector_result, real_bridge_or_skip
 from tests.test_dump_inventory import dump_inventory
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -105,7 +105,8 @@ def collection_for(body: dict[str, Any], count: int = 5, moment: str | None = No
 
 
 def faults(records: list[dict[str, Any]], outcome: str = "ok", **params: Any):
-    return asyncio.run(take("faults", FakeBridge(BridgeResult(outcome, items=records, took_ms=8)), params))
+    result = log_collector_result(records, log="Application", window_start="2026-09-01T00:00:00.000Z", queried_at="2026-10-01T00:00:00.000Z", limit=int(params.get("count", 30))) if outcome in ("ok", "empty") else BridgeResult(outcome, took_ms=8)
+    return asyncio.run(take("faults", FakeBridge(result), params))
 
 
 def record(record_id: int) -> dict[str, Any]:
@@ -766,7 +767,7 @@ def test_the_summary_counts_what_failed_and_how_often():
 
 def test_faults_keeps_the_sections_apart():
     reading = faults(faults_fixture(), count=30)
-    assert [(s.name, s.cls) for s in reading.sections] == [("records", "raw"), ("collection", "raw"), ("decoded", "derived"), ("summary", "derived")]
+    assert [(s.name, s.cls) for s in reading.sections] == [("records", "raw"), ("collection", "raw"), ("coverage", "derived"), ("decoded", "derived"), ("summary", "derived")]
     assert reading.section("decoded").basis and reading.section("summary").basis
     assert faults([], outcome="empty").outcome == "empty"
 
@@ -776,10 +777,18 @@ def test_faults_cutoff_limits_raw_and_derived_evidence_together():
     reading = faults(records, count=2, since="boot")
     assert reading.count == 2
     assert reading.section("records").data == records[:2]
-    assert reading.section("collection").data == {"limit": 2, "returned": 2, "truncated": True}
+    assert reading.section("collection").data["truncated"] is True
     assert all(entry["RecordId"] in {row["RecordId"] for row in records[:2]} for entry in reading.section("decoded").data)
     assert any("older matching records" in warning for warning in reading.warnings)
     assert faults(records, count=2).warnings == []
+
+
+def test_fault_window_reach_is_application_report_retention_only():
+    reading = faults([], count=5, since="2026-09-01T00:00:00Z")
+    assert reading.outcome == "empty"
+    assert reading.section("collection").data["log"] == "Application"
+    assert reading.section("coverage").data["log"] == "Application"
+    assert reading.section("coverage").data["complete"] is True
 
 
 # ---------------------------------------------------------------- the boundary
@@ -791,7 +800,7 @@ def client():
     body["collection"] = collection_for(body, count=1)
     bridge = FakeBridge(
         result=BridgeResult("ok", items=[body], took_ms=5),
-        by_marker={"$env:COMPUTERNAME": identity_result("WORKBENCH", "someone")},
+        by_marker={"$env:COMPUTERNAME": identity_result("WORKBENCH", "someone"), log_collector_marker("Application"): log_collector_result(faults_fixture(), log="Application")},
     )
     app = create_app(State(bridge=bridge, token=TOKEN))
     with TestClient(app) as c:
@@ -866,7 +875,7 @@ def test_faults_answers_on_this_machine():
     assert reading.outcome in ("ok", "empty"), reading.error
     if reading.outcome == "empty":
         return
-    assert [s.name for s in reading.sections] == ["records", "collection", "decoded", "summary"]
+    assert [s.name for s in reading.sections] == ["records", "collection", "coverage", "decoded", "summary"]
     kinds = {e["kind"] for e in reading.section("decoded").data}
     assert kinds <= {"application crash", "application hang", "live kernel event", "report"}
     for entry in reading.section("decoded").data:

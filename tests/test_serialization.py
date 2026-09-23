@@ -22,7 +22,7 @@ from sentinel.redact import Identity, Redactor
 from sentinel.serialization import MAX_SAFE_INTEGER, json_safe_integers
 from sentinel.stack import Item, Stack
 from sentinel.stream import Stream
-from tests.conftest import FakeBridge, identity_result
+from tests.conftest import FakeBridge, LogBridge, identity_result
 from tests.test_crash import faults_fixture
 from tests.test_mcp import rpc
 from tests.test_stream import take_frames
@@ -65,7 +65,7 @@ def machine():
         record["RecordId"] = record_id
         record["Properties"][9] = CREATED + index
         records.append(record)
-    bridge = FakeBridge(
+    bridge = LogBridge(
         result=BridgeResult("unavailable", error="no synthetic answer for this reading"),
         by_marker={
             "$env:COMPUTERNAME": identity_result("WORKBENCH", "someone"),

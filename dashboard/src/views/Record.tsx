@@ -50,7 +50,7 @@ function Log() {
         <h1 className={`${styles.title} display`}>Record</h1>
         <button className={styles.filterToggle} onClick={() => setFiltersOpen((open) => !open)} aria-expanded={filtersOpen} aria-controls="record-controls">
           <span className="readout">Window</span>
-          <span className={styles.filterValue}>{levels === 'errors' ? 'Critical and error' : 'Every level'} · {boot ? `Since boot · up to ${BOOT_COUNT}` : `Last ${count}`}</span>
+          <span className={styles.filterValue}>{levels === 'errors' ? 'Critical and error' : 'Every level'} · {boot ? `This Windows session · up to ${BOOT_COUNT}` : `Last ${count}`}</span>
           <span className={styles.filterChevron} aria-hidden="true">⌄</span>
         </button>
         <div className={`${styles.controls} ${filtersOpen ? '' : styles.controlsClosed}`} id="record-controls" role="group" aria-label="Which records">
@@ -68,7 +68,7 @@ function Log() {
             onChange={setSpan}
             options={[
               { value: 'recent', label: 'Last records' },
-              { value: 'boot', label: 'Since boot' },
+              { value: 'boot', label: 'This Windows session' },
             ]}
             label="Window"
           />
@@ -81,16 +81,16 @@ function Log() {
       <p className={styles.intro}>What did Windows record? Browse System log entries by time and source. Open a row for its full message, raw fields and the records before it. An entry alone does not establish a cause.</p>
       <OutcomeLine
         taken={taken}
-        noun={boot ? 'records since boot' : 'records'}
-        singular={boot ? 'record since boot' : 'record'}
+        noun={boot ? 'records since the reported Windows session start' : 'records'}
+        singular={boot ? 'record since the reported Windows session start' : 'record'}
         emptyText={
           boot
             ? levels === 'errors'
-              ? 'No critical or error record since this session started'
-              : 'Nothing in the log since this session started'
+              ? 'No critical or error record returned from the retained log since the reported Windows session start'
+              : 'No record returned from the retained log since the reported Windows session start'
             : levels === 'errors'
-              ? `No critical or error records among the last ${count}`
-              : 'The log is empty'
+              ? 'No critical or error records returned from the retained log'
+              : 'No records returned from the retained log'
         }
       />
       {observed(taken.reading) && records.length > 0 && taken.reading ? <Rows records={records} reading={taken.reading} overview /> : null}
@@ -122,7 +122,7 @@ function Frame({ moment }: { moment: string }) {
         </div>
       </div>
       <p className={`${styles.frameLine} readout`}>{day.format(when)} · the System log, every level, oldest first and ending at this moment</p>
-      <OutcomeLine taken={before.taken} noun="records" singular="record" emptyText="Nothing in the log before this moment" />
+      <OutcomeLine taken={before.taken} noun="records" singular="record" emptyText="No retained System records returned before this moment" />
       {before.rows.length && before.held ? (
         <>
           <More before={before} />
@@ -287,7 +287,7 @@ function Before({ moment }: { moment: string }) {
   return (
     <div className={styles.before}>
       <p className="label">The records before {clock.format(new Date(moment))}</p>
-      <OutcomeLine taken={before.taken} noun="records" singular="record" emptyText="Nothing in the log before this moment" />
+      <OutcomeLine taken={before.taken} noun="records" singular="record" emptyText="No retained records returned before this moment" />
       {before.rows.length ? (
         <>
           <More before={before} />
@@ -316,11 +316,13 @@ interface Widened {
   held: Reading<EventRecord[]> | null;
   rows: EventRecord[];
   more: () => void;
+  retry: () => void;
   moreCount: number;
   list: Ref<HTMLOListElement>;
   /** The log answered that the requested frame has no older record. */
   atStart: boolean;
   atLimit: boolean;
+  atStop: boolean;
 }
 
 /**
@@ -348,12 +350,19 @@ function useBefore(moment: string): Widened {
   const heldCount = typeof held?.params.count === 'number' ? held.params.count : PAGE;
   const nextCount = Math.min(FRAME_LIMIT, heldCount * 2);
 
-  const more = useCallback(() => {
+  const rememberPlace = useCallback(() => {
     const first = list.current?.querySelector<HTMLElement>('[data-record]');
     place.current = first?.dataset.record ? { id: first.dataset.record, top: first.getBoundingClientRect().top } : null;
+  }, []);
+  const more = useCallback(() => {
+    rememberPlace();
     if (nextCount === count) retake();
     else setCount(nextCount);
-  }, [count, nextCount, retake]);
+  }, [count, nextCount, rememberPlace, retake]);
+  const retry = useCallback(() => {
+    rememberPlace();
+    retake();
+  }, [rememberPlace, retake]);
 
   useLayoutEffect(() => {
     const saved = place.current;
@@ -363,33 +372,41 @@ function useBefore(moment: string): Widened {
     place.current = null;
   }, [held, taken.reading]);
 
-  const collection = held?.sections.find((s) => s.name === 'collection')?.data as unknown as { truncated?: boolean } | undefined;
+  const collection = held?.sections.find((s) => s.name === 'collection')?.data as unknown as { truncated?: boolean | null; stopped?: { kind: string; detail: string } | null } | undefined;
   const heldLimit = held?.params.count;
   return {
-    taken, held, rows, more, moreCount: nextCount - heldCount, list,
+    taken, held, rows, more, retry, moreCount: nextCount - heldCount, list,
     atStart: observed(held) && collection?.truncated === false,
     atLimit: heldLimit === FRAME_LIMIT && collection?.truncated === true,
+    atStop: observed(held) && collection?.stopped != null,
   };
 }
 
 /** The way further back, at the top of the list because that is where the records it asks for appear. */
 function More({ before }: { before: Widened }) {
   const status = useRef<HTMLParagraphElement>(null);
+  const moreButton = useRef<HTMLButtonElement>(null);
   const hadFocus = useRef(false);
   useLayoutEffect(() => {
-    if (status.current && hadFocus.current) {
-      status.current.focus();
+    const target = status.current ?? moreButton.current;
+    if (target && hadFocus.current) {
+      target.focus();
       hadFocus.current = false;
     }
-  }, [before.atStart, before.atLimit]);
-  if (before.atStart || before.atLimit) {
-    const message = before.atStart
-      ? 'The log holds nothing earlier than this.'
-      : `This frame reached ${FRAME_LIMIT.toLocaleString()} records. Choose an earlier moment to continue.`;
-    return <p ref={status} tabIndex={-1} aria-live="polite" className={`${styles.logStart} readout`}>{message}</p>;
+  }, [before.atStart, before.atLimit, before.atStop]);
+  if (before.atStart || before.atLimit || before.atStop) {
+    const message = before.atStop
+      ? 'Windows stopped returning older records here. The reading explains why.'
+      : before.atStart
+        ? 'Windows returned every retained record before this moment.'
+        : `This frame reached ${FRAME_LIMIT.toLocaleString()} records. Choose an earlier moment to continue.`;
+    return <>
+      <p ref={status} tabIndex={-1} aria-live="polite" className={`${styles.logStart} readout`}>{message}</p>
+      {before.atStop ? <button className={`${styles.more} readout`} onClick={() => { if (before.taken.state !== 'taking') { hadFocus.current = true; before.retry(); } }} aria-disabled={before.taken.state === 'taking'}>{before.taken.state === 'taking' ? 'Trying again…' : 'Try this frame again'}</button> : null}
+    </>;
   }
   return (
-    <button className={`${styles.more} readout`} onClick={() => { if (before.taken.state !== 'taking') { hadFocus.current = true; before.more(); } }} onFocus={() => { hadFocus.current = true; }} onBlur={() => { hadFocus.current = false; }} aria-disabled={before.taken.state === 'taking'}>
+    <button ref={moreButton} className={`${styles.more} readout`} onClick={() => { if (before.taken.state !== 'taking') { hadFocus.current = true; before.more(); } }} onFocus={() => { hadFocus.current = true; }} onBlur={() => { hadFocus.current = false; }} aria-disabled={before.taken.state === 'taking'}>
       {before.taken.state === 'taking' ? 'Taking…' : `${before.moreCount} more before this`}
     </button>
   );

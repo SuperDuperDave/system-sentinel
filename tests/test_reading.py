@@ -9,7 +9,7 @@ from sentinel import readings  # noqa: F401
 from sentinel.bridge import BridgeResult
 from sentinel.reading import REGISTRY, Param, Section, Spec, from_bridge, from_object, take
 from sentinel.readings.events import _utc_stamp, events_script, record_script, since_clause
-from tests.conftest import FakeBridge
+from tests.conftest import FakeBridge, log_collector_result
 
 
 def test_ok_reading_has_one_raw_section_and_a_count():
@@ -207,7 +207,8 @@ def test_register_twice_is_an_error():
 def test_events_script_asks_the_log_index_for_the_levels():
     s = events_script("Application", [1, 2, 3], 7)
     assert "<Select Path='Application'>*[System[(Level=1 or Level=2 or Level=3)]]</Select>" in s
-    assert "-FilterXml $xml" in s and "-MaxEvents 8" in s and "-ErrorAction Stop" in s
+    assert "-FilterXml ([xml]$xml)" in s and "-MaxEvents 8" in s and "-ErrorAction Stop" in s
+    assert "Read-LogMetadata 'Application'" in s
     assert "FilterHashtable" not in s  # StartTime there does not honour a timestamp's Kind
 
 
@@ -216,7 +217,7 @@ def test_a_window_is_a_clause_against_the_index_and_boot_is_resolved_on_the_mach
     prelude, clause = since_clause("2026-09-20T18:04:11Z")
     assert prelude == "" and clause == " and TimeCreated[@SystemTime&gt;='2026-09-20T18:04:11.000Z']"
     prelude, clause = since_clause("BOOT")
-    assert "LastBootUpTime" in prelude and clause == " and TimeCreated[@SystemTime&gt;='$since']"
+    assert "LastBootUpTime" in prelude and "AddTicks(-($boot.Ticks % 10000))" in prelude and clause == " and TimeCreated[@SystemTime&gt;='$since']"
     with pytest.raises(ValueError, match="'boot'"):
         since_clause("the other day")
 
@@ -225,7 +226,7 @@ def test_events_since_a_moment_and_since_boot():
     s = events_script("System", [1, 2], 5, "2026-09-20T18:04:11Z")
     assert "*[System[(Level=1 or Level=2) and TimeCreated[@SystemTime&gt;='2026-09-20T18:04:11.000Z']]]" in s
     boot = events_script("System", [1, 2], 5, "boot")
-    assert boot.startswith("$since = (Get-CimInstance Win32_OperatingSystem")
+    assert "$boot = (Get-CimInstance Win32_OperatingSystem" in boot and "AddTicks(-($boot.Ticks % 10000))" in boot
     assert "TimeCreated[@SystemTime&gt;='$since']" in boot
     assert '@"' in boot  # an expanding here-string: $since is the machine's answer, not a literal
 
@@ -255,7 +256,7 @@ def test_record_script_filters_before_the_moment():
 
 
 def test_take_events_through_a_fake_bridge():
-    bridge = FakeBridge()
+    bridge = FakeBridge(log_collector_result([{"RecordId": 1, "Id": 41}], limit=3))
     r = asyncio.run(take("events", bridge, {"count": "3"}))
     assert r.outcome == "ok" and r.count == 1
     assert r.params == {"log": "System", "levels": [1, 2], "count": 3, "since": ""}
@@ -263,34 +264,162 @@ def test_take_events_through_a_fake_bridge():
 
 
 def test_a_time_window_reports_an_exact_record_cutoff_and_retains_only_the_requested_rows():
-    rows = [{"Id": number} for number in (4, 3, 2, 1)]  # Windows returns newest first
-    bridge = FakeBridge(BridgeResult("ok", items=rows))
+    rows = [{"RecordId": number, "Id": number, "TimeCreated": f"2026-09-20T{number:02d}:00:00.000Z"} for number in (4, 3, 2, 1)]  # Windows returns newest first
+    bridge = FakeBridge(log_collector_result(rows, limit=3))
     reading = asyncio.run(take("events", bridge, {"count": 3, "since": "boot"}))
     assert [row["Id"] for row in reading.section("records").data] == [4, 3, 2]
-    assert reading.count == 3 and reading.section("collection").data == {"limit": 3, "returned": 3, "truncated": True}
+    assert reading.count == 3 and reading.section("collection").data["truncated"] is True
+    assert reading.section("coverage").data["covered_from"] == rows[2]["TimeCreated"]
+    assert reading.section("coverage").data["complete"] is False
     assert any("older matching records" in warning for warning in reading.warnings)
 
-    exactly = asyncio.run(take("events", FakeBridge(BridgeResult("ok", items=rows[:3])), {"count": 3, "since": "boot"}))
+    exactly = asyncio.run(take("events", FakeBridge(log_collector_result(rows[:3], limit=3)), {"count": 3, "since": "boot"}))
     assert exactly.section("collection").data["truncated"] is False and exactly.warnings == []
     recent = asyncio.run(take("events", bridge, {"count": 3}))
     assert recent.section("collection").data["truncated"] is True and recent.warnings == []
 
-    empty = asyncio.run(take("events", FakeBridge(BridgeResult("empty")), {"count": 3, "since": "boot"}))
-    assert empty.outcome == "empty" and empty.section("collection").data == {"limit": 3, "returned": 0, "truncated": False}
+    empty = asyncio.run(take("events", FakeBridge(log_collector_result([], limit=3)), {"count": 3, "since": "boot"}))
+    assert empty.outcome == "empty" and empty.section("collection").data["returned"] == 0 and empty.section("collection").data["truncated"] is False
     failed = asyncio.run(take("events", FakeBridge(BridgeResult("timeout")), {"count": 3, "since": "boot"}))
     assert failed.count is None and failed.sections == []
 
 
 def test_take_record_reverses_to_oldest_first_and_rejects_bad_timestamps():
-    bridge = FakeBridge(BridgeResult("ok", items=[{"Id": 3}, {"Id": 2}, {"Id": 1}]))
+    rows = [{"RecordId": number, "Id": number} for number in (3, 2, 1)]
+    bridge = FakeBridge(log_collector_result(rows, limit=50))
     r = asyncio.run(take("record", bridge, {"before": "2026-09-20T18:04:11Z"}))
     assert [x["Id"] for x in r.section("records").data] == [1, 2, 3]
     with pytest.raises(ValueError):
         asyncio.run(take("record", bridge, {"before": "yesterday"}))
 
-    capped = asyncio.run(take("record", bridge, {"before": "2026-09-20T18:04:11Z", "count": 2}))
+    capped = asyncio.run(take("record", FakeBridge(log_collector_result(rows, limit=2)), {"before": "2026-09-20T18:04:11Z", "count": 2}))
     assert [row["Id"] for row in capped.section("records").data] == [2, 3]
-    assert capped.section("collection").data == {"limit": 2, "returned": 2, "truncated": True}
+    assert capped.section("collection").data["truncated"] is True
+
+
+def test_empty_window_before_retention_is_not_a_quiet_machine():
+    result = log_collector_result([], limit=5, oldest="2026-07-01T00:00:00.0000000Z", window_start="2026-03-01T00:00:00.000Z")
+    reading = asyncio.run(take("events", FakeBridge(result), {"since": "2026-03-01T00:00:00Z", "count": 5}))
+    assert reading.outcome == "empty" and reading.count == 0
+    reach = reading.section("coverage").data
+    assert reach["log"] == "System" and reach["retained_from"] == "2026-07-01T00:00:00.0000000Z"
+    assert reach["covered_from"] == reach["retained_from"] and reach["complete"] is False
+    assert any("oldest retained record" in warning for warning in reading.warnings)
+
+
+def test_retention_must_begin_strictly_before_the_requested_start():
+    start = "2026-09-20T00:00:00.0000000Z"
+    exact = log_collector_result([], limit=5, oldest=start, window_start=start)
+    at_boundary = asyncio.run(take("events", FakeBridge(exact), {"since": start, "count": 5}))
+    assert at_boundary.section("coverage").data["complete"] is False
+    earlier = log_collector_result([], limit=5, oldest="2026-09-19T23:59:59.9999999Z", window_start=start)
+    reached = asyncio.run(take("events", FakeBridge(earlier), {"since": start, "count": 5}))
+    assert reached.section("coverage").data["complete"] is True
+
+
+def test_a_future_start_cannot_establish_a_complete_window_even_when_the_log_is_healthy():
+    result = log_collector_result([], limit=5, window_start="2026-10-01T00:00:00.000Z", queried_at="2026-09-21T00:00:00.000Z")
+    reading = asyncio.run(take("events", FakeBridge(result), {"since": "2026-10-01T00:00:00Z", "count": 5}))
+    assert reading.outcome == "empty" and reading.section("coverage").data["complete"] is False
+    assert any("window completeness" in warning for warning in reading.warnings)
+
+
+def test_recent_records_show_retention_without_claiming_a_complete_window():
+    result = log_collector_result([{"RecordId": 7, "TimeCreated": "2026-09-20T12:00:00.000Z"}], limit=5)
+    reading = asyncio.run(take("events", FakeBridge(result), {"count": 5}))
+    reach = reading.section("coverage").data
+    assert reach["retained_from"] == "2026-01-01T00:00:00.0000000Z"
+    assert reach["covered_from"] is None and reach["complete"] is None
+    assert reading.warnings == []
+
+
+def test_metadata_failure_does_not_erase_returned_records_or_claim_complete_reach():
+    row = {"RecordId": 7, "Id": 41, "TimeCreated": "2026-09-20T12:00:00.000Z"}
+    result = log_collector_result([row], limit=5)
+    result.items[0]["metadata"] = {"log": "System", "log_state": "denied", "oldest_state": "denied"}
+    reading = asyncio.run(take("events", FakeBridge(result), {"since": "2026-09-20T00:00:00Z", "count": 5}))
+    assert reading.outcome == "ok" and reading.section("records").data == [row]
+    assert reading.section("coverage").data["retained_from"] is None
+    assert reading.section("coverage").data["covered_from"] is None
+    assert any("retention reach could not be established" in warning for warning in reading.warnings)
+
+
+def test_partial_query_keeps_its_returned_prefix_and_marks_the_unseen_tail():
+    row = {"RecordId": 7, "Id": 41, "TimeCreated": "2026-09-20T12:00:00.000Z"}
+    result = log_collector_result([row], limit=5)
+    result.items[0]["truncated"] = None
+    result.items[0]["stopped"] = {"kind": "failed", "detail": "synthetic interruption"}
+    reading = asyncio.run(take("events", FakeBridge(result), {"since": "2026-09-20T00:00:00Z", "count": 5}))
+    assert reading.outcome == "ok" and reading.section("records").data == [row]
+    assert reading.section("collection").data["stopped"]["kind"] == "failed"
+    assert reading.section("coverage").data["covered_from"] == row["TimeCreated"]
+    assert reading.section("coverage").data["complete"] is False
+    assert any("stopped early" in warning for warning in reading.warnings)
+
+
+@pytest.mark.parametrize("mutation", [
+    "returned_count", "wrong_log", "two_objects", "stopped_with_truncated", "truncated_without_full_page",
+    "empty_with_rows", "ok_with_error", "missing_record_id", "zero_record_id", "malformed_stopped",
+])
+def test_invalid_log_collector_shape_never_becomes_observed_evidence(mutation):
+    result = log_collector_result([{"RecordId": 7, "TimeCreated": "2026-09-20T12:00:00.000Z"}], limit=5)
+    if mutation == "returned_count":
+        result.items[0]["returned"] = 2
+    elif mutation == "wrong_log":
+        result.items[0]["log"] = "Application"
+    elif mutation == "stopped_with_truncated":
+        result.items[0]["stopped"] = {"kind": "failed", "detail": "interrupted"}
+    elif mutation == "truncated_without_full_page":
+        result.items[0]["truncated"] = True
+    elif mutation == "empty_with_rows":
+        result.items[0]["outcome"] = "empty"
+    elif mutation == "ok_with_error":
+        result.items[0]["error"] = "unexpected error"
+    elif mutation == "missing_record_id":
+        del result.items[0]["records"][0]["RecordId"]
+    elif mutation == "zero_record_id":
+        result.items[0]["records"][0]["RecordId"] = 0
+    elif mutation == "malformed_stopped":
+        result.items[0]["stopped"] = {"kind": "failed", "detail": ""}
+        result.items[0]["truncated"] = None
+    else:
+        result.items.append(result.items[0].copy())
+    reading = asyncio.run(take("events", FakeBridge(result), {"count": 5}))
+    assert reading.outcome == "failed" and reading.count is None and reading.sections == []
+
+
+@pytest.mark.parametrize("outcome", ["failed", "denied"])
+def test_log_collector_source_failure_keeps_its_outcome_and_no_evidence(outcome):
+    result = log_collector_result([], limit=5)
+    result.items[0]["outcome"] = outcome
+    result.items[0]["error"] = "synthetic query failure"
+    reading = asyncio.run(take("events", FakeBridge(result), {"count": 5}))
+    assert reading.outcome == outcome and reading.count is None and reading.sections == []
+    assert reading.error == {"kind": outcome, "detail": "synthetic query failure"}
+
+
+def test_failed_log_collector_for_another_log_is_rejected():
+    result = log_collector_result([], limit=5)
+    result.items[0].update(outcome="failed", log="Application", error="synthetic query failure")
+    reading = asyncio.run(take("events", FakeBridge(result), {"count": 5}))
+    assert reading.outcome == "failed" and reading.sections == []
+    assert "invalid query result" in reading.error["detail"]
+
+
+def test_record_before_retained_history_reports_the_boundary():
+    result = log_collector_result([], limit=5, oldest="2026-07-01T00:00:00.0000000Z", window_start=None)
+    reading = asyncio.run(take("record", FakeBridge(result), {"before": "2026-03-01T00:00:00Z", "count": 5}))
+    assert reading.outcome == "empty" and reading.section("coverage").data["reaches_before"] is False
+    assert any("earlier records are unavailable" in warning for warning in reading.warnings)
+
+
+def test_returned_record_proves_reach_even_if_log_wrapped_before_metadata_check():
+    row = {"RecordId": 7, "TimeCreated": "2026-03-01T00:00:00.000Z"}
+    result = log_collector_result([row], limit=5, oldest="2026-07-01T00:00:00.0000000Z", window_start=None)
+    reading = asyncio.run(take("record", FakeBridge(result), {"before": "2026-04-01T00:00:00Z", "count": 5}))
+    assert reading.outcome == "ok" and reading.section("coverage").data["reaches_before"] is True
+    assert reading.section("records").data == [row]
+    assert any("may have wrapped" in warning for warning in reading.warnings)
 
 
 def test_unknown_reading_is_a_key_error():

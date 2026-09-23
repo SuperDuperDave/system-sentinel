@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from sentinel.app import State, create_app
 from sentinel.bridge import BridgeResult
 from sentinel.readings import health
-from tests.conftest import FakeBridge, identity_result
+from tests.conftest import FakeBridge, LogBridge, identity_result
 
 TOKEN = "test-token-0123456789"
 
@@ -23,7 +23,7 @@ EVENT = {
 
 @pytest.fixture
 def client():
-    bridge = FakeBridge(
+    bridge = LogBridge(
         result=BridgeResult("ok", items=[EVENT], took_ms=5),
         by_marker={"$env:COMPUTERNAME": identity_result("TESTBOX", "tester")},
     )
@@ -221,7 +221,7 @@ def test_unknown_parameters_are_refused(client: TestClient):
 
 def test_host_field_is_redacted_even_before_the_machine_names_are_learned():
     """The bridge answers the log but not the identity probe: MachineName still leaves as <host>."""
-    bridge = FakeBridge(result=BridgeResult("ok", items=[EVENT], took_ms=5), by_marker={"$env:COMPUTERNAME": BridgeResult("unavailable", error="no interop")})
+    bridge = LogBridge(result=BridgeResult("ok", items=[EVENT], took_ms=5), by_marker={"$env:COMPUTERNAME": BridgeResult("unavailable", error="no interop")})
     with TestClient(create_app(State(bridge=bridge, token=TOKEN))) as c:
         rec = c.get("/api/readings/events", headers=AUTH).json()["sections"][0]["data"][0]
         assert rec["MachineName"] == "<host>"

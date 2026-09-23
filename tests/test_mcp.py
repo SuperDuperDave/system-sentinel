@@ -35,7 +35,7 @@ from sentinel.mcp_server import (
 from sentinel.paths import captures_dir
 from sentinel.reading import REGISTRY
 from sentinel.stack import PRESET_PROMPTS, slug
-from tests.conftest import FakeBridge, identity_result
+from tests.conftest import FakeBridge, LogBridge, identity_result
 from tests.test_stream import serve
 
 TOKEN = "test-token-0123456789"
@@ -56,7 +56,7 @@ READING_TOOLS = {tool_name(name) for name in REGISTRY}
 
 
 def machine() -> FakeBridge:
-    return FakeBridge(result=BridgeResult("ok", items=[EVENT], took_ms=5), by_marker={"$env:COMPUTERNAME": identity_result("TESTBOX", "tester")})
+    return LogBridge(result=BridgeResult("ok", items=[EVENT], took_ms=5), by_marker={"$env:COMPUTERNAME": identity_result("TESTBOX", "tester")})
 
 
 @pytest.fixture

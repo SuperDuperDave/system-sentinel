@@ -264,15 +264,19 @@ def test_record_before_a_moment_and_before_the_log_began():
         assert all(s < moment for s in stamps)
     ancient = asyncio.run(take("record", bridge, {"before": "2000-01-01T00:00:00Z", "count": 5}))
     assert ancient.outcome == "empty", ancient.error  # a clean no-match is a finding, not a failure
+    assert ancient.section("coverage").data["reaches_before"] is False
+    assert any("oldest retained record" in warning for warning in ancient.warnings)
 
 
 def test_a_log_that_does_not_exist_is_a_failure_not_an_empty_result():
     bridge = real_bridge_or_skip()
-    from sentinel.readings.events import events_script
+    from sentinel.readings.events import events_script, from_log_collector
 
-    result = bridge.run(events_script("NoSuchLogHere", [1, 2], 5))
-    assert result.outcome == "failed", (result.outcome, result.error)
-    assert result.error
+    script = events_script("NoSuchLogHere", [1, 2], 5)
+    result = bridge.run(script, depth=8)
+    assert result.outcome == "ok" and len(result.items) == 1  # the collector itself answered
+    reading = from_log_collector("events", {"log": "NoSuchLogHere", "count": 5}, script, result, "NoSuchLogHere", 5)
+    assert reading.outcome == "failed" and reading.error and reading.sections == []
 
 
 def test_events_since_boot_holds_to_the_machines_own_idea_of_its_start():

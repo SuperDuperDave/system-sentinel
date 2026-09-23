@@ -371,14 +371,16 @@ def _item_lines(position: int, item: dict[str, Any]) -> list[str]:
     if item.get("verbosity") == "summary" and envelope.get("reading") in ("events", "record", "whea", "faults"):
         cutoff = next((section.get("data") for section in sections if section.get("name") == "collection"), None)
         if isinstance(cutoff, dict) and all(key in cutoff for key in ("limit", "returned", "truncated")):
-            lines.append(f"- record cutoff: limit={cutoff['limit']}, returned={cutoff['returned']}, truncated={str(cutoff['truncated']).lower()}")
+            truncated = cutoff["truncated"]
+            state = str(truncated).lower() if isinstance(truncated, bool) else "unknown (query stopped early)" if cutoff.get("stopped") else "unknown"
+            lines.append(f"- record cutoff: limit={cutoff['limit']}, returned={cutoff['returned']}, truncated={state}")
     method = envelope.get("method") if isinstance(envelope.get("method"), dict) else {}
     lines.append(f"- method: {method.get('kind', 'unknown')}")
     warnings = envelope.get("warnings")
     if isinstance(warnings, list) and warnings:
         if item.get("verbosity") == "summary":
             warning_texts = [str(warning) for warning in warnings[:10]]
-            shown = [warning[:300] + ("…" if len(warning) > 300 else "") for warning in warning_texts]
+            shown = [warning[:250] + ("…" if len(warning) > 250 else "") for warning in warning_texts]
             more = len(warnings) - len(shown)
             lines.append(f"- warnings: {json.dumps(shown, ensure_ascii=False)}" + (f" (+{more} more in the stored reading)" if more else ""))
         else:

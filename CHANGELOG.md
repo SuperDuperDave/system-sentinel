@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.3.5] - 2026-09-23
+
+### Changed
+- `events`, `record` and `faults` now return the source log's enabled state, mode and oldest retained record after their matching query, with derived retention reach. An empty match before the log's retained history no longer reads as a quiet period. Windowed queries distinguish a complete returned window, a row limit, an interrupted query and unknown metadata while keeping any valid returned records. A future start keeps an observed empty query outcome but cannot claim a complete window; newest-record requests show retention without claiming a time window.
+- Already connected default-redacted streams use the current identity policy after each poll. A failed relearn preserves previously known names, and a native Windows server can use its inherited computer and user names if the PowerShell identity query fails while still reporting that failure. Bridge-error redaction runs off the server event loop.
+- The `boot` event-log boundary is rounded to the same UTC millisecond used by the log index and returned as the resolved window start.
+
+### Limits
+- Retention reach depends on the live log's recorded order and does not prove Windows emitted every event. `faults` covers Application log reports by filing time, not every live kernel event that occurred. An offset-free timestamp is interpreted in the server's local zone; use an explicit offset or `Z` when WSL and Windows may differ. Windows' reported kernel session can span multiple power-ons with Fast Startup.
+
+
 ## [1.3.4] - 2026-09-23
 
 ### Changed
