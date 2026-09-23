@@ -3,6 +3,7 @@
 ## [Unreleased] - 2026-09-22
 
 ### Added
+- PCIe now keeps the full raw PCI device inventory when parent relations fail or are incomplete, reports source and placement coverage, and groups only devices with fully reported chains. Signals marks missing relations as a gap and limits shared-link leads to root ports; Diagnostics distinguishes root ports, direct non-PCI parents and unknown topology.
 - Event, Record, WHEA and fault readings now report an exact record cutoff alongside their raw and decoded evidence. Time-window readings warn when the requested period extends past that cutoff. The Record frame uses this result to end paging precisely, keeps the reader's place as rows arrive, and widens progressively to avoid repeated small transfers. Large log Stack items default to a bounded summary, with all stored records available in full on demand. Numeric count limits are published in the catalog and MCP schema and rejected before event-log collection.
 - An on-demand `changes` reading brings Windows Update results, device configuration records and MSI installation/removal results into one time-ordered answer before a chosen moment. Each log reports its own read outcome, retention reach and truncation. Raw rows keep only safe projected event fields with exact log and RecordId references; decoded entries label unsupported layouts and never treat proximity as a cause.
 - Application crash and hang details now expose supported process IDs and interpreted creation times, with exact FILETIME values, source layout, independent validity and explicit limits. Unknown layouts and malformed values keep their raw evidence; inconsistent timestamps are flagged without being discarded.
@@ -20,7 +21,6 @@
 - Dashboard addresses now remember the selected view and an investigation moment. Refresh, copied links and browser back/forward return to the right screen; links to sections that load after a reading answer land at the section, and view changes focus the new title.
 - Record opens with a time-density view and leading sources for the returned System log rows. A bar or source opens and focuses one exact row below; the chart names its sample boundary instead of implying it covers the whole log.
 - Diagnostics shows a memory map after the person takes the reading: installed capacity, reported slot population and each returned module's configured speed against its rating, with links to the exact derived and Windows fields below.
-- Diagnostics now opens the PCIe reading with its shared-upstream groups: a bar for each returned group, exact endpoint counts and expandable device branches, followed by the Windows endpoint and bridge records. Bar lengths count endpoints and make no claim about bandwidth or fault likelihood.
 - On phones, Record keeps the selected level and window visible in one disclosure. Its full filter controls remain one tap away, letting the returned evidence appear sooner in the first viewport.
 - Hardware errors now shows a visible legend for the Windows event levels present in returned records; each record's symbol also has a spoken level name.
 

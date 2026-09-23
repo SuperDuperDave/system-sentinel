@@ -21,9 +21,10 @@ device and overran the bridge's limit. Its obvious replacement, one call with th
 whole array of instance ids, is faster but wrong on this machine: it returns the
 right number of property objects with the wrong instance ids attached to them, so
 some devices are answered twice and others not at all, and the answer changes
-between runs. ``pnputil /enum-devices /connected /relations /format xml`` reports
-the whole device tree in one pass, complete, and its XML element names do not
-depend on the display language.
+between runs. ``pnputil /enum-devices /connected /relations /format xml`` can report
+the device tree in one pass, and its XML element names do not depend on the
+display language. Its exit status and each returned chain are checked before
+the tree is used to explain a connection.
 """
 
 from __future__ import annotations
@@ -49,18 +50,26 @@ DEEP = 8
 PCIE_SCRIPT = r"""
 $warnings = @()
 
-$present = @()
 try { $present = @(Get-PnpDevice -PresentOnly -ErrorAction Stop) }
-catch { $warnings += "Get-PnpDevice did not answer: $($_.Exception.Message)" }
+catch { throw }
 
 # The parent of every present device, in one pass over the whole device tree.
 $parents = @{}
+$relationExit = $null
+$relationParsed = $false
+$relationListed = 0
 try {
+    # Pooled PowerShell sessions can retain a native command's previous exit status.
+    $global:LASTEXITCODE = $null
     $text = (& pnputil.exe /enum-devices /connected /relations /format xml 2>&1 | Out-String)
-    foreach ($d in ([xml]$text).PnpUtil.Device) {
+    $relationExit = $LASTEXITCODE
+    $nodes = ([xml]$text).SelectNodes('/PnpUtil/Device')
+    $relationParsed = $true
+    $relationListed = $nodes.Count
+    foreach ($d in $nodes) {
         if ($d.InstanceId -and $d.Parent) { $parents[[string]$d.InstanceId] = [string]$d.Parent }
     }
-    if ($parents.Count -eq 0) { $warnings += 'pnputil reported no parent for any device: the fabric could not be assembled.' }
+    if ($relationExit -ne 0) { $warnings += "pnputil exited with code $relationExit; its device relations may be incomplete." }
 } catch { $warnings += "pnputil did not report the device tree: $($_.Exception.Message)" }
 
 # Bus, device and function, from the PCI enumerator's own record. The indirect string
@@ -98,9 +107,16 @@ $devices = @(foreach ($d in $present) {
     }
 })
 
-if ($present.Count -gt 0 -and $devices.Count -eq 0) { $warnings += 'No device on this machine is enumerated on the PCI bus.' }
-
-[pscustomobject]@{ devices = $devices; present_devices = $present.Count; warnings = $warnings }
+[pscustomobject]@{
+    devices = $devices
+    relation_source = [pscustomobject]@{
+        exit_code = $relationExit
+        parsed = $relationParsed
+        listed = $relationListed
+        mapped = $parents.Count
+    }
+    warnings = $warnings
+}
 """
 
 POWER_SCRIPT_TEMPLATE = r"""
@@ -248,12 +264,18 @@ $devices = @(Get-PnpDevice -PresentOnly -ErrorAction Stop |
 # ---------------------------------------------------------------------------
 
 GROUPS_BASIS = (
-    "Each PCI device that is the parent of another PCI device is a bridge; the rest are endpoints. "
-    "An endpoint's parent chain is followed while each parent is itself a PCI device, and the last "
-    "one reached is its root port. Endpoints reaching the same root port are one group: they share "
-    "an upstream link, so a fault on one can present on another. An endpoint with no PCI ancestor "
-    "sits on the root complex and is grouped under its own parent. The address is the bus, device "
-    "and function the PCI enumerator recorded for the endpoint."
+    "A device is placed only when Windows reported its parent and every PCI ancestor's parent. "
+    "Devices with a reported PCI child are omitted from the member list; when relations are partial, "
+    "a placed member may still have an unseen child. A root_port group follows a reported chain to "
+    "its highest PCI ancestor, so its members share that link. A non_pci_parent group has no PCI "
+    "ancestor and does not establish a shared PCIe link. Missing chains are listed in coverage. "
+    "The address is the bus, device and function the PCI enumerator recorded for that device."
+)
+COVERAGE_BASIS = (
+    "With returned PCI devices, complete requires a successful pnputil XML query and a reported parent chain for every device; "
+    "an empty inventory needs no parent relations. "
+    "Partial keeps only groups supported by fully reported chains. None means no relation-backed group can be formed; "
+    "it does not mean the PCI devices are absent. Unplaced entries name the device at the first missing link."
 )
 
 _ADDRESS = re.compile(r"\((\d+)\s*,\s*(\d+)\s*,\s*(\d+)\)\s*$")
@@ -264,55 +286,100 @@ def _key(instance_id: Any) -> str:
     return str(instance_id or "").upper()
 
 
-def pcie_topology(devices: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
-    """Split the PCI devices into endpoints and bridges and group the endpoints by root port."""
+def pcie_topology(devices: list[dict[str, Any]], relation_source: dict[str, Any]) -> tuple[list[dict[str, Any]] | None, dict[str, Any]]:
+    """Place only devices with a fully observed chain, and state what could not be placed."""
     by_id = {_key(d.get("InstanceId")): d for d in devices}
     parented = Counter(_key(d.get("Parent")) for d in devices if d.get("Parent"))
+    parsed = relation_source.get("parsed") is True
+    exit_code = relation_source.get("exit_code")
+    clean_source = parsed and type(exit_code) is int and exit_code == 0
+    placed: dict[str, tuple[list[str], str]] = {}
+    unplaced: list[dict[str, str]] = []
+    for device in devices:
+        if not parsed:
+            reason = "the relation source did not answer"
+            chain, bus, at = [], "", str(device.get("InstanceId") or "")
+        else:
+            chain, bus, reason, at = _upstream(device, by_id)
+        if reason:
+            unplaced.append({"instance_id": str(device.get("InstanceId") or ""), "at": at, "reason": reason})
+        else:
+            placed[_key(device.get("InstanceId"))] = (chain, bus)
 
-    endpoints = [d for d in devices if not parented.get(_key(d.get("InstanceId")))]
-    roots = [d for d in devices if parented.get(_key(d.get("InstanceId")))]
+    if not devices:
+        relation_state = "complete"  # no topology is needed to establish an empty PCI inventory
+    elif not parsed or not placed:
+        relation_state = "none"
+    elif not clean_source or unplaced:
+        relation_state = "partial"
+    else:
+        relation_state = "complete"
+
+    coverage = {
+        "relations": relation_state,
+        "returned_devices": len(devices),
+        "placed_devices": len(placed),
+        "unplaced": unplaced,
+    }
+    if relation_state == "none":
+        return None, coverage
 
     groups: dict[str, dict[str, Any]] = {}
-    for endpoint in endpoints:
-        chain = _upstream(endpoint, by_id)
+    for member_device in devices:
+        if parented.get(_key(member_device.get("InstanceId"))):
+            continue
+        resolved = placed.get(_key(member_device.get("InstanceId")))
+        if resolved is None:
+            continue
+        chain, bus = resolved
         root = by_id[_key(chain[-1])] if chain else None
-        key = _key(chain[-1]) if chain else _key(endpoint.get("Parent"))
+        key = _key(chain[-1]) if chain else bus
         group = groups.setdefault(
             key,
             {
-                "root_port": {
-                    "instance_id": (root or {}).get("InstanceId") or endpoint.get("Parent"),
-                    "name": (root or {}).get("Name") or endpoint.get("ParentName"),
+                "kind": "root_port" if chain else "non_pci_parent",
+                "upstream": {
+                    "instance_id": (root or {}).get("InstanceId") or member_device.get("Parent"),
+                    "name": (root or {}).get("Name") or member_device.get("ParentName"),
                 },
                 "members": [],
             },
         )
         group["members"].append(
             {
-                "name": endpoint.get("Name"),
-                "instance_id": endpoint.get("InstanceId"),
-                "class": endpoint.get("Class"),
-                "status": endpoint.get("Status"),
-                "problem": endpoint.get("Problem"),
-                "address": pcie_address(endpoint.get("Location")),
+                "name": member_device.get("Name"),
+                "instance_id": member_device.get("InstanceId"),
+                "class": member_device.get("Class"),
+                "status": member_device.get("Status"),
+                "problem": member_device.get("Problem"),
+                "address": pcie_address(member_device.get("Location")),
                 "upstream": chain,
             }
         )
 
-    ordered = sorted(groups.values(), key=lambda g: (-len(g["members"]), str(g["root_port"]["name"] or "")))
-    return endpoints, roots, ordered
+    ordered = sorted(groups.values(), key=lambda g: (-len(g["members"]), str(g["upstream"]["name"] or "")))
+    return ordered, coverage
 
 
-def _upstream(device: dict[str, Any], by_id: dict[str, dict[str, Any]]) -> list[str]:
-    """The instance ids from this device's parent up to the last PCI ancestor, nearest first."""
+def _upstream(device: dict[str, Any], by_id: dict[str, dict[str, Any]]) -> tuple[list[str], str, str | None, str]:
+    """Return an observed PCI chain and terminal bus, or the first missing relation."""
     chain: list[str] = []
-    seen: set[str] = set()
+    device_id = _key(device.get("InstanceId"))
+    seen: set[str] = {device_id}
     parent = _key(device.get("Parent"))
-    while parent and parent in by_id and parent not in seen:
+    if not parent:
+        return chain, "", "parent not reported", device_id
+    while parent.startswith("PCI\\"):
+        if parent not in by_id:
+            return chain, "", "upstream PCI device was not returned", parent
+        if parent in seen:
+            return chain, "", "parent relations form a loop", parent
         seen.add(parent)
         chain.append(by_id[parent]["InstanceId"])
         parent = _key(by_id[parent].get("Parent"))
-    return chain
+        if not parent:
+            return chain, "", "an upstream device's parent was not reported", _key(chain[-1])
+    return chain, parent, None, ""
 
 
 def pcie_address(location: Any) -> dict[str, int] | None:
@@ -328,19 +395,28 @@ def take_pcie(bridge: Bridge, params: dict[str, Any]) -> Reading:
     result = bridge.run(PCIE_SCRIPT, depth=DEEP)
 
     def build(payload: dict[str, Any]) -> list[Section]:
-        endpoints, roots, groups = pcie_topology(list(payload.get("devices") or []))
+        devices = list(payload.get("devices") or [])
+        source = payload.get("relation_source") if isinstance(payload.get("relation_source"), dict) else {}
+        groups, coverage = pcie_topology(devices, source)
         return [
-            Section("endpoints", "raw", endpoints),
-            Section("roots", "raw", roots),
+            Section("devices", "raw", devices),
             Section("groups", "derived", groups, basis=GROUPS_BASIS),
+            Section("coverage", "derived", coverage, basis=COVERAGE_BASIS),
+            Section("collection", "raw", {"pnputil": {key: source.get(key) for key in ("exit_code", "parsed", "listed", "mapped")}}),
         ]
 
     reading = from_object("pcie", params, PCIE_SCRIPT, result, build)
-    endpoints, roots = reading.section("endpoints"), reading.section("roots")
-    if endpoints is not None and roots is not None:
-        reading.count = len(endpoints.data)
-        if reading.outcome == "ok" and not endpoints.data and not roots.data:
-            reading.outcome = "empty"  # nothing is enumerated on the PCI bus: a finding, not an absence
+    devices, coverage = reading.section("devices"), reading.section("coverage")
+    if devices is not None and coverage is not None:
+        reading.count = len(devices.data)
+        if reading.outcome == "ok" and not devices.data:
+            reading.outcome = "empty"  # Get-PnpDevice answered with no PCI devices
+        elif coverage.data["relations"] != "complete":
+            unplaced = len(coverage.data["unplaced"])
+            if unplaced:
+                reading.warnings.append(f"PCI parent relations are {coverage.data['relations']}; {unplaced} returned devices could not be placed, so only reported links appear in groups")
+            else:
+                reading.warnings.append("The PCI relation source did not complete cleanly; reported parent chains are shown, but their completeness is uncertain")
     return reading
 
 
@@ -742,6 +818,18 @@ def _suppressions(observed: dict[str, Reading]) -> list[dict[str, Any]]:
 def _gaps(observed: dict[str, Reading], readings: dict[str, Reading | None], reasons: dict[str, str]) -> list[dict[str, Any]]:
     """Where the record has a hole: a device that cannot speak, or a reading that did not answer."""
     out: list[dict[str, Any]] = []
+    coverage = _section(observed.get("pcie"), "coverage") or {}
+    if coverage.get("returned_devices") and coverage.get("relations") in ("partial", "none"):
+        out.append(
+            _signal(
+                "gaps",
+                "gap:pcie-relations",
+                "PCI parent relationships were not observed" if coverage["relations"] == "none" else "Some PCI parent relationships were not observed",
+                "The PCI device inventory answered, but the upstream relationships did not fully answer. Groups include only devices with a reported parent chain; an absent group does not mean an absent link.",
+                {"relations": coverage["relations"], "returned_devices": coverage["returned_devices"], "placed_devices": coverage["placed_devices"], "unplaced_devices": len(coverage["unplaced"])},
+                ["pcie"],
+            )
+        )
     for device in _derived(observed.get("constraints")).get("not_working") or []:
         out.append(
             _signal(
@@ -935,16 +1023,18 @@ def _mismatches(observed: dict[str, Reading]) -> list[dict[str, Any]]:
             )
         )
     for group in _section(observed.get("pcie"), "groups") or []:
+        if group.get("kind") != "root_port":
+            continue
         members = group.get("members") or []
-        unhealthy = [m for m in members if m.get("status") and m.get("status") != "OK"]
+        unhealthy = [m for m in members if (m.get("status") and m.get("status") != "OK") or (m.get("problem") and m.get("problem") != "CM_PROB_NONE")]
         if unhealthy and len(members) > 1:
             out.append(
                 _signal(
                     "mismatches",
-                    f"mismatch:root-port:{group.get('root_port', {}).get('instance_id')}",
-                    f"One endpoint under {group.get('root_port', {}).get('name')} is not healthy while others are",
-                    "Endpoints under one root port share an upstream link. A fault on one of them can have a cause the others also sit behind.",
-                    {"root_port": (group.get("root_port") or {}).get("name"), "not_ok": [m.get("name") for m in unhealthy], "members": len(members)},
+                    f"mismatch:root-port:{group.get('upstream', {}).get('instance_id')}",
+                    f"A PCI device under {group.get('upstream', {}).get('name')} reports a non-OK state while others share its reported upstream parent",
+                    "These returned devices share a reported upstream PCI link. The different states are a lead to inspect, not a cause established by this reading.",
+                    {"root_port": (group.get("upstream") or {}).get("name"), "not_ok": [m.get("name") for m in unhealthy], "members": len(members)},
                     ["pcie"],
                 )
             )
@@ -1112,11 +1202,11 @@ register(
     Spec(
         name="pcie",
         description=(
-            "The PCIe fabric: every device on the PCI bus, split into the bridges that carry the "
-            "tree and the endpoints hanging off it, grouped by the root port they share. Endpoints "
-            "under one root port share an upstream link, which is why a fault on one can present on "
-            "another. Device instance identifiers and bus addresses are kept: they are how endpoints "
-            "are told apart and how a hardware error record is matched to a device."
+            "The present PCI device inventory and the parent relations Windows reported. Devices with "
+            "complete reported parent chains can be grouped under a PCI root port or root complex; "
+            "coverage says when the relation source or any chain is incomplete. Root-port members "
+            "share an upstream link; members under a non-PCI parent do not establish that claim. Instance "
+            "identifiers and bus addresses are kept to distinguish devices and match hardware errors."
         ),
         classes=("raw", "derived"),
         take=take_pcie,

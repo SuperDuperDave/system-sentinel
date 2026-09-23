@@ -142,7 +142,7 @@ A collector that returns one structured object must actually return exactly one 
 | `hardware.storage` | Disks, volumes, SMART where exposed | `raw`, `derived` | |
 | `hardware.network` | Adapters and connectivity | `raw`, `derived`; if Windows cannot assemble IP configuration, the adapter inventory remains observed, a warning names the gap, and each adapter's `ip` is `null` rather than an empty address list | |
 | `drivers` | Current signed driver inventory, sorted by the driver's authored date rather than installation time | `drivers` (raw) | `count` (default 30, at least 1) |
-| `pcie` | The PCIe fabric | `endpoints` (raw), `roots` (raw), `groups` (derived: endpoints sharing a root) | |
+| `pcie` | Present PCI devices and the reported parent relations; incomplete relations do not erase the inventory or imply a link | `devices` (raw PCI inventory), `groups` (derived from fully reported parent chains, `null` when none can be established; `kind` distinguishes `root_port` from `non_pci_parent`, with a generic `upstream` identity), `coverage` (derived complete/partial/none and unplaced device reasons), `collection` (raw `pnputil` exit and XML counts) | |
 | `power` | Power configuration and transitions | `raw`, `derived` | |
 | `memory` | Physical memory and stability signals | `raw`, `derived` | |
 | `constraints` | Configured limits and their sources | `raw`, `derived` | |

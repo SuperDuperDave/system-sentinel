@@ -52,6 +52,7 @@ PCI_DEVICES = [
     {"Name": "AMD SMBus", "InstanceId": "PCI\\VEN_1022&DEV_790B\\3&A&0&A0", "Class": "System", "Status": "OK", "Problem": "CM_PROB_NONE", "Service": "",
      "Location": "@System32\\drivers\\pci.sys,#65536;PCI bus %1, device %2, function %3;(0,20,0)", "Parent": "ACPI\\PNP0A08\\0", "ParentName": "PCI Express Root Complex"},
 ]
+RELATIONS_OK = {"exit_code": 0, "parsed": True, "listed": 40, "mapped": 40}
 
 POWER_PAYLOAD = {
     "sleep_states": [
@@ -154,7 +155,7 @@ def payload_bridge() -> FakeBridge:
     """Each script is answered by its own fixture, matched on a phrase only that script has."""
     return FakeBridge(
         by_marker={
-            "pnputil": BridgeResult("ok", items=[{"devices": PCI_DEVICES, "present_devices": 40, "warnings": []}], took_ms=11),
+            "pnputil": BridgeResult("ok", items=[{"devices": PCI_DEVICES, "relation_source": RELATIONS_OK, "warnings": []}], took_ms=11),
             "powercfg": BridgeResult("ok", items=[dict(POWER_PAYLOAD, warnings=["powercfg /a produced no output: the supported sleep states were not observed."])], took_ms=12),
             "Win32_PhysicalMemory": BridgeResult("ok", items=[dict(MEMORY_PAYLOAD)], took_ms=13),
             "CM_PROB_NONE": BridgeResult("ok", items=[{"devices": CONSTRAINT_DEVICES, "warnings": []}], took_ms=14),
@@ -166,32 +167,35 @@ def payload_bridge() -> FakeBridge:
 # ---------------------------------------------------------------- pcie
 
 
-def test_the_fabric_splits_into_bridges_and_endpoints():
-    endpoints, roots, _ = pcie_topology(PCI_DEVICES)
-    assert [r["Name"] for r in roots] == ["PCI Express Root Port"]
-    assert sorted(e["Name"] for e in endpoints) == ["AMD SMBus", "High Definition Audio Controller", "NVIDIA GeForce RTX 3080"]
+def test_the_fabric_places_only_devices_with_observed_parent_chains():
+    groups, coverage = pcie_topology(PCI_DEVICES, RELATIONS_OK)
+    assert coverage == {"relations": "complete", "returned_devices": 4, "placed_devices": 4, "unplaced": []}
+    assert sorted(member["name"] for group in groups for member in group["members"]) == ["AMD SMBus", "High Definition Audio Controller", "NVIDIA GeForce RTX 3080"]
 
 
 def test_endpoints_under_one_root_port_are_one_group_whatever_the_case():
-    _, _, groups = pcie_topology(PCI_DEVICES)
+    groups, _ = pcie_topology(PCI_DEVICES, RELATIONS_OK)
     shared = groups[0]  # the largest group first
-    assert shared["root_port"] == {"instance_id": ROOT_PORT, "name": "PCI Express Root Port"}
+    assert shared["kind"] == "root_port"
+    assert shared["upstream"] == {"instance_id": ROOT_PORT, "name": "PCI Express Root Port"}
     assert sorted(m["name"] for m in shared["members"]) == ["High Definition Audio Controller", "NVIDIA GeForce RTX 3080"]
     assert all(m["upstream"] == [ROOT_PORT] for m in shared["members"])
 
 
 def test_a_device_on_the_root_complex_is_grouped_under_its_own_parent():
-    _, _, groups = pcie_topology(PCI_DEVICES)
-    complex_group = next(g for g in groups if g["root_port"]["instance_id"] == "ACPI\\PNP0A08\\0")
+    groups, _ = pcie_topology(PCI_DEVICES, RELATIONS_OK)
+    complex_group = next(g for g in groups if g["upstream"]["instance_id"] == "ACPI\\PNP0A08\\0")
+    assert complex_group["kind"] == "non_pci_parent"
     assert [m["name"] for m in complex_group["members"]] == ["AMD SMBus"]
-    assert complex_group["root_port"]["name"] == "PCI Express Root Complex"
+    assert complex_group["upstream"]["name"] == "PCI Express Root Complex"
     assert complex_group["members"][0]["upstream"] == []
 
 
 def test_a_chain_that_points_at_itself_does_not_loop():
     looped = [{"Name": "A", "InstanceId": "PCI\\A", "Parent": "PCI\\B"}, {"Name": "B", "InstanceId": "PCI\\B", "Parent": "PCI\\A"}]
-    endpoints, roots, groups = pcie_topology(looped)
-    assert endpoints == [] and len(roots) == 2 and groups == []
+    groups, coverage = pcie_topology(looped, RELATIONS_OK)
+    assert groups is None and coverage["relations"] == "none"
+    assert {row["reason"] for row in coverage["unplaced"]} == {"parent relations form a loop"}
 
 
 def test_the_bus_address_is_read_from_the_enumerators_location_string():
@@ -200,10 +204,13 @@ def test_the_bus_address_is_read_from_the_enumerators_location_string():
     assert pcie_address("PCI bus 1, device 0, function 0") is None
 
 
-def test_pcie_returns_three_sections_and_counts_its_endpoints():
+def test_pcie_keeps_raw_devices_and_counts_them_separately_from_placed_groups():
     reading = asyncio.run(take("pcie", payload_bridge(), {}))
-    assert reading.outcome == "ok" and reading.count == 3
-    assert [(s.name, s.cls) for s in reading.sections] == [("endpoints", "raw"), ("roots", "raw"), ("groups", "derived")]
+    assert reading.outcome == "ok" and reading.count == 4
+    assert [(s.name, s.cls) for s in reading.sections] == [("devices", "raw"), ("groups", "derived"), ("coverage", "derived"), ("collection", "raw")]
+    assert reading.section("devices").data == PCI_DEVICES
+    assert reading.section("coverage").data["relations"] == "complete"
+    assert reading.section("collection").data["pnputil"] == RELATIONS_OK
     assert reading.section("groups").basis
     assert "pnputil" in reading.method["query"] and reading.method["kind"] == "powershell"
 
@@ -214,10 +221,66 @@ def test_pcie_says_unavailable_rather_than_empty_when_the_bridge_did_not_answer(
     assert reading.error == {"kind": "unavailable", "detail": "powershell.exe was not found"}
 
 
+def test_pcie_inventory_query_failure_is_not_an_empty_machine():
+    reading = asyncio.run(take("pcie", FakeBridge(BridgeResult("failed", error="Get-PnpDevice failed")), {}))
+    assert reading.outcome == "failed" and reading.section("devices") is None
+
+
 def test_a_machine_with_no_pci_device_is_empty_not_ok():
-    bridge = FakeBridge(BridgeResult("ok", items=[{"devices": [], "present_devices": 3, "warnings": []}]))
+    bridge = FakeBridge(BridgeResult("ok", items=[{"devices": [], "relation_source": RELATIONS_OK, "warnings": []}]))
     reading = asyncio.run(take("pcie", bridge, {}))
     assert reading.outcome == "empty" and reading.count == 0
+    assert reading.section("groups").data == []
+
+
+def test_missing_relations_keep_inventory_without_inventing_a_group():
+    devices = [dict(PCI_DEVICES[1], Parent=None), dict(PCI_DEVICES[2], Parent=None)]
+    source = {"exit_code": 1, "parsed": False, "listed": 0, "mapped": 0}
+    reading = asyncio.run(take("pcie", FakeBridge(BridgeResult("ok", items=[{"devices": devices, "relation_source": source, "warnings": []}])), {}))
+    assert reading.outcome == "ok" and reading.count == 2
+    assert reading.section("devices").data == devices
+    assert reading.section("groups").data is None
+    assert reading.section("coverage").data["relations"] == "none"
+    assert len(reading.section("coverage").data["unplaced"]) == 2
+    assert reading.warnings
+
+
+def test_partial_relations_place_only_complete_chains():
+    devices = PCI_DEVICES + [dict(PCI_DEVICES[1], InstanceId="PCI\\OTHER", Parent=None)]
+    groups, coverage = pcie_topology(devices, RELATIONS_OK)
+    assert coverage["relations"] == "partial" and coverage["placed_devices"] == 4
+    assert coverage["unplaced"] == [{"instance_id": "PCI\\OTHER", "at": "PCI\\OTHER", "reason": "parent not reported"}]
+    assert all(m["instance_id"] != "PCI\\OTHER" for g in groups for m in g["members"])
+
+
+def test_missing_upstream_pci_device_is_unplaced():
+    groups, coverage = pcie_topology([dict(PCI_DEVICES[1], Parent="PCI\\NOT_RETURNED")], RELATIONS_OK)
+    assert groups is None and coverage["relations"] == "none"
+    assert coverage["unplaced"][0]["reason"] == "upstream PCI device was not returned"
+    assert coverage["unplaced"][0]["at"] == "PCI\\NOT_RETURNED"
+
+
+def test_missing_parent_mid_chain_marks_descendants_unplaced_and_keeps_independent_chain():
+    devices = [dict(d, Parent=None) if d["InstanceId"] == ROOT_PORT else d for d in PCI_DEVICES]
+    groups, coverage = pcie_topology(devices, RELATIONS_OK)
+    assert coverage["relations"] == "partial" and coverage["placed_devices"] == 1
+    assert {r["instance_id"] for r in coverage["unplaced"]} == {ROOT_PORT, PCI_DEVICES[1]["InstanceId"], PCI_DEVICES[2]["InstanceId"]}
+    assert {r["at"] for r in coverage["unplaced"]} == {ROOT_PORT}
+    assert [[m["name"] for m in g["members"]] for g in groups] == [["AMD SMBus"]]
+
+
+def test_missing_relation_source_is_unknown_even_when_devices_have_parent_fields():
+    groups, coverage = pcie_topology(PCI_DEVICES, {})
+    assert groups is None and coverage["relations"] == "none"
+    assert {r["reason"] for r in coverage["unplaced"]} == {"the relation source did not answer"}
+
+
+def test_nonzero_relation_exit_makes_even_reported_chains_partial():
+    source = dict(RELATIONS_OK, exit_code=5)
+    groups, coverage = pcie_topology(PCI_DEVICES, source)
+    assert groups and coverage["relations"] == "partial" and coverage["unplaced"] == []
+    reading = asyncio.run(take("pcie", FakeBridge(BridgeResult("ok", items=[{"devices": PCI_DEVICES, "relation_source": source, "warnings": []}])), {}))
+    assert any("source did not complete cleanly" in w for w in reading.warnings)
 
 
 # ---------------------------------------------------------------- power
@@ -523,7 +586,7 @@ def _reading(name: str, sections: list[tuple[str, str, object]], outcome: str = 
 def _inputs(**over):
     base = {
         "hardware": _reading("hardware", [("fingerprint", "derived", {"gpu": {"date": "2018-01-01", "driver_version": "1.0"}}), ("config", "raw", {"fast_startup": False})]),
-        "pcie": _reading("pcie", [("groups", "derived", [{"root_port": {"instance_id": "PCI\\R", "name": "Root Port"}, "members": [{"name": "GPU", "status": "OK"}, {"name": "Audio", "status": "Error"}]}])]),
+        "pcie": _reading("pcie", [("groups", "derived", [{"kind": "root_port", "upstream": {"instance_id": "PCI\\R", "name": "Root Port"}, "members": [{"name": "GPU", "status": "OK"}, {"name": "Audio", "status": "Error"}]}]), ("coverage", "derived", {"relations": "complete", "returned_devices": 3, "placed_devices": 3, "unplaced": []})]),
         "power": _reading("power", [("derived", "derived", {"fast_startup": True, "uptime_seconds": 30 * 86400, "link_power_management": {"ac": {"index": "0x2", "setting": "L1"}}, "ledger": {"counts": {"unexpected shutdown": 2, "wake": 1, "display driver reset": 1}, "window": {"first": "a", "last": "b"}}})]),
         "constraints": _reading("constraints", [("derived", "derived", constraints_derived(CONSTRAINT_DEVICES))]),
         "events": _reading("events", [("records", "raw", [{"ProviderName": "Service Control Manager", "TimeCreated": f"2026-09-0{i % 9 + 1}T00:00:00Z"} for i in range(30)] + [{"ProviderName": "Quiet", "TimeCreated": "2026-09-01T00:00:00Z"}])]),
@@ -563,6 +626,36 @@ def test_an_endpoint_in_error_beside_healthy_ones_under_a_root_port_is_a_mismatc
     signals, _ = take_signals_sync(_inputs())
     mismatch = next(s for s in signals if s["id"] == "mismatch:root-port:PCI\\R")
     assert mismatch["evidence"]["not_ok"] == ["Audio"] and mismatch["readings"] == ["pcie"]
+
+
+def test_a_problem_code_also_counts_as_a_non_ok_root_port_member():
+    pcie = _reading("pcie", [("groups", "derived", [{"kind": "root_port", "upstream": {"instance_id": "PCI\\R", "name": "Root Port"}, "members": [{"name": "GPU", "status": "OK", "problem": "CM_PROB_NONE"}, {"name": "Audio", "status": "OK", "problem": "CM_PROB_FAILED_START"}]}])])
+    signals, _ = take_signals_sync(_inputs(pcie=pcie))
+    mismatch = next(s for s in signals if s["id"] == "mismatch:root-port:PCI\\R")
+    assert mismatch["evidence"]["not_ok"] == ["Audio"]
+
+
+def test_root_complex_members_do_not_imply_a_shared_link():
+    pcie = _reading("pcie", [("groups", "derived", [{"kind": "non_pci_parent", "upstream": {"instance_id": "ACPI\\ROOT", "name": "Root Complex"}, "members": [{"name": "GPU", "status": "OK"}, {"name": "Audio", "status": "Error"}]}])])
+    signals, _ = take_signals_sync(_inputs(pcie=pcie))
+    assert not any(s["id"].startswith("mismatch:root-port:") for s in signals)
+
+
+def test_partial_pcie_relations_raise_a_gap_without_dropping_reported_links():
+    groups, coverage = pcie_topology(PCI_DEVICES + [dict(PCI_DEVICES[1], InstanceId="PCI\\OTHER", Parent=None)], RELATIONS_OK)
+    pcie = _reading("pcie", [("groups", "derived", groups), ("coverage", "derived", coverage)])
+    signals, _ = take_signals_sync(_inputs(pcie=pcie))
+    gap = next(s for s in signals if s["id"] == "gap:pcie-relations")
+    assert gap["evidence"] == {"relations": "partial", "returned_devices": 5, "placed_devices": 4, "unplaced_devices": 1}
+    assert any(s["id"].startswith("mismatch:root-port:") for s in signals)
+
+
+def test_no_pcie_relations_raise_a_gap_and_no_shared_link_lead():
+    pcie = _reading("pcie", [("groups", "derived", None), ("coverage", "derived", {"relations": "none", "returned_devices": 2, "placed_devices": 0, "unplaced": [{"instance_id": "PCI\\A"}, {"instance_id": "PCI\\B"}]})])
+    signals, _ = take_signals_sync(_inputs(pcie=pcie))
+    gap = next(s for s in signals if s["id"] == "gap:pcie-relations")
+    assert gap["title"] == "PCI parent relationships were not observed"
+    assert not any(s["id"].startswith("mismatch:root-port:") for s in signals)
 
 
 def test_stops_that_share_a_bug_check_and_stops_that_wrote_none_are_each_one_signal():
@@ -692,11 +785,15 @@ def test_the_fabric_on_this_machine_is_whole():
     reading = asyncio.run(take("pcie", bridge, {}))
     if reading.outcome != "ok":
         pytest.skip("the PCI bus was not observed")
-    endpoints = reading.section("endpoints").data
-    roots = reading.section("roots").data
+    devices = reading.section("devices").data
+    coverage = reading.section("coverage").data
+    assert coverage["relations"] == "complete", reading.section("collection").data
     grouped = [m for g in reading.section("groups").data for m in g["members"]]
-    assert len(grouped) == len(endpoints), "every endpoint belongs to exactly one group"
-    assert all(e.get("Parent") for e in endpoints + roots), "every PCI device reported a parent"
+    parents = {str(d.get("Parent") or "").upper() for d in devices}
+    leaves = [d for d in devices if str(d.get("InstanceId") or "").upper() not in parents]
+    assert len(grouped) == len(leaves), "every observed PCI leaf belongs to exactly one group"
+    assert coverage["placed_devices"] == len(devices)
+    assert all(d.get("Parent") for d in devices), "every PCI device reported a parent"
     if not any(m["address"] for m in grouped):
         # A virtual machine's devices hang off a bus that reports no addresses (GitHub's Windows
         # runner, for one); the fabric was read and grouped whole, but this assertion is about hardware.

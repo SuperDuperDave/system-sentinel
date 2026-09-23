@@ -10,39 +10,59 @@ interface Endpoint {
 }
 
 export interface PcieGroup {
-  root_port: { instance_id: string; name: string };
+  kind: 'root_port' | 'non_pci_parent';
+  upstream: { instance_id: string; name: string };
   members: Endpoint[];
+}
+
+export interface PcieCoverage {
+  relations: 'complete' | 'partial' | 'none';
+  returned_devices: number;
+  placed_devices: number;
+  unplaced: { instance_id: string; reason: string }[];
 }
 
 const reportsProblem = (member: Endpoint) => (!!member.status && member.status !== 'OK') || (!!member.problem && member.problem !== 'CM_PROB_NONE');
 const stateText = (member: Endpoint) => reportsProblem(member) ? `${member.status || 'State unknown'} · ${member.problem || 'No problem code'}` : member.status === 'OK' ? 'OK' : 'State not reported';
+const coverageText = (coverage: PcieCoverage | null): string => {
+  if (!coverage) return 'Parent relation coverage was not reported.';
+  if (coverage.returned_devices === 0) return 'Windows returned no present PCI devices, so no parent chains are needed.';
+  if (coverage.relations === 'complete') return 'Windows reported a parent chain for every returned PCI device.';
+  if (coverage.relations === 'none') return 'Windows did not provide enough parent relationships to draw upstream groups.';
+  if (coverage.unplaced.length === 0) return 'The relation source did not finish cleanly. Returned devices have reported chains, but source completeness is uncertain.';
+  return `Parent relation coverage is partial. ${coverage.unplaced.length} returned PCI devices could not be placed; reported groups may be incomplete.`;
+};
 
-/** Windows' returned parent groups, organized by shared link rather than physical board position. */
-export function PcieMap({ groups }: { groups: PcieGroup[] }) {
-  const endpoints = groups.reduce((count, group) => count + group.members.length, 0);
-  const peak = Math.max(1, ...groups.map((group) => group.members.length));
-  const nonOk = groups.reduce((count, group) => count + group.members.filter(reportsProblem).length, 0);
+/** Groups backed by reported parent chains; a non-PCI parent does not imply a shared PCIe link. */
+export function PcieMap({ groups, coverage }: { groups: PcieGroup[] | null; coverage: PcieCoverage | null }) {
+  const placedGroups = groups ?? [];
+  const peak = Math.max(1, ...placedGroups.map((group) => group.members.length));
+  const nonOk = placedGroups.reduce((count, group) => count + group.members.filter(reportsProblem).length, 0);
 
   return (
     <div className={styles.fabric}>
       <div className={styles.summary}>
-        <div><strong>{groups.length}</strong><span className="readout">upstream groups</span></div>
-        <div><strong>{endpoints}</strong><span className="readout">endpoints returned</span></div>
-        <div><strong>{nonOk}</strong><span className="readout">endpoints with non-OK state or problem code</span></div>
+        <div><strong>{coverage?.returned_devices ?? '—'}</strong><span className="readout">PCI devices returned</span></div>
+        <div><strong>{coverage?.placed_devices ?? '—'}</strong><span className="readout">devices with complete parent chains</span></div>
+        <div><strong>{groups === null ? '—' : placedGroups.length}</strong><span className="readout">reported upstream groups</span></div>
       </div>
-      <p className={styles.explain}>Each line joins endpoints Windows placed under one upstream parent. Its length counts returned endpoints, not link speed or fault likelihood. Open a group to inspect its devices.</p>
-      {groups.length ? (
+      <p className={styles.explain}>
+        {coverageText(coverage)}
+        {' '}Only root-port groups establish a shared PCIe link. Bar length counts placed members, not link speed or fault likelihood.
+        {groups !== null && nonOk > 0 ? ` ${nonOk} placed ${nonOk === 1 ? 'member has' : 'members have'} a non-OK state or problem code.` : ''}
+      </p>
+      {placedGroups.length ? (
         <ol className={styles.groups}>
-          {groups.map((group, index) => (
-            <li key={`${group.root_port.instance_id}-${index}`} className={styles.group}>
+          {placedGroups.map((group, index) => (
+            <li key={`${group.upstream.instance_id}-${index}`} className={styles.group}>
               <details>
                 <summary className={styles.root}>
                   <span className={`${styles.number} readout`}>{String(index + 1).padStart(2, '0')}</span>
-                  <span className={styles.rootName}>{group.root_port.name || 'Upstream parent not named'}</span>
-                  <span className={styles.count}>{group.members.length} {group.members.length === 1 ? 'endpoint' : 'endpoints'}</span>
+                  <span className={styles.rootName}>{group.upstream.name || 'Upstream parent not named'} <small>({group.kind === 'root_port' ? 'root port' : 'non-PCI parent'})</small></span>
+                  <span className={styles.count}>{group.members.length} {group.members.length === 1 ? 'member' : 'members'}</span>
                   <span className={styles.bar} aria-hidden="true"><span style={{ width: `${(group.members.length / peak) * 100}%` }} /></span>
                 </summary>
-                <p className={`${styles.rootId} readout`}>Upstream ID · {group.root_port.instance_id || 'not reported'}</p>
+                <p className={`${styles.rootId} readout`}>Upstream ID · {group.upstream.instance_id || 'not reported'}</p>
                 <ul className={styles.members}>
                   {group.members.map((member, memberIndex) => (
                     <li key={`${member.instance_id}-${memberIndex}`} className={styles.member}>
@@ -57,8 +77,8 @@ export function PcieMap({ groups }: { groups: PcieGroup[] }) {
             </li>
           ))}
         </ol>
-      ) : <p className={styles.empty}>No upstream groups were returned. Check the reading outcome and warnings above for what Windows answered.</p>}
-      <div className={`${styles.links} readout`}><a href="#diagnostic-pcie-endpoints">Windows endpoints ↗</a><a href="#diagnostic-pcie-roots">Windows bridges ↗</a></div>
+      ) : <p className={styles.empty}>{groups === null ? 'Upstream groups are unknown. The raw PCI device inventory remains available below.' : 'No groups could be formed from the returned parent chains.'}</p>}
+      <div className={`${styles.links} readout`}><a href="#diagnostic-pcie-devices">Windows PCI devices ↗</a><a href="#diagnostic-pcie-coverage">Relation coverage ↗</a></div>
     </div>
   );
 }

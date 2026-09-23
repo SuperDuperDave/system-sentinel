@@ -5,7 +5,7 @@ import { OutcomeLine, firstLine, clock } from '../Outcome';
 import { Head, RowList, Section, Tree, part } from '../Sections';
 import { useReading } from '../useReading';
 import { MemoryMap, type MemorySummary } from './MemoryMap';
-import { PcieMap, type PcieGroup } from './PcieMap';
+import { PcieMap, type PcieCoverage, type PcieGroup } from './PcieMap';
 import styles from './Diagnostics.module.css';
 
 /**
@@ -22,7 +22,7 @@ export function Diagnostics() {
       <p className={styles.lede}>
         Four readings taken only when you ask. Each runs its queries against the machine there and then; nothing here is cached from before.
       </p>
-      <Panel name="pcie" title="PCIe" what="Every device on the PCI bus: the bridges that carry the tree, the endpoints hanging off them, and which endpoints share an upstream link." />
+      <Panel name="pcie" title="PCIe" what="The present PCI device inventory, with upstream groups where Windows reported enough parent relationships to establish them." />
       <Panel name="power" title="Power" what="The sleep states the firmware offers, what Windows chose, what may wake the machine, and how it has moved between states." />
       <Panel name="memory" title="Memory" what="Which modules Windows returned, their reported capacity and speed, recent hardware-error records, and Windows' own memory test result." />
       <Panel name="constraints" title="Constraints" what="What the machine is not using and why: devices that are present and not operating, with the problem each one reports." />
@@ -38,6 +38,7 @@ function Panel({ name, title, what }: { name: string; title: string; what: strin
   // carries, nothing of it is rendered: the outcome line is the whole answer.
   const sections = observed(taken.reading) ? taken.reading?.sections ?? [] : [];
   const orderedSections = name === 'pcie' ? [...sections].sort((a, b) => Number(b.name === 'groups') - Number(a.name === 'groups')) : sections;
+  const pcieCoverage = name === 'pcie' ? (sections.find((s) => s.name === 'coverage')?.data as PcieCoverage | undefined) ?? null : null;
   const memory = name === 'memory' && observed(taken.reading) ? part<MemorySummary>(taken.reading, 'derived') : null;
 
   return (
@@ -57,7 +58,7 @@ function Panel({ name, title, what }: { name: string; title: string; what: strin
       {orderedSections.map((s) => (
         <div key={s.name} className={styles.section} id={`diagnostic-${name}-${s.name}`}>
           <Section title={sectionTitle(s.name)} cls={s.class} basis={s.basis}>
-            <Payload name={name} section={s} />
+            <Payload name={name} section={s} pcieCoverage={pcieCoverage} />
           </Section>
         </div>
       ))}
@@ -70,9 +71,9 @@ function Panel({ name, title, what }: { name: string; title: string; what: strin
  * that a plain tree renders badly — one is a list to scan, the other a run of the log — so each
  * gets its own rows. Everything else is shown field for field, in the machine's own names.
  */
-function Payload({ name, section }: { name: string; section: SectionData<unknown> }) {
+function Payload({ name, section, pcieCoverage }: { name: string; section: SectionData<unknown>; pcieCoverage: PcieCoverage | null }) {
   const data = section.data;
-  if (name === 'pcie' && section.name === 'groups') return <PcieMap groups={data as PcieGroup[]} />;
+  if (name === 'pcie' && section.name === 'groups') return <PcieMap groups={data as PcieGroup[] | null} coverage={pcieCoverage} />;
   if (isDevices(data)) return <Devices devices={data} />;
   if (isRecords(data)) return <Records records={data} />;
 
@@ -169,14 +170,15 @@ const stamp = (iso: string): string => {
 function sectionTitle(name: string): string {
   if (name === 'raw') return 'As Windows reported it';
   if (name === 'derived') return 'Computed from it';
-  if (name === 'groups') return 'Shared upstream groups';
-  if (name === 'endpoints') return 'Endpoints Windows returned';
-  if (name === 'roots') return 'PCI bridges Windows returned';
+  if (name === 'groups') return 'Reported upstream groups';
+  if (name === 'devices') return 'PCI devices Windows returned';
+  if (name === 'coverage') return 'Parent relation coverage';
+  if (name === 'collection') return 'Relation source';
   return name;
 }
 
 const NOUNS: Record<string, [string, string]> = {
-  pcie: ['endpoint', 'endpoints'],
+  pcie: ['PCI device', 'PCI devices'],
   power: ['setting', 'settings'],
   memory: ['module', 'modules'],
   constraints: ['device', 'devices'],
