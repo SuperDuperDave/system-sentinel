@@ -44,9 +44,10 @@ function Read-LogMetadata([string]$log) {
 
 COVERAGE_BASIS = (
     "For each observed source, compare the requested UTC start with the log's oldest retained "
-    "record and the oldest matching record returned when the response was truncated. Complete "
+    "record and the oldest validated in-window match returned when the query stopped early or reached its cap. Complete "
     "means this retained circular log was enabled, had a record before the requested start and "
-    "returned all matching records within the per-source limit. A boundary at the oldest retained "
+    "returned all matching records within the per-source limit without stopping early. For storms, "
+    "an event whose projected time cannot be read also prevents complete coverage. A boundary at the oldest retained "
     "or oldest returned record is exclusive: earlier records can share its timestamp. The time "
     "reach assumes event timestamps have not moved backward across retained record order; it does "
     "not prove Windows emitted every event."
@@ -62,11 +63,13 @@ def coverage(source: dict[str, Any], rows: list[dict[str, Any]], start: str, end
         return {"covered_from": None, "covered_from_inclusive": None, "complete": None}
     covered = covered_from(source, rows, start, end)
     oldest_key, start_key = stamp_key(source.get("log_oldest")), stamp_key(start)
-    inclusive = covered is not None and not source["truncated"] and oldest_key is not None and start_key is not None and oldest_key < start_key
+    inclusive = covered is not None and not stopped_early(source) and oldest_key is not None and start_key is not None and oldest_key < start_key
+    issues = source.get("row_issues")
+    unplaced = issues.get("unplaced", 0) if isinstance(issues, dict) else 0
     return {
         "covered_from": covered,
         "covered_from_inclusive": None if covered is None else inclusive,
-        "complete": covered is not None and inclusive and stamp_key(covered) == stamp_key(start),
+        "complete": covered is not None and inclusive and stamp_key(covered) == stamp_key(start) and not unplaced,
     }
 
 
@@ -79,12 +82,17 @@ def covered_from(source: dict[str, Any], rows: list[dict[str, Any]], start: str,
     if not isinstance(oldest_text, str) or oldest is None or window_start is None or window_end is None or oldest >= window_end:
         return None
     candidates: list[str] = [start, oldest_text]
-    if source.get("truncated"):
+    if stopped_early(source):
         returned = [row.get("TimeCreated") for row in rows]
         if not returned or any(not isinstance(moment, str) or stamp_key(moment) is None for moment in returned):
             return None
         candidates.append(min((moment for moment in returned if isinstance(moment, str)), key=known_stamp_key))
     return max(candidates, key=known_stamp_key)
+
+
+def stopped_early(source: dict[str, Any]) -> bool:
+    """A record cap and an interrupted query both leave the older tail unobserved."""
+    return source.get("truncated") is True or source.get("stopped") is not None
 
 
 def parse_stamp(value: Any) -> datetime | None:
@@ -93,7 +101,7 @@ def parse_stamp(value: Any) -> datetime | None:
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
         return parsed.astimezone(UTC) if parsed.tzinfo else None
-    except ValueError:
+    except (ValueError, OverflowError, OSError):
         return None
 
 

@@ -257,26 +257,44 @@ STORMS_SCRIPT_TEMPLATE = r"""
 $until = (Get-Date).ToUniversalTime()
 $until = $until.AddTicks(-($until.Ticks % 10000))
 $untilIso = $until.ToString('o')
+$queryUntilIso = $until.AddMilliseconds(1).ToString('o')
 $epoch = [datetime]::SpecifyKind([datetime]'1970-01-01T00:00:00', [System.DateTimeKind]::Utc)
 $bucketTicks = [long]{bucket_seconds} * [long]10000000
 $elapsedTicks = $until.Ticks - $epoch.Ticks
 $currentBucketTicks = $elapsedTicks - ($elapsedTicks % $bucketTicks)
 $startIso = $epoch.AddTicks($currentBucketTicks - ([long]({count} - 1) * $bucketTicks)).ToString('o')
 $xml = @"
-<QueryList><Query Id='0' Path='System'><Select Path='System'>*[System[Provider[@Name='Microsoft-Windows-WHEA-Logger'] and TimeCreated[@SystemTime&gt;='$startIso' and @SystemTime&lt;'$untilIso']]]</Select></Query></QueryList>
+<QueryList><Query Id='0' Path='System'><Select Path='System'>*[System[Provider[@Name='Microsoft-Windows-WHEA-Logger'] and TimeCreated[@SystemTime&gt;='$startIso' and @SystemTime&lt;'$queryUntilIso']]]</Select></Query></QueryList>
 "@
-$records = @(); $outcome = 'failed'; $errorText = $null; $truncated = $null
+$found = [System.Collections.Generic.List[object]]::new()
+$records = @(); $outcome = 'failed'; $errorText = $null; $truncated = $null; $stopped = $null
 try {
-    $found = @(Get-WinEvent -FilterXml ([xml]$xml) -MaxEvents {extra} -ErrorAction Stop)
+    Get-WinEvent -FilterXml ([xml]$xml) -MaxEvents {extra} -ErrorAction Stop | & { process { [void]$found.Add($_) } }
     $truncated = $found.Count -gt {cap}
-    $records = @($found | Select-Object -First {cap} | Select-Object RecordId, Id, ProviderName, LogName, LevelDisplayName,
-        @{Name='TimeCreated'; Expression={ $_.TimeCreated.ToUniversalTime().ToString('o') }}, Message)
-    $outcome = if ($records.Count) { 'ok' } else { 'empty' }
 } catch {
-    if ($_.FullyQualifiedErrorId -like 'NoMatchingEventsFound*') { $outcome = 'empty'; $truncated = $false }
-    else {
+    if ($_.FullyQualifiedErrorId -like 'NoMatchingEventsFound*' -and $found.Count -eq 0) { $truncated = $false }
+    elseif ($found.Count) {
+        $kind = if ($_.CategoryInfo.Category -eq [System.Management.Automation.ErrorCategory]::PermissionDenied -or $_.Exception -is [System.UnauthorizedAccessException]) { 'denied' } else { 'failed' }
+        $detail = ([string]$_.Exception.Message -split '\r?\n')[0].Trim()
+        if (-not $detail) { $detail = 'the System query stopped early' }
+        if ($detail.Length -gt 300) {
+            $detail = $detail.Substring(0, 300)
+            if ([char]::IsHighSurrogate($detail[299])) { $detail = $detail.Substring(0, 299) }
+        }
+        $stopped = [pscustomobject]@{ kind = $kind; detail = $detail }
+    } else {
         $outcome = if ($_.CategoryInfo.Category -eq [System.Management.Automation.ErrorCategory]::PermissionDenied -or $_.Exception -is [System.UnauthorizedAccessException]) { 'denied' } else { 'failed' }
         $errorText = $_.Exception.Message
+    }
+}
+if ($null -eq $errorText) {
+    try {
+        $records = @($found | Select-Object -First {cap} -ErrorAction Stop | Select-Object RecordId, Id, ProviderName, LogName, LevelDisplayName,
+            @{Name='TimeCreated'; Expression={ if ($null -ne $_.TimeCreated) { $_.TimeCreated.ToUniversalTime().ToString('o') } }}, Message -ErrorAction Stop)
+        if ($records.Count -ne [Math]::Min($found.Count, {cap})) { throw 'the System event projection returned fewer records than the query' }
+        $outcome = if ($records.Count) { 'ok' } else { 'empty' }
+    } catch {
+        $records = @(); $outcome = 'failed'; $errorText = $_.Exception.Message; $truncated = $null; $stopped = $null
     }
 }
 $meta = Read-LogMetadata 'System'
@@ -284,7 +302,7 @@ $meta = Read-LogMetadata 'System'
     window_start = $startIso; window_end = $untilIso
     source = [pscustomobject]@{
         log = 'System'; outcome = $outcome; error = $errorText
-        returned = $records.Count; limit = {cap}; truncated = $truncated; records = $records
+        returned = $records.Count; limit = {cap}; truncated = $truncated; stopped = $stopped; records = $records
         log_enabled = $meta.log_enabled; log_mode = $meta.log_mode; log_state = $meta.log_state; log_error = $meta.log_error
         log_oldest = $meta.log_oldest; oldest_state = $meta.oldest_state; oldest_error = $meta.oldest_error
     }
@@ -323,7 +341,7 @@ def take_storms(bridge: Bridge, params: dict[str, Any]) -> Reading:
         collection.update(window_start=start_text, window_end=end_text, system=source)
         records.extend(returned)
         reach.update(system=log_coverage(source, returned, start_text, end_text))
-        sections = compose(returned, host_window, params, reach["system"]) if host_window and source["outcome"] in ("ok", "empty") else []
+        sections = compose(returned, host_window, params, reach["system"], stopped=source.get("stopped")) if host_window and source["outcome"] in ("ok", "empty") else []
         return [
             *sections,
             Section("collection", "raw", collection),
@@ -339,15 +357,23 @@ def take_storms(bridge: Bridge, params: dict[str, Any]) -> Reading:
         reading.count = None
         reading.error = {"kind": reading.outcome, "detail": source["error"] or "The System event query did not answer."}
     else:
-        reading.outcome = source["outcome"]
+        reading.outcome = "ok" if records else "empty"
         reading.count = len(records)
         if source["truncated"]:
             reading.warnings.append(f"the System query reached its {RECORD_CAP}-record limit; older matching records were not returned")
-        if reach["system"]["complete"] is False:
-            reading.warnings.append(
-                "System log coverage could not be established" if reach["system"]["covered_from"] is None
-                else "System log retention or the record limit does not cover the whole requested storm window"
-            )
+        if isinstance(source.get("stopped"), dict):
+            reading.warnings.append(f"the System query stopped after {source['returned']} returned records: {source['stopped']['detail']}")
+        issues = source.get("row_issues") or {}
+        if issues.get("unplaced"):
+            reading.warnings.append(f"{issues['unplaced']} returned WHEA-Logger records had no readable time; no bucket can be called quiet")
+        if issues.get("outside_window"):
+            reading.warnings.append(f"{issues['outside_window']} returned records fell just outside the requested window and were not counted")
+        oldest = stamp_key(source.get("log_oldest"))
+        start = stamp_key(collection.get("window_start"))
+        if reach["system"]["complete"] is False and reach["system"]["covered_from"] is None:
+            reading.warnings.append("System log coverage could not be established")
+        elif oldest is not None and start is not None and oldest >= start:
+            reading.warnings.append("System log retention does not cover the whole requested storm window")
     reading.took_ms = _ms(started)
     return reading
 
@@ -360,53 +386,93 @@ def _host_window(start: Any, end: Any, requested: Window) -> Window | None:
     end_key = stamp_key(end)
     if end_key is None:
         return None
-    current = int(end_key[0].timestamp() // requested.bucket_seconds) * requested.bucket_seconds
-    aligned = Window(current - (requested.count - 1) * requested.bucket_seconds, requested.bucket_seconds, requested.count)
-    if stamp_key(start) != stamp_key(_stamp(aligned.start)) or stamp_key(start) > end_key:
+    try:
+        current = int(end_key[0].timestamp() // requested.bucket_seconds) * requested.bucket_seconds
+        aligned = Window(current - (requested.count - 1) * requested.bucket_seconds, requested.bucket_seconds, requested.count)
+        aligned_start = stamp_key(_stamp(aligned.start))
+    except (ValueError, OverflowError, OSError):
+        return None
+    if stamp_key(start) != aligned_start or aligned_start is None or aligned_start > end_key:
         return None
     return aligned
 
 
 def _storm_source(value: Any, start: Any, end: Any, *, problem: str = "the storm source result or record projection failed validation") -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    fallback = {**log_metadata({}), "log": LOG, "outcome": "failed", "returned": 0, "limit": RECORD_CAP, "truncated": None, "error": problem}
+    fallback = {**log_metadata({}), "log": LOG, "outcome": "failed", "returned": 0, "limit": RECORD_CAP, "truncated": None, "stopped": None, "row_issues": {"unplaced": 0, "outside_window": 0}, "error": problem}
     first, until = stamp_key(start), stamp_key(end)
     if not isinstance(value, dict) or first is None or until is None or first > until:
         return fallback, []
     outcome = value.get("outcome")
     if outcome in ("failed", "denied"):
-        return {**log_metadata(value), "log": LOG, "outcome": outcome, "returned": 0, "limit": RECORD_CAP, "truncated": None, "error": value.get("error") or "the source did not answer"}, []
+        return {**log_metadata(value), "log": LOG, "outcome": outcome, "returned": 0, "limit": RECORD_CAP, "truncated": None, "stopped": None, "row_issues": {"unplaced": 0, "outside_window": 0}, "error": value.get("error") or "the source did not answer"}, []
     rows = value.get("records")
     if outcome not in ("ok", "empty") or not isinstance(rows, list):
         return fallback, []
+    stopped = value.get("stopped")
+    valid_stop = stopped is None or (
+        isinstance(stopped, dict) and set(stopped) == {"kind", "detail"}
+        and stopped["kind"] in ("failed", "denied")
+        and isinstance(stopped["detail"], str) and 0 < len(stopped["detail"]) <= 300
+    )
     valid = (
         value.get("log") == LOG
         and type(value.get("returned")) is int and value["returned"] == len(rows)
         and type(value.get("limit")) is int and value["limit"] == RECORD_CAP
-        and type(value.get("truncated")) is bool and len(rows) <= RECORD_CAP
-        and (not value["truncated"] or len(rows) == RECORD_CAP)
+        and valid_stop and "truncated" in value
+        and (value.get("truncated") is None if stopped is not None else type(value.get("truncated")) is bool)
+        and len(rows) <= RECORD_CAP
+        and (value.get("truncated") is not True or len(rows) == RECORD_CAP)
         and (outcome == "empty") == (len(rows) == 0)
-        and all(_valid_storm_row(row, first, until) for row in rows)
+        and (stopped is None or outcome == "ok" and bool(rows))
+        and value.get("error") is None
     )
     if not valid:
         return fallback, []
-    return {**log_metadata(value), "outcome": outcome, "returned": len(rows), "limit": RECORD_CAP, "truncated": value["truncated"], "error": None}, rows
+    kept: list[dict[str, Any]] = []
+    issues = {"unplaced": 0, "outside_window": 0}
+    for row in rows:
+        location = _storm_row_location(row, first, until)
+        if location is None:
+            return fallback, []
+        if location == "outside_window":
+            issues[location] += 1
+        else:
+            kept.append(row)
+            if location == "unplaced":
+                issues[location] += 1
+    if stopped is not None and not kept:
+        return {**log_metadata(value), "log": LOG, "outcome": stopped["kind"], "returned": len(rows), "limit": RECORD_CAP, "truncated": None, "stopped": stopped, "row_issues": issues, "error": "the System query stopped before any in-window record could be counted"}, []
+    return {**log_metadata(value), "outcome": outcome, "returned": len(rows), "limit": RECORD_CAP, "truncated": value["truncated"], "stopped": stopped, "row_issues": issues, "error": None}, kept
 
 
-def _valid_storm_row(row: Any, first: tuple[datetime, int], until: tuple[datetime, int]) -> bool:
+def _storm_row_location(row: Any, first: tuple[datetime, int], until: tuple[datetime, int]) -> str | None:
     if not isinstance(row, dict) or not set(row) <= STORM_ROW_KEYS:
-        return False
-    at = stamp_key(row.get("TimeCreated"))
-    return (
+        return None
+    record_id = row.get("RecordId")
+    if not (
         row.get("LogName") == LOG and row.get("ProviderName") == PROVIDER
-        and type(row.get("RecordId")) is int and row["RecordId"] > 0
+        and (record_id is None or type(record_id) is int and record_id > 0)
         and type(row.get("Id")) is int
         and (row.get("LevelDisplayName") is None or isinstance(row["LevelDisplayName"], str))
         and (row.get("Message") is None or isinstance(row["Message"], str))
-        and at is not None and first <= at < until
-    )
+    ):
+        return None
+    stamp = row.get("TimeCreated")
+    if stamp is not None and not isinstance(stamp, str):
+        return None
+    at = stamp_key(stamp)
+    if at is None:
+        return "unplaced"
+    if first <= at < until:
+        return "inside"
+    # Event Log's XPath clock may round at a millisecond boundary. Accept only that
+    # narrow disagreement, and do not store or count the out-of-window projection.
+    delta = ((first[0] - at[0]) if at < first else (at[0] - until[0])).total_seconds()
+    delta += (first[1] - at[1] if at < first else at[1] - until[1]) / 10_000_000
+    return "outside_window" if 0 <= delta <= 0.001 else None
 
 
-def compose(records: list[dict[str, Any]], window: Window, params: dict[str, Any], reach: dict[str, Any]) -> list[Section]:
+def compose(records: list[dict[str, Any]], window: Window, params: dict[str, Any], reach: dict[str, Any], *, stopped: Any = None) -> list[Section]:
     """Returned events remain visible; a bucket is zero only when retention covers all of it."""
     returned_totals = [0] * window.count
     per_bucket: list[dict[str, int]] = [{} for _ in range(window.count)]
@@ -414,8 +480,8 @@ def compose(records: list[dict[str, Any]], window: Window, params: dict[str, Any
     unplaced = 0
 
     for record in records:
-        moment = _moment(record.get("TimeCreated"))
-        idx = window.index(moment) if moment is not None else None
+        at = stamp_key(record.get("TimeCreated"))
+        idx = window.index(at[0].timestamp()) if at is not None else None
         if idx is None:
             unplaced += 1
             continue
@@ -429,7 +495,7 @@ def compose(records: list[dict[str, Any]], window: Window, params: dict[str, Any
     for index, count in enumerate(returned_totals):
         start = stamp_key(_stamp(window.start + index * window.bucket_seconds))
         covered = cutoff is not None and start is not None and (start > cutoff or inclusive and start == cutoff)
-        totals.append(count if covered else None)
+        totals.append(count if covered and not unplaced else None)
 
     buckets = {
         "from": _stamp(window.start),
@@ -453,8 +519,8 @@ def compose(records: list[dict[str, Any]], window: Window, params: dict[str, Any
             "derived",
             buckets,
             basis=(
-                f"returned WHEA-Logger records counted into wall-clock buckets of {window.bucket_seconds} seconds: "
-                "'totals' has null where retained history or the record cap cannot establish a whole bucket, "
+                f"placed in-window WHEA-Logger records counted into wall-clock buckets of {window.bucket_seconds} seconds: "
+                "'totals' has null where retained history, an early stop, the record cap or an event with unreadable time cannot establish a whole bucket, "
                 "zero only for an observed quiet bucket, and a count otherwise. 'active' keeps returned "
                 "records even in an incomplete bucket; the current bucket is observed only through collection.window_end"
             ),
@@ -463,14 +529,14 @@ def compose(records: list[dict[str, Any]], window: Window, params: dict[str, Any
             "signatures",
             "derived",
             [s.to_dict() for s in ranked],
-            basis="Counts and first/last times describe returned records only. SHA-256 over the error type, bank, APIC id, MCI status, PCI vendor and device ids and the normalized message text; the first characters of the digest identify the signature",
+            basis="Counts and first/last times describe placed in-window returned records only. SHA-256 over the error type, bank, APIC id, MCI status, PCI vendor and device ids and the normalized message text; the first characters of the digest identify the signature",
         ),
-        Section("status", "inferred", status(totals, returned_totals, per_bucket, params, unplaced, reach=reach), basis=_status_basis(params)),
+        Section("status", "inferred", status(totals, returned_totals, per_bucket, params, unplaced, reach=reach, stopped=stopped), basis=_status_basis(params)),
     ]
     return sections
 
 
-def status(totals: list[int | None], returned_totals: list[int], per_bucket: list[dict[str, int]], params: dict[str, Any], unplaced: int = 0, *, reach: dict[str, Any]) -> dict[str, Any]:
+def status(totals: list[int | None], returned_totals: list[int], per_bucket: list[dict[str, int]], params: dict[str, Any], unplaced: int = 0, *, reach: dict[str, Any], stopped: Any = None) -> dict[str, Any]:
     """A returned burst is evidence; acceleration and quiet require their whole source window."""
     burst_threshold = params["burst_threshold"]
     accel_threshold = params["accel_threshold"]
@@ -497,7 +563,9 @@ def status(totals: list[int | None], returned_totals: list[int], per_bucket: lis
         reason = f"the recent rate is {acceleration}x the baseline ({recent_rate} against {baseline_rate} per bucket); the acceleration threshold is {accel_threshold}"
     elif not whole_window or not baseline_known:
         state, severity = "unknown", None
-        if unplaced:
+        if stopped is not None:
+            reason = "The System event query stopped before the requested window was fully read."
+        elif unplaced:
             reason = "Some returned records could not be placed in time buckets."
         elif reach.get("covered_from") is None:
             reason = "Log coverage could not be established for the requested window."
@@ -689,22 +757,6 @@ def _first(pattern: re.Pattern[str], message: str) -> str | None:
 
 
 # ---------------------------------------------------------------- shared
-
-
-def _moment(stamp: Any) -> float | None:
-    """The record's own UTC timestamp as an epoch, or nothing when it cannot be read."""
-    if not stamp:
-        return None
-    text = str(stamp).strip().replace("Z", "+00:00")
-    for candidate in (text, re.sub(r"\.(\d{6})\d+", r".\1", text)):
-        try:
-            parsed = datetime.fromisoformat(candidate)
-        except ValueError:
-            continue
-        if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=UTC)
-        return parsed.timestamp()
-    return None
 
 
 def _stamp(epoch: float) -> str:
