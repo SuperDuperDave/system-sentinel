@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased] - 2026-09-23
+## [1.2.0] - 2026-09-23
 
 ### Added
 - Hardware errors now reads both System WHEA-Logger and the separate Kernel-WHEA/Errors CPER channel. The newest records are merged with exact log references, per-source failures and retained reach; safe CPER header facts show severity and previous-session reporting. The screen shows dates, source scope and an explicit on-demand exact binary readout; default redacted responses withhold CPER bytes, including copies in event properties. Stack selections carry header meaning beside the chosen row. Detailed external decoding of the newly included channel is deferred until real payloads pass an isolated safety check; the current storm trace names its System-only scope.
