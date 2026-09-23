@@ -413,6 +413,14 @@ def _item_lines(position: int, item: dict[str, Any]) -> list[str]:
         return lines
     if envelope.get("reading") == "changes" and (item.get("verbosity") == "summary" or item.get("ids") is not None):
         lines += _json_block(_change_handoff_sections(envelope, records if item.get("ids") is not None else None, item.get("verbosity") == "summary"))
+    elif envelope.get("reading") == "whea" and records is not None and (item.get("verbosity") == "summary" or item.get("ids") is not None):
+        compact = item.get("verbosity") == "summary"
+        if compact:
+            lines.append("CPER severity and previous-session status come from the record header; Windows event level can differ. Raw bytes remain in the stored reading; set this item to full to include them.")
+            if len(records) > SUMMARY_LOG_LIMIT:
+                lines.append(f"Showing the first and last {SUMMARY_LOG_EDGE} of {len(records)} returned records.")
+            lines.append("")
+        lines += _json_block(_whea_handoff_sections(envelope, records, compact))
     elif envelope.get("reading") == "storms" and item.get("verbosity") == "summary":
         lines += ["Bounded storm summary. Set this item to full for its stored buckets and signature samples; take `storms` again for a fresh observation.", ""]
         lines += _json_block(_storm_handoff_sections(envelope))
@@ -484,6 +492,39 @@ def _change_handoff_sections(envelope: dict[str, Any], selected: list[dict[str, 
     if raw_section is not None:
         sections.append(raw_section)
     return sections
+
+
+def _whea_handoff_sections(envelope: dict[str, Any], records: list[dict[str, Any]], compact: bool) -> list[dict[str, Any]]:
+    """Keep CPER meaning beside selected evidence; bound a large reading's default handoff."""
+    named = {s.get("name"): s for s in _sections(envelope) if isinstance(s.get("name"), str)}
+    chosen = [*records[:SUMMARY_LOG_EDGE], *records[-SUMMARY_LOG_EDGE:]] if compact and len(records) > SUMMARY_LOG_LIMIT else records
+    wanted = {(row.get("Log"), row.get("RecordId")) for row in chosen}
+    output = [named[name] for name in ("collection", "coverage") if name in named]
+    for name in ("identity", "decoded"):
+        section = named.get(name)
+        if not isinstance(section, dict) or not isinstance(section.get("data"), list):
+            continue
+        entries = [entry for entry in section["data"] if isinstance(entry, dict) and (entry.get("Log"), entry.get("RecordId")) in wanted]
+        if compact and name == "decoded":
+            # Decoder structures can be larger than the event itself. The header carries the
+            # important severity and session qualification in this bounded handoff.
+            entries = [{key: entry[key] for key in ("Log", "RecordId", "error") if key in entry} for entry in entries]
+        output.append({**section, "data": entries})
+    raw = named.get("records")
+    if isinstance(raw, dict):
+        if compact:
+            fields = ("Log", "RecordId", "TimeCreated", "Id", "LevelDisplayName", "ProviderName", "Message")
+            display = []
+            for row in chosen:
+                entry = {key: row[key] for key in fields if key in row}
+                message = entry.get("Message")
+                if isinstance(message, str) and len(message) > SUMMARY_MESSAGE:
+                    entry["Message"] = message[:SUMMARY_MESSAGE] + "…"
+                display.append(entry)
+            output.append({**raw, "data": display})
+        else:
+            output.append({**raw, "data": chosen})
+    return output
 
 
 def _storm_handoff_sections(envelope: dict[str, Any]) -> list[dict[str, Any]]:

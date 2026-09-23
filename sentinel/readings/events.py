@@ -172,7 +172,7 @@ register(
             Param("count", "int", 50, "How many of the most recent records.", minimum=1, maximum=MAX_LOG_RECORDS),
             Param("since", "str", "", "ISO timestamp, or the word 'boot' for this session only. Empty for the most recent records."),
         ),
-        private=("MachineName", "user names inside Message", "profile paths inside Message"),
+        private=("MachineName", "user names inside Message", "profile paths inside Message", "CPER bytes in binary Properties"),
     )
 )
 
@@ -187,6 +187,6 @@ register(
             Param("count", "int", 50, "How many records before the moment.", minimum=1, maximum=MAX_LOG_RECORDS),
             Param("log", "str", "System", "Which log.", choices=LOGS),
         ),
-        private=("MachineName", "user names inside Message", "profile paths inside Message"),
+        private=("MachineName", "user names inside Message", "profile paths inside Message", "CPER bytes in binary Properties"),
     )
 )

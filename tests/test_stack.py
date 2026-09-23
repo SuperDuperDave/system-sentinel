@@ -111,6 +111,44 @@ def test_change_handoff_leads_with_meaning_and_keeps_raw_selection_available():
     assert "one source failed" in storm_handoff and '"complete": false' in storm_handoff
 
 
+def test_whea_handoff_keeps_header_severity_with_exact_cross_log_selection(client: TestClient):
+    channel = "Microsoft-Windows-Kernel-WHEA/Errors"
+    payload = "43504552" + "A1" * 128
+    envelope = {
+        "reading": "whea", "params": {"count": 2}, "asked_at": "2026-09-23T00:00:00Z", "outcome": "ok", "count": 2,
+        "method": {"kind": "powershell"}, "sections": [
+            {"name": "records", "class": "raw", "data": [
+                {"Log": "System", "RecordId": 42, "TimeCreated": "2026-09-22T01:00:00Z", "LevelDisplayName": "Information", "RawData": "SYSTEM-BYTES"},
+                {"Log": channel, "RecordId": 42, "TimeCreated": "2026-09-22T02:00:00Z", "LevelDisplayName": "Information", "RawData": payload},
+            ]},
+            {"name": "identity", "class": "derived", "data": [
+                {"Log": "System", "RecordId": 42, "cper": {"severity": "corrected", "previous_session": False}},
+                {"Log": channel, "RecordId": 42, "cper": {"severity": "fatal", "previous_session": True}},
+            ]},
+            {"name": "decoded", "class": "derived", "data": [
+                {"Log": "System", "RecordId": 42, "decoded": {"kind": "synthetic System detail"}},
+                {"Log": channel, "RecordId": 42, "error": "detail decoding deferred"},
+            ]},
+            {"name": "collection", "class": "raw", "data": {"limit": 2, "returned": 2, "truncated": False}},
+            {"name": "coverage", "class": "derived", "data": {"complete": True}},
+        ],
+    }
+    selected = "\n".join(_item_lines(1, {"kind": "selection", "title": "Channel record", "reading": envelope, "ids": [f"{channel}:42"], "verbosity": "full"}))
+    assert '"severity": "fatal"' in selected and '"previous_session": true' in selected
+    assert payload in selected and "SYSTEM-BYTES" not in selected
+    assert '"severity": "corrected"' not in selected and "synthetic System detail" not in selected
+    assert '"complete": true' in selected and "detail decoding deferred" in selected
+
+    summary = "\n".join(_item_lines(1, {"kind": "reading", "title": "Hardware errors", "reading": envelope, "verbosity": "summary"}))
+    assert '"severity": "fatal"' in summary and '"previous_session": true' in summary
+    assert payload not in summary and "SYSTEM-BYTES" not in summary
+
+    add(client, kind="selection", ids=[f"{channel}:42"], envelope=envelope)
+    composed = client.get("/api/stack/composed", headers=AUTH).json()["text"]
+    assert '"severity": "fatal"' in composed and '"previous_session": true' in composed
+    assert payload not in composed and "<cper bytes withheld" in composed
+
+
 def test_a_week_of_storm_buckets_has_a_bounded_default_handoff_with_full_evidence_available(client: TestClient):
     from tests.test_whea import _powershell_stamp, load, storms
 
@@ -137,6 +175,7 @@ def test_a_week_of_storm_buckets_has_a_bounded_default_handoff_with_full_evidenc
     compact = "\n".join(_item_lines(1, item))
     full = "\n".join(_item_lines(1, {**item, "verbosity": "full"}))
     assert len(compact) < 8000 and len(full) > 70_000
+    assert "Quiet does not clear Kernel-WHEA/Errors" in compact
     assert '"state": "burst"' in compact and '"complete": true' in compact
     assert '"bucket_count": 10080' in compact and '"active_buckets": 29' in compact
     assert '"other_active_buckets":' in compact and '"highlighted_active":' in compact and '"unknown_runs": 0' in compact

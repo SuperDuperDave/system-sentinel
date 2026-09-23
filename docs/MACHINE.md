@@ -23,13 +23,14 @@ Three MCA status register values were observed in the 2026-03 sessions:
 - `0xbea0000001000108`: Cache Hierarchy Error (L1/L2/L3), various APICs
 - `0xbaa000000002010b`: Cache Hierarchy companion error, APIC 0
 
-Bugcheck 0x133 (DPC_WATCHDOG_VIOLATION) recurred in 2026-03. After the first mitigation round the WHEA logging stopped while unclean restarts (Kernel-Power 41 with no bugcheck) continued; the 2026-05-26 stream records that relapse. On 2026-09-20 the System log's retention began on 2026-07-25 and held eight Kernel-Power 41 records.
+Bugcheck 0x133 (DPC_WATCHDOG_VIOLATION) recurred in 2026-03. The original note said WHEA logging stopped after the first mitigation round while unclean restarts (Kernel-Power 41 with no bugcheck) continued; the 2026-05-26 stream records that relapse. That absence was inferred from the System WHEA-Logger path. On 2026-09-23, the separate Kernel-WHEA/Errors channel still retained older CPER records, so the System log alone cannot establish when all hardware error reporting stopped. On 2026-09-20 the System log's retention began on 2026-07-25 and held eight Kernel-Power 41 records.
 
 ## How to query the host
 
 All Windows telemetry is gathered through `powershell.exe` with `-NoProfile -NonInteractive -ExecutionPolicy Bypass`, from WSL in development and natively on Windows. `sentinel/bridge.py` is the one path: the EncodedCommand pattern, the JSON prelude, and the six outcomes a query can have.
 
-- WHEA events: `Get-WinEvent -FilterHashtable @{ProviderName="Microsoft-Windows-WHEA-Logger"}`
+- Human-readable WHEA events in System: `Get-WinEvent -FilterHashtable @{LogName="System"; ProviderName="Microsoft-Windows-WHEA-Logger"}`
+- CPER hardware error records in the separate channel: `Get-WinEvent -FilterHashtable @{LogName="Microsoft-Windows-Kernel-WHEA/Errors"; ProviderName="Microsoft-Windows-Kernel-WHEA"; Id=20}`. [Microsoft describes this channel](https://learn.microsoft.com/en-us/windows-hardware/drivers/whea/registering-for-notification-of-hardware-error-events) as a source of detailed CPER events; do not infer that either log covers the other's retention.
 - Unclean restarts: `Get-WinEvent -FilterHashtable @{ProviderName="Microsoft-Windows-Kernel-Power"; Id=41}`
 - Bugchecks: `Get-WinEvent -FilterHashtable @{ProviderName="Microsoft-Windows-WER-SystemErrorReporting"}`
 - System errors: `Get-WinEvent -FilterHashtable @{LogName="System"; Level=1,2}`

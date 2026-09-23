@@ -37,7 +37,7 @@ Opening Performance also asks Windows which processes are using CPU time, privat
 | `events`, `record` | Records from the System and Application logs by level, from a moment or from this session's start, and the records *before* a moment |
 | `crash`, `faults` | The stops the machine did not plan, each composed into one: when it stopped as Windows estimated it, when it came back, the bug check if one was written, the dump that belongs to it and the last System record before the next start — and, while it kept running, the programs that crashed or hung and the kernel's own live reports |
 | `changes` | On-demand Windows Update results, device configuration and MSI installation/removal results before a moment, with each log's coverage and safe raw event fields; available to the API and agents while its view is being designed |
-| `whea`, `storms` | Hardware-error records with their binary payload decoded beside them, and the same records over a window in wall-clock buckets, grouped by signature, with burst and acceleration flags |
+| `whea`, `storms` | Hardware-error records from both Windows WHEA logs, with CPER header facts and exact binary bytes available on explicit request; redacted responses withhold the bytes. Detailed decoding is currently limited to System WHEA-Logger records. `storms` counts that System source over wall-clock buckets with burst and acceleration flags; its quiet state does not clear the separate Kernel-WHEA channel. |
 | `dumps`, `dump_header` | The crash-dump inventory and an on-demand structural readout of one file: its exact header bytes, kernel bug check or minidump streams and exception, with the raw readout available in Crashes |
 | `system`, `hardware`, `hardware.cpu`, `.gpu`, `.board`, `.storage`, `.network`, `drivers` | The snapshot, the fingerprint and configuration, one subsystem at a time, and the current signed driver inventory |
 | `pcie`, `power`, `memory`, `constraints` | The PCIe fabric, power configuration and transitions, physical memory, devices present and not working |
@@ -51,7 +51,7 @@ Every reading comes back in one envelope. Its **outcome** says whether the machi
 
 The **stack** is the evidence you or your agent chose to hand on. It lives on the machine, so the desktop, the phone and the agent see one stack. It composes into one text, led by a prompt from a library you can edit; the dashboard copies it to the clipboard, and an agent reads the same text from a route. A **capture** is every reading, the stack and the composed text in one ZIP on disk, with a manifest that says exactly what is in it. Nothing leaves the machine unless a person sends it.
 
-![The dashboard on the desk, a phone on a private network and a local agent are three clients of one API, which takes the token on every route and redacts by field name. Below it, one path leads through powershell.exe to the machine's record. The outer edge is the line nothing crosses unless a person sends it.](docs/boundary.svg)
+![The dashboard on the desk, a phone on a private network and a local agent are three clients of one API, which takes the token on every route and redacts identifiers and CPER binary by default. Below it, one path leads through powershell.exe to the machine's record. The outer edge is the line nothing crosses unless a person sends it.](docs/boundary.svg)
 
 ## Installing it
 

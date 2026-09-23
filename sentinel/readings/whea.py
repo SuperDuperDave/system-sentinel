@@ -1,6 +1,7 @@
-"""Hardware errors: ``whea`` (the WHEA-Logger records with their payload decoded beside them)
-and ``storms`` (the records over a window in wall-clock buckets, by signature, with burst and
-acceleration flags).
+"""Hardware errors: ``whea`` (the records from both logs Windows keeps them in, each with its CPER
+header read locally and, for WHEA-Logger, its payload decoded beside it) and ``storms`` (the
+System log's WHEA-Logger records over a window in wall-clock buckets, by signature, with burst
+and acceleration flags).
 
 Built in phase 2 against docs/API.md from the queries and rules in the old backend
 (``backend/services/system_logs.py:get_whea_events``, ``backend/services/cper_decoder.py``,
@@ -18,6 +19,13 @@ The decoder is a subprocess, not a bridge call: it is a local executable over a 
 and it runs in the same worker thread as the reading. A record that the decoder cannot
 read is an error on that record, never a failure of the reading: the records were observed
 either way, and observing them is the evidence.
+
+Windows keeps hardware errors in two places, and ``whea`` reads both as independent sources:
+WHEA-Logger's records in the System log, which carry a human-readable message, and the
+Kernel-WHEA provider's event 20 in its own ``Errors`` channel, which carries only the CPER
+record. The channel's retention is its own: on the machine this was built on it still held
+fatal records the System log had long rotated out, while ``whea`` answered ``empty``. Neither
+source stands in for the other, so a source that did not answer is never read as an empty one.
 """
 
 from __future__ import annotations
@@ -28,22 +36,26 @@ import os
 import re
 import subprocess
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
 from ..bridge import WSL_INTEROP_ERRORS, Bridge
-from ..reading import Param, Reading, Section, Spec, from_bridge, from_object, register
-from .event_coverage import COVERAGE_BASIS, LOG_METADATA_SCRIPT, stamp_key
+from ..reading import Param, Reading, Section, Spec, from_object, register
+from .event_coverage import COVERAGE_BASIS, LOG_METADATA_SCRIPT, known_stamp_key, stamp_key
 from .event_coverage import coverage as log_coverage
 from .event_coverage import metadata as log_metadata
-from .events import bounded_log_records, record_projection, winevent
+from .events import RECORD_FIELDS
 from .health import DECODER
 
 PROVIDER = "Microsoft-Windows-WHEA-Logger"
 MAX_WHEA_RECORDS = 500
 LOG = "System"
+CHANNEL = "Microsoft-Windows-Kernel-WHEA/Errors"
+CHANNEL_PROVIDER = "Microsoft-Windows-Kernel-WHEA"
+WHEA_DEPTH = 8  # the payload's sources hold records, which hold their Properties
 
 # The decoder takes the record on the command line, which Windows caps near 32,000 characters.
 MAX_HEX = 30_000
@@ -70,74 +82,381 @@ SIGNATURE_ID_CHARS = 16
 # ---------------------------------------------------------------- whea
 
 
-def query_xml(since: str | None = None) -> str:
-    """The provider's records in the System log, from a moment when one is given.
+@dataclass(frozen=True)
+class WheaSource:
+    """One place Windows keeps hardware error records, and whether this tool decodes them yet."""
 
-    Both readings ask the log's own index by XPath, on the provider and on the time. The
-    same question put through ``-FilterHashtable @{LogName; ProviderName}`` answered thirty
-    times slower on this machine when nothing matched, which is exactly the case the tool
-    has to be quick about.
-    """
-    predicate = f"Provider[@Name='{PROVIDER}']"
-    if since:
-        predicate += f" and TimeCreated[@SystemTime&gt;='{since}']"
-    return f"""$xml = @"
-<QueryList><Query Id="0" Path="{LOG}"><Select Path="{LOG}">*[System[{predicate}]]</Select></Query></QueryList>
-"@
-"""
+    name: str
+    log: str
+    provider: str
+    event_ids: tuple[int, ...] | None  # None: every event the provider writes to this log
+    decode: bool
+
+    def select(self) -> str:
+        ids = f" and ({' or '.join(f'EventID={i}' for i in self.event_ids)})" if self.event_ids else ""
+        return f"*[System[Provider[@Name='{self.provider}']{ids}]]"
 
 
-def whea_script(count: int) -> str:
-    """The records in the shared record shape, plus the CPER payload: the first binary property."""
-    return query_xml() + winevent(
-        f"""Get-WinEvent -FilterXml $xml -MaxEvents {int(count) + 1} -ErrorAction Stop |
-    {record_projection(RAW_DATA)}"""
-    )
+WHEA_SOURCES: tuple[WheaSource, ...] = (
+    WheaSource("system", LOG, PROVIDER, None, decode=True),
+    # TODO(F4): decode the channel's records once DecodeWheaRecord.exe has been exercised on
+    # structurally valid AMD payloads in isolation; until then its crash would land in this
+    # machine's own reliability record, so the header is read locally and the raw bytes kept.
+    WheaSource("kernel_whea", CHANNEL, CHANNEL_PROVIDER, (20,), decode=False),
+)
 
+DEFERRED = (
+    f"detail decoding is deferred for {CHANNEL} records until the decoder has been exercised on them "
+    "in isolation; the CPER header identity and the raw payload are in this reading"
+)
 
 # The CPER payload: the record's first binary property, as hex.
 RAW_DATA = "RawData = $( $b = $_.Properties | Where-Object { $_.Value -is [byte[]] } | Select-Object -First 1; if ($b) { [System.BitConverter]::ToString($b.Value).Replace('-','') } else { $null } )"
 
+# One source, asked for one record more than the limit so a reached cap is exact. The events are
+# kept as they arrive, so a query that stops part way keeps the newest records it did return; a
+# clean no-match is empty, and every other error is a failure, never an empty log. Log metadata is
+# read afterwards and only qualifies the answer: its own failure is reported beside the records.
+WHEA_SOURCE_SCRIPT = r"""
+function Read-WheaSource([string]$name, [string]$log, [string]$select, [int]$limit) {
+    $xml = "<QueryList><Query Id='0' Path='$log'><Select Path='$log'>$select</Select></Query></QueryList>"
+    $found = [System.Collections.Generic.List[object]]::new()
+    $records = @(); $outcome = 'failed'; $errorText = $null; $truncated = $null; $stopped = $null
+    try {
+        Get-WinEvent -FilterXml ([xml]$xml) -MaxEvents ($limit + 1) -ErrorAction Stop | & { process { [void]$found.Add($_) } }
+        $truncated = $found.Count -gt $limit
+    } catch {
+        $kind = if ($_.CategoryInfo.Category -eq [System.Management.Automation.ErrorCategory]::PermissionDenied -or $_.Exception -is [System.UnauthorizedAccessException]) { 'denied' } else { 'failed' }
+        if ($_.FullyQualifiedErrorId -like 'NoMatchingEventsFound*' -and $found.Count -eq 0) { $truncated = $false }
+        elseif ($found.Count) {
+            $detail = ([string]$_.Exception.Message -split '\r?\n')[0].Trim()
+            if (-not $detail) { $detail = "the $log query stopped early" }
+            if ($detail.Length -gt 300) {
+                $detail = $detail.Substring(0, 300)
+                if ([char]::IsHighSurrogate($detail[299])) { $detail = $detail.Substring(0, 299) }
+            }
+            $stopped = [pscustomobject]@{ kind = $kind; detail = $detail }
+        } else { $outcome = $kind; $errorText = $_.Exception.Message }
+    }
+    if ($null -eq $errorText) {
+        try {
+            $records = @($found | Select-Object -First $limit | ForEach-Object { [pscustomobject]@{ {fields} } })
+            if ($records.Count -ne [Math]::Min($found.Count, $limit)) { throw "the $log record projection returned fewer records than the query" }
+            $outcome = if ($records.Count) { 'ok' } else { 'empty' }
+        } catch {
+            $records = @(); $outcome = 'failed'; $errorText = $_.Exception.Message; $truncated = $null; $stopped = $null
+        }
+    }
+    $meta = Read-LogMetadata $log
+    [pscustomobject]@{
+        name = $name; log = $log; outcome = $outcome; error = $errorText
+        returned = $records.Count; limit = $limit; truncated = $truncated; stopped = $stopped; records = $records
+        log_enabled = $meta.log_enabled; log_mode = $meta.log_mode; log_state = $meta.log_state; log_error = $meta.log_error
+        log_oldest = $meta.log_oldest; oldest_state = $meta.oldest_state; oldest_error = $meta.oldest_error
+    }
+}
+"""
+
+# The shared record shape, plus the log the record came from (a RecordId is only unique within its
+# log) and the CPER payload.
+WHEA_FIELDS = RECORD_FIELDS + ";\n        Log = $_.LogName;\n        " + RAW_DATA
+WHEA_ROW_KEYS = {
+    "RecordId", "Id", "Level", "LevelDisplayName", "ProviderName", "ProviderId", "Version", "MachineName",
+    "TaskDisplayName", "TimeCreated", "Message", "Properties", "Log", "RawData",
+}
+
+
+def whea_script(count: int) -> str:
+    """Both sources, each through the same collector, each asked for ``count + 1`` records.
+
+    Each source is one ``-FilterXml`` query on the log's own index: the same question put through
+    ``-FilterHashtable @{LogName; ProviderName}`` answered thirty times slower on this machine when
+    nothing matched, which is exactly the case the tool has to be quick about.
+    """
+    calls = ", ".join(f"(Read-WheaSource '{s.name}' '{s.log}' \"{s.select()}\" {int(count)})" for s in WHEA_SOURCES)
+    return LOG_METADATA_SCRIPT + WHEA_SOURCE_SCRIPT.replace("{fields}", WHEA_FIELDS) + f"[pscustomobject]@{{ sources = @({calls}) }}\n"
+
+
+COLLECTION_BASIS = "each source's own answer: outcome, the records it returned against its limit of count + 1 asked, whether it was truncated or stopped part way, and its log's metadata"
+WHEA_COVERAGE_BASIS = (
+    "records holds the newest `limit` records across both logs, newest first; ties are ordered by source "
+    "(System first) and then by descending RecordId. complete means every record both logs still retain "
+    "matching the query is in records; it is false when a source did not answer, and never a claim "
+    "about the machine's lifetime. When a source was truncated, stopped part way or cut by the merge, "
+    "cutoff is the time after which every answered source is fully shown: records at exactly that time "
+    "may be missing. retained_from is the oldest record the log still holds, read after the query, so "
+    "a log that wrapped meanwhile can reach less far; it is null when it could not be read or the log "
+    "holds nothing, and absence before it says nothing about what happened then."
+)
+IDENTITY_BASIS = (
+    "Read locally from each payload's 128-byte CPER header after the structural check: the record id "
+    "(which Windows documents as unique only on the machine that created it), severity, section count, "
+    "notification type, flags, and the header time when its valid bit is set, as the header records it "
+    "(it carries no time zone). previous_session is the header's PreviousError flag: the error occurred "
+    "in an earlier session and was reported after a restart, so the record's time is that report, not "
+    "the moment of the error. PlatformId, PartitionId and CreatorId are not reported here; the full "
+    "payload stays in records."
+)
+GROUPS_BASIS = (
+    "A pair of returned records, one from each log, whose CPER headers agree on a nonzero record id, "
+    "all eight raw timestamp bytes (even when the timestamp is not valid as a time), severity, section count "
+    "and notification type is grouped as likely the same error reported twice. "
+    "Both rows stay in records; a group is a derived match on the headers, not a statement of cause. "
+    "likely_errors counts each group once and every other returned record once. Records that share a "
+    "record id but disagree on the rest are listed under conflicting and not grouped."
+)
+DEFERRED_BASIS = DECODED_BASIS + f"; {CHANNEL} records are not yet decoded (see each entry's error)"
+
+_SEVERITY = {0: "recoverable", 1: "fatal", 2: "corrected", 3: "informational"}
+
 
 def take_whea(bridge: Bridge, params: dict[str, Any]) -> Reading:
     started = time.perf_counter()
-    script = whea_script(params["count"])
-    reading = bounded_log_records(from_bridge("whea", params, script, bridge.run(script)), params["count"])
+    count = params["count"]
+    script = whea_script(count)
+    result = bridge.run(script, depth=WHEA_DEPTH)
+    sources: dict[str, dict[str, Any]] = {}
+    kept: list[dict[str, Any]] = []
+
+    def build(payload: dict[str, Any]) -> list[Section]:
+        answered = payload.get("sources")
+        by_name: dict[str, list[Any]] = {s.name: [] for s in WHEA_SOURCES}
+        for value in answered if isinstance(answered, list) else []:
+            if isinstance(value, dict) and value.get("name") in by_name:
+                by_name[value["name"]].append(value)
+        rows: list[dict[str, Any]] = []
+        for spec in WHEA_SOURCES:
+            source, returned = whea_source(spec, by_name[spec.name][0] if len(by_name[spec.name]) == 1 else None, count)
+            sources[spec.name] = source
+            rows.extend(returned)
+        kept.extend(merge_newest(rows, count))
+        identities = [record_identity(record) for record in kept]
+        return [
+            Section("records", "raw", kept),
+            Section("collection", "raw", {"limit": count, "returned": len(kept), "truncated": len(rows) > count or any(s["truncated"] is True for s in sources.values()), "sources": sources}, basis=COLLECTION_BASIS),
+            Section("coverage", "derived", whea_coverage(sources, rows, kept), basis=WHEA_COVERAGE_BASIS),
+            Section("identity", "derived", identities, basis=IDENTITY_BASIS),
+            Section("groups", "derived", group_identities(identities, kept), basis=GROUPS_BASIS),
+        ]
+
+    reading = from_object("whea", params, script, result, build)
     if not reading.observed:
         return reading
-    record_section = reading.section("records")
-    assert record_section is not None
-    records = record_section.data
-    decoded, warnings = decode_all(records)
-    reading.sections.append(Section("decoded", "derived", decoded, basis=DECODED_BASIS))
+    failures = [spec for spec in WHEA_SOURCES if sources[spec.name]["outcome"] not in ("ok", "empty")]
+    for spec in WHEA_SOURCES:
+        source = sources[spec.name]
+        if spec in failures:
+            reading.warnings.append(f"{spec.log} did not answer: {source['error']}; its records are missing, so this is not a complete list")
+        if isinstance(source.get("stopped"), dict):
+            reading.warnings.append(f"{spec.log} stopped after {source['returned']} returned records: {source['stopped']['detail']}; its older records were not returned")
+        if source.get("log_enabled") is False:
+            reading.warnings.append(f"{spec.log} is disabled: Windows is not recording new events there, so its absence of records is not evidence")
+        if spec not in failures and (source.get("log_state") != "ok" or source.get("oldest_state") not in ("ok", "empty")):
+            reading.warnings.append(f"how far back {spec.log} reaches could not be read; its returned records stand, its retention is unknown")
+    if kept:
+        reading.outcome, reading.count = "ok", len(kept)
+    elif failures:
+        reading.outcome = "denied" if all(sources[s.name]["outcome"] == "denied" for s in failures) else "failed"
+        reading.count = None
+        reading.error = {"kind": reading.outcome, "detail": "No hardware error record was returned and " + " and ".join(s.log for s in failures) + " did not answer, so an empty list would not be an observation."}
+        reading.sections = [section for section in reading.sections if section.name in ("collection", "coverage")]
+        reading.took_ms = _ms(started)
+        return reading
+    else:
+        reading.outcome, reading.count = "empty", 0
+    decoded, warnings = decode_all(kept)
+    reading.sections.append(Section("decoded", "derived", decoded, basis=DEFERRED_BASIS))
     reading.warnings.extend(warnings)
     reading.took_ms = _ms(started)
     return reading
 
 
+def whea_source(spec: WheaSource, value: Any, limit: int) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """One source's answer, validated whole before any of its records is counted."""
+    base = {"log": spec.log, "provider": spec.provider, "event_ids": list(spec.event_ids) if spec.event_ids else None, "limit": limit}
+    failed = {**log_metadata({}), **base, "outcome": "failed", "error": "the collector did not return a valid source result", "returned": 0, "truncated": None, "stopped": None}
+    if not isinstance(value, dict) or value.get("log") != spec.log:
+        return failed, []
+    metadata = {**log_metadata(value), **base}
+    outcome = value.get("outcome")
+    if outcome in ("failed", "denied"):
+        return {**metadata, "outcome": outcome, "error": value.get("error") or "the source did not answer", "returned": 0, "truncated": None, "stopped": None}, []
+    rows = value.get("records")
+    stopped = value.get("stopped")
+    valid_stop = stopped is None or (
+        isinstance(stopped, dict) and set(stopped) == {"kind", "detail"} and stopped["kind"] in ("failed", "denied")
+        and isinstance(stopped["detail"], str) and 0 < len(stopped["detail"]) <= 300
+    )
+    valid = (
+        outcome in ("ok", "empty") and isinstance(rows, list) and valid_stop and "truncated" in value
+        and type(value.get("returned")) is int and value["returned"] == len(rows)
+        and type(value.get("limit")) is int and value["limit"] == limit and len(rows) <= limit
+        and (value.get("truncated") is None if stopped is not None else type(value.get("truncated")) is bool)
+        and (value.get("truncated") is not True or len(rows) == limit)
+        and (outcome == "empty") == (len(rows) == 0)
+        and (stopped is None or outcome == "ok")
+        and value.get("error") is None
+        and all(valid_whea_row(spec, row) for row in rows)
+    )
+    if not valid:
+        return {**failed, **metadata, "outcome": "failed", "error": "the source result or its records failed validation", "returned": 0, "truncated": None, "stopped": None}, []
+    return {**metadata, "outcome": outcome, "error": None, "returned": len(rows), "truncated": value["truncated"], "stopped": stopped}, rows
+
+
+def valid_whea_row(spec: WheaSource, row: Any) -> bool:
+    if not isinstance(row, dict) or not set(row) <= WHEA_ROW_KEYS:
+        return False
+    return (
+        row.get("Log") == spec.log and row.get("ProviderName") == spec.provider
+        and type(row.get("RecordId")) is int and row["RecordId"] > 0
+        and type(row.get("Id")) is int and (spec.event_ids is None or row["Id"] in spec.event_ids)
+        and stamp_key(row.get("TimeCreated")) is not None
+        and (row.get("RawData") is None or isinstance(row["RawData"], str))
+        and (row.get("Message") is None or isinstance(row["Message"], str))
+        and (row.get("Level") is None or type(row["Level"]) is int)
+    )
+
+
+def merge_newest(rows: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
+    """The newest ``limit`` across both logs. Each source returned its own newest ``limit``, so the
+    merged prefix is exact; ties fall to source order and then to the newer RecordId in its log."""
+    rank = {s.log: i for i, s in enumerate(WHEA_SOURCES)}
+    ordered = sorted(rows, key=lambda r: (known_stamp_key(r["TimeCreated"]), -rank[r["Log"]], r["RecordId"]), reverse=True)
+    return ordered[:limit]
+
+
+def whea_coverage(sources: dict[str, dict[str, Any]], rows: list[dict[str, Any]], kept: list[dict[str, Any]]) -> dict[str, Any]:
+    """Whether the list is every retained match, and if not, from when it is."""
+    shown = {(r["Log"], r["RecordId"]) for r in kept}
+    oldest_kept = min((r["TimeCreated"] for r in kept), key=known_stamp_key) if kept else None
+    per_source: dict[str, dict[str, Any]] = {}
+    boundaries: list[str] = []
+    for spec in WHEA_SOURCES:
+        source = sources[spec.name]
+        answered = source["outcome"] in ("ok", "empty")
+        own = [r for r in rows if r["Log"] == spec.log]
+        cut = any((r["Log"], r["RecordId"]) not in shown for r in own)
+        bounded = source["truncated"] is True or source["stopped"] is not None
+        if answered and bounded and own:
+            boundaries.append(min((r["TimeCreated"] for r in own), key=known_stamp_key))
+        if answered and cut and oldest_kept is not None:
+            boundaries.append(oldest_kept)
+        per_source[spec.name] = {
+            "log": spec.log,
+            "answered": answered,
+            "complete": (not bounded and not cut) if answered else None,
+            "shown": sum(1 for r in kept if r["Log"] == spec.log),
+            "retained_from": source.get("log_oldest") if source.get("oldest_state") == "ok" and stamp_key(source.get("log_oldest")) is not None else None,
+            "retention": source.get("oldest_state"),
+            "enabled": source.get("log_enabled"),
+        }
+    return {
+        "complete": all(s["complete"] is True for s in per_source.values()),
+        "cutoff": max(boundaries, key=known_stamp_key) if boundaries else None,
+        "sources": per_source,
+    }
+
+
+def cper_header(payload: Any) -> tuple[dict[str, Any] | None, str | None]:
+    """The header facts a person or an agent can use to tell errors apart, or why there are none."""
+    text = str(payload or "").strip()
+    if not text:
+        return None, "the record carries no binary payload"
+    checked, reason = checked_cper(text)
+    if reason:
+        return None, reason
+    data = bytes.fromhex(checked[:256])
+    severity = int.from_bytes(data[12:16], "little")
+    valid = int.from_bytes(data[16:20], "little")
+    flags = int.from_bytes(data[104:108], "little")
+    return {
+        "record_id": f"0x{int.from_bytes(data[96:104], 'little'):016x}",
+        "severity": _SEVERITY.get(severity, f"unknown ({severity})"),
+        "section_count": int.from_bytes(data[10:12], "little"),
+        "notify_type": str(uuid.UUID(bytes_le=data[80:96])),
+        "timestamp": _cper_time(data[24:32]) if valid & 0x2 else None,
+        "flags": f"0x{flags:08x}",
+        "recovered": bool(flags & 0x1),
+        "previous_session": bool(flags & 0x2),
+        "simulated": bool(flags & 0x4),
+    }, None
+
+
+def _cper_time(raw: bytes) -> str | None:
+    seconds, minutes, hours, _precise, day, month, year, century = raw
+    try:
+        return datetime(century * 100 + year, month, day, hours, minutes, seconds).isoformat()
+    except ValueError:
+        return None
+
+
+def record_identity(record: dict[str, Any]) -> dict[str, Any]:
+    header, reason = cper_header(record.get("RawData"))
+    entry: dict[str, Any] = {"Log": record.get("Log"), "RecordId": record.get("RecordId")}
+    if header is None:
+        return {**entry, "cper": None, "error": reason}
+    return {**entry, "cper": header, "error": None}
+
+
+def group_identities(identities: list[dict[str, Any]], records: list[dict[str, Any]]) -> dict[str, Any]:
+    """Likely repeats of one error by their headers, with every returned row kept as it came."""
+    by_key: dict[tuple[Any, ...], list[tuple[str, str]]] = {}
+    by_id: dict[str, set[tuple[Any, ...]]] = {}
+    members: dict[str, list[str]] = {}
+    for entry, record in zip(identities, records, strict=True):
+        header = entry.get("cper")
+        if not header:
+            continue
+        ref = f"{entry['Log']}:{entry['RecordId']}"
+        # Invalid timestamp fields have no time meaning, but their bytes still distinguish two
+        # records. A zero CPER id has no useful identity; never collapse such records by accident.
+        raw_time = str(record.get("RawData") or "")[48:64].upper()
+        key = (header["record_id"], raw_time, header["severity"], header["section_count"], header["notify_type"])
+        by_key.setdefault(key, []).append((str(entry["Log"]), ref))
+        by_id.setdefault(header["record_id"], set()).add(key)
+        members.setdefault(header["record_id"], []).append(ref)
+    groups = [[ref for _, ref in refs] for key, refs in by_key.items() if key[0] != "0x0000000000000000" and len(refs) == 2 and refs[0][0] != refs[1][0]]
+    return {
+        "returned": len(identities),
+        "without_identity": sum(1 for entry in identities if not entry.get("cper")),
+        "likely_same_error": groups,
+        "likely_errors": len(identities) - sum(len(refs) - 1 for refs in groups),
+        "conflicting": [members[record_id] for record_id, keys in by_id.items() if len(keys) > 1],
+    }
+
+
 def decode_all(records: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[str]]:
-    """One entry per record, in the records' order: the decoder's structure or why there is none."""
+    """One entry per record, in the records' order, named by its log and RecordId: the decoder's
+    structure, or why there is none. Only the sources the decoder has been exercised on reach it."""
     if not records:
         return [], []
-    if not os.path.exists(DECODER):
-        return (
-            [{"RecordId": r.get("RecordId"), "error": "the decoder is not present"} for r in records],
-            ["the CPER decoder is not present: the records were read but not decoded"],
-        )
-    deadline = time.monotonic() + DECODE_BUDGET
-    # The decoder is a pure function of RawData. Repeated records often carry identical binary
-    # data, especially fixtures: one process per distinct payload is enough, then put each
-    # answer back under its own RecordId. This also bounds a bad payload to one attempted launch
-    # per reading rather than one launch per occurrence.
-    unique: dict[str, dict[str, Any]] = {}
+    decodes = {s.log for s in WHEA_SOURCES if s.decode}
+    eligible = [r for r in records if r.get("Log") in decodes]
+    answers: dict[str, dict[str, Any]] = {}
+    warnings: list[str] = []
+    if eligible and not os.path.exists(DECODER):
+        answers = {str(r.get("RawData") or ""): {"error": "the decoder is not present"} for r in eligible}
+        warnings.append("the CPER decoder is not present: the records were read but not decoded")
+    elif eligible:
+        deadline = time.monotonic() + DECODE_BUDGET
+        # The decoder is a pure function of RawData. Repeated records often carry identical binary
+        # data, especially fixtures: one process per distinct payload is enough, then put each
+        # answer back under its own record. This also bounds a bad payload to one attempted launch
+        # per reading rather than one launch per occurrence.
+        unique: dict[str, dict[str, Any]] = {}
+        for record in eligible:
+            unique.setdefault(str(record.get("RawData") or ""), record)
+        with ThreadPoolExecutor(max_workers=DECODE_WORKERS) as pool:
+            answers = dict(zip(unique, pool.map(lambda r: decode_record(r, deadline), unique.values()), strict=True))
+    out = []
     for record in records:
-        unique.setdefault(str(record.get("RawData") or ""), record)
-    with ThreadPoolExecutor(max_workers=DECODE_WORKERS) as pool:
-        answers = dict(zip(unique, pool.map(lambda r: decode_record(r, deadline), unique.values()), strict=True))
-    return [
-        {**answers[str(record.get("RawData") or "")], "RecordId": record.get("RecordId")}
-        for record in records
-    ], []
+        ref = {"Log": record.get("Log"), "RecordId": record.get("RecordId")}
+        if record.get("Log") not in decodes:
+            out.append({**ref, "error": DEFERRED})
+        else:
+            answer = {k: v for k, v in answers[str(record.get("RawData") or "")].items() if k != "RecordId"}
+            out.append({**ref, **answer})
+    return out, warnings
 
 
 def decode_record(record: dict[str, Any], deadline: float) -> dict[str, Any]:
@@ -603,6 +922,7 @@ def status(totals: list[int | None], returned_totals: list[int], per_bucket: lis
 
 def _status_basis(params: dict[str, Any]) -> str:
     return (
+        "System WHEA-Logger only. Quiet does not clear Kernel-WHEA/Errors. "
         f"the last {RECENT_BUCKETS} buckets against the {BASELINE_BUCKETS} before them, averaged over covered wall-clock buckets including observed idle ones: "
         f"a burst is reportable when at least {params['burst_threshold']} returned records share a recent bucket (critical above twice that); "
         f"acceleration needs the whole recent and baseline windows, a ratio of at least {params['accel_threshold']} and the noise floor. "
@@ -777,18 +1097,25 @@ def _ms(started: float) -> int:
 register(
     Spec(
         name="whea",
-        description="WHEA-Logger records with their binary payload, each decoded beside it: what the firmware told Windows about a hardware error, and what the CPER record inside it says.",
+        description=(
+            "Hardware error records from both places Windows keeps them: WHEA-Logger in the System log and "
+            "the Kernel-WHEA CPER events in Microsoft-Windows-Kernel-WHEA/Errors, newest first across both, "
+            "each with its log, its raw payload and its CPER header identity. Each source reports its own "
+            "outcome and how far its log reaches back; a source that did not answer is never an empty log. "
+            "Records that are likely one error reported in both logs are grouped, never merged. WHEA-Logger "
+            "payloads are decoded beside them; channel records are not decoded yet."
+        ),
         classes=("raw", "derived"),
         take=take_whea,
-        params=(Param("count", "int", 30, "How many of the most recent records.", minimum=1, maximum=MAX_WHEA_RECORDS),),
-        private=("MachineName", "user names inside Message", "serial and UUID fields inside the decoded structure"),
+        params=(Param("count", "int", 30, "How many of the most recent records across both logs.", minimum=1, maximum=MAX_WHEA_RECORDS),),
+        private=("MachineName", "user names inside Message", "CPER bytes in RawData and Properties", "serial and UUID fields inside the decoded structure"),
     )
 )
 
 register(
     Spec(
         name="storms",
-        description="WHEA-Logger records over a window in wall-clock buckets, grouped by signature, with the burst and acceleration rules applied. Computed from the log on each take; nothing is stored between takes.",
+        description="WHEA-Logger records in the System log over a window in wall-clock buckets, grouped by signature, with the burst and acceleration rules applied. Computed from the log on each take; nothing is stored between takes. The Microsoft-Windows-Kernel-WHEA/Errors channel is not counted here yet: a quiet window does not clear it, and the whea reading lists its records.",
         classes=("raw", "derived", "inferred"),
         take=take_storms,
         params=(

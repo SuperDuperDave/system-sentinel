@@ -5,8 +5,9 @@ that renders the real thing, over records that were never on this machine.
 
 Answers:
   - the identity probe (``$env:COMPUTERNAME``): a placeholder host and user
-  - WHEA (``whea``, ``storms``): tests/fixtures/whea-records.json, each record with binary data
-    given a real, decodable CPER payload (the minimal construction from tests/test_whea.py)
+  - WHEA (``whea``, ``storms``): tests/fixtures/whea-records.json for System rows, with each
+    binary System record given a decodable CPER payload; two synthetic Kernel-WHEA channel rows
+    exercise fatal previous-session and unavailable-header presentation
   - the System log (``events``, ``record``): docs/screens/fixtures/system-log.json, filtered
     and paged the way Get-WinEvent would be
   - anything else: empty
@@ -86,6 +87,18 @@ def minimal_cper() -> str:
 CPER_HEX = minimal_cper()
 
 
+def kernel_cper() -> str:
+    """A safe synthetic fatal header; this source never invokes the external decoder."""
+    payload = bytearray.fromhex(CPER_HEX)
+    payload[12:16] = (1).to_bytes(4, "little")
+    payload[96:104] = (77).to_bytes(8, "little")
+    payload[104:108] = (2).to_bytes(4, "little")  # PreviousError
+    return payload.hex().upper()
+
+
+CHANNEL_CPER_HEX = kernel_cper()
+
+
 def _powershell_stamp(epoch: float) -> str:
     """PowerShell's 'o' format, which the readings parse: seven fractional digits."""
     moment = datetime.fromtimestamp(epoch, UTC)
@@ -111,6 +124,7 @@ def whea_records(now: float, count: int | None = None) -> list[dict[str, Any]]:
     out = []
     for entry in doc["records"]:
         rec = {k: v for k, v in entry.items() if k not in ("group", "minutes_ago")}
+        rec["Log"] = "System"
         rec["TimeCreated"] = _powershell_stamp(now - entry["minutes_ago"] * 60)
         rec["MachineName"] = FIXTURE_HOST
         out.append(rec)
@@ -125,6 +139,19 @@ def whea_records(now: float, count: int | None = None) -> list[dict[str, Any]]:
         if record.get("RawData"):
             record["RawData"] = CPER_HEX
     return out
+
+
+def kernel_whea_records(now: float) -> list[dict[str, Any]]:
+    common = {
+        "Log": "Microsoft-Windows-Kernel-WHEA/Errors", "Id": 20, "Level": 4,
+        "LevelDisplayName": "Information", "ProviderName": "Microsoft-Windows-Kernel-WHEA",
+        "ProviderId": None, "Version": 0, "MachineName": FIXTURE_HOST,
+        "TaskDisplayName": None, "Message": "WHEA Event", "Properties": [],
+    }
+    return [
+        {**common, "RecordId": 77, "TimeCreated": _powershell_stamp(now - 2 * 60), "RawData": CHANNEL_CPER_HEX},
+        {**common, "RecordId": 76, "TimeCreated": _powershell_stamp(now - 5 * 60), "RawData": "43504552"},
+    ]
 
 
 # ---------------------------------------------------------------- System log
@@ -175,6 +202,31 @@ def answer_record(script: str) -> BridgeResult:
     return BridgeResult("ok" if records else "empty", items=records, took_ms=37)
 
 
+def answer_whea(script: str) -> BridgeResult:
+    """The two-source collector's object shape, including safe synthetic channel rows."""
+    match = re.search(r"Read-WheaSource 'system' 'System' .*? (\d+)\)", script)
+    assert match, "the WHEA fixture must follow the collector's explicit per-source limit"
+    limit = int(match.group(1))
+    now = time.time()
+    system = whea_records(now)
+    returned = system[:limit]
+    source = {
+        "name": "system", "log": "System", "outcome": "ok" if returned else "empty", "error": None,
+        "returned": len(returned), "limit": limit, "truncated": len(system) > limit, "stopped": None, "records": returned,
+        "log_enabled": True, "log_mode": "Circular", "log_state": "ok", "log_error": None,
+        "log_oldest": _powershell_stamp(now - 86400), "oldest_state": "ok", "oldest_error": None,
+    }
+    channel_rows = kernel_whea_records(now)
+    channel_returned = channel_rows[:limit]
+    channel = {
+        "name": "kernel_whea", "log": "Microsoft-Windows-Kernel-WHEA/Errors", "outcome": "ok", "error": None,
+        "returned": len(channel_returned), "limit": limit, "truncated": len(channel_rows) > limit, "stopped": None, "records": channel_returned,
+        "log_enabled": True, "log_mode": "Circular", "log_state": "ok", "log_error": None,
+        "log_oldest": channel_rows[-1]["TimeCreated"], "oldest_state": "ok", "oldest_error": None,
+    }
+    return BridgeResult("ok", items=[{"sources": [source, channel]}], took_ms=412)
+
+
 class FixtureBridge:
     exe = "fixture"
     available = True
@@ -188,6 +240,8 @@ class FixtureBridge:
             # logs to a real high-water mark makes it read as caught up, not broken.
             top = max((r["RecordId"] for r in system_log_records(time.time())), default=0)
             return BridgeResult("ok", items=[{"log": "System", "record": top}, {"log": "Application", "record": 1}], took_ms=6)
+        if "Read-WheaSource" in script and "sources = @(" in script:
+            return answer_whea(script)
         if "window_start = $startIso" in script and "WHEA-Logger" in script:
             # The storm collector returns one source object, not the record list used by whea.
             now = time.time()

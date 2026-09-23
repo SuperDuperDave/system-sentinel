@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { EventRecord, Reading, type RecordId, observed } from '../api';
 import { AddToStack } from '../AddToStack';
 import { Glyph, OutcomeLine, clock, firstLine } from '../Outcome';
@@ -58,9 +58,42 @@ interface Signature {
 
 /** One entry of the decoded section: the CPER structure inside a record, or why there is none. */
 interface Decoded {
+  Log?: string;
   RecordId: RecordId | null;
   decoded?: unknown;
   error?: string;
+}
+
+interface WheaIdentity {
+  Log: string;
+  RecordId: RecordId;
+  cper: {
+    record_id: string;
+    severity: string;
+    previous_session: boolean;
+    timestamp: string | null;
+  } | null;
+  error: string | null;
+}
+
+interface WheaSource {
+  outcome: string;
+  returned: number;
+  truncated: boolean | null;
+  stopped: { kind: string; detail: string } | null;
+}
+
+interface WheaCollection { sources: { system: WheaSource; kernel_whea: WheaSource } }
+interface WheaReach { complete: boolean | null; shown: number; retained_from: string | null; enabled: boolean | null }
+interface WheaCoverage { complete: boolean; sources: { system: WheaReach; kernel_whea: WheaReach } }
+
+const KERNEL_WHEA = 'Microsoft-Windows-Kernel-WHEA/Errors';
+const recordDay = new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+const recordRef = (record: { Log?: string; RecordId: RecordId | null }) => `${record.Log ?? 'System'}:${record.RecordId}`;
+
+function markerKind(record: EventRecord, identity?: WheaIdentity): 'critical' | 'error' | 'warning' | 'info' {
+  const severity = identity?.cper?.severity;
+  return severity === 'fatal' ? 'critical' : severity === 'recoverable' ? 'error' : severity === 'corrected' ? 'warning' : severity === 'informational' ? 'info' : levelKind(record.Level);
 }
 
 /** How far back the window reaches: a fixed span, or this session, which only the machine can say. */
@@ -71,7 +104,7 @@ const WINDOWS: { value: Span; label: string }[] = [
   { value: 168, label: '7 days' },
   { value: 'boot', label: 'since boot' },
 ];
-const COUNTS = [30, 100];
+const COUNTS = [30, 100, 500];
 
 /**
  * Hardware errors: what the firmware told Windows, and the shape of it over time.
@@ -113,15 +146,18 @@ export function Errors() {
   const status = part<Status>(storms.reading, 'status');
   const coverage = part<Coverage>(storms.reading, 'coverage')?.system;
   const emptyStormText = coverage?.complete
-    ? `No WHEA-Logger records ${inWindow}`
+    ? `System log timeline: no WHEA-Logger records ${inWindow}`
     : coverage?.covered_from == null
-      ? `No WHEA-Logger records returned ${inWindow}; log coverage could not be established`
-      : `No WHEA-Logger records returned ${inWindow}; the window is not fully covered`;
+      ? `System log timeline: no WHEA-Logger records returned ${inWindow}; log coverage could not be established`
+      : `System log timeline: no WHEA-Logger records returned ${inWindow}; the window is not fully covered`;
   const signatures = part<Signature[]>(storms.reading, 'signatures') ?? [];
 
   const records = part<EventRecord[]>(whea.reading, 'records') ?? [];
   const decoded = part<Decoded[]>(whea.reading, 'decoded') ?? [];
-  const shownLevels = [...new Map(records.map((r) => [r.Level, r.LevelDisplayName] as const)).entries()].sort(([a], [b]) => a - b);
+  const identities = part<WheaIdentity[]>(whea.reading, 'identity') ?? [];
+  const identityByRef = new Map(identities.map((entry) => [recordRef(entry), entry]));
+  const collection = part<WheaCollection>(whea.reading, 'collection');
+  const wheaCoverage = part<WheaCoverage>(whea.reading, 'coverage');
 
   return (
     <section>
@@ -145,6 +181,7 @@ export function Errors() {
       ) : (
         <OutcomeLine taken={storms} noun={coverage?.complete ? 'WHEA-Logger records' : 'returned WHEA-Logger records'} singular={coverage?.complete ? 'WHEA-Logger record' : 'returned WHEA-Logger record'} emptyText={emptyStormText} />
       )}
+      {hours !== null ? <p className={`${styles.windowNote} readout`}>This timeline uses the System log. The records below also check Windows’ separate hardware-error channel; a quiet timeline cannot clear that channel.</p> : null}
 
       {hours !== null && observed(storms.reading) && status ? (
         <Section
@@ -194,44 +231,92 @@ export function Errors() {
       <Section
         title="Records"
         cls="raw"
-        note="WHEA-Logger, most recent first"
+        note="System and Kernel-WHEA/Errors, most recent first"
         controls={
           <>
             <Segmented value={count} onChange={setCount} options={COUNTS.map((c) => ({ value: c, label: `last ${c}` }))} label="How many records" />
-            {whea.reading ? <AddToStack item={{ kind: 'reading', envelope: whea.reading, title: `WHEA-Logger records, last ${count}` }} /> : null}
+            {whea.reading ? <AddToStack item={{ kind: 'reading', envelope: whea.reading, title: `Hardware error records, last ${count}` }} /> : null}
           </>
         }
       >
-        <OutcomeLine taken={whea} noun="WHEA-Logger records" singular="WHEA-Logger record" emptyText="No WHEA-Logger records in the System log" />
+        <OutcomeLine taken={whea} noun="hardware error records" singular="hardware error record" emptyText="No hardware error records returned by either log" />
+        {collection ? <WheaSources collection={collection} coverage={wheaCoverage} /> : null}
         {observed(whea.reading) && records.length > 0 ? (
           <div className={`${styles.levelLegend} readout`}>
-            <span>Windows event levels</span>
-            <ul>
-              {shownLevels.map(([level, label]) => <li key={level}><Glyph kind={levelKind(level)} />{label || `Level ${level}`}</li>)}
+            <span>Markers use CPER header severity when readable; otherwise Windows event level.</span>
+            <ul aria-label="CPER severity markers">
+              <li><Glyph kind="critical" /> fatal</li>
+              <li><Glyph kind="error" /> recoverable</li>
+              <li><Glyph kind="warning" /> corrected</li>
+              <li><Glyph kind="info" /> informational</li>
             </ul>
           </div>
         ) : null}
         {observed(whea.reading) && records.length > 0 ? (
           <RowList
             items={records}
-            idOf={(record) => record.RecordId}
+            idOf={recordRef}
             layout={styles.recordRow}
-            cells={(r) => (
-              <>
-                <span className={`${styles.time} readout`}>{clock.format(new Date(r.TimeCreated))}</span>
-                <span className={styles.level} title={r.LevelDisplayName}>
-                  <Glyph kind={levelKind(r.Level)} />
-                  <span className={styles.srOnly}>{r.LevelDisplayName || `Level ${r.Level}`}</span>
-                </span>
-                <span className={`${styles.eventId} readout`}>{r.Id}</span>
-                <span className={styles.message}>{r.Message ? firstLine(r.Message) : <span className={styles.quiet}>no message text</span>}</span>
-              </>
-            )}
-            inspect={(r) => <RecordDetail record={r} decoded={decoded.find((d) => d.RecordId === r.RecordId)} envelope={whea.reading} />}
+            cells={(r) => {
+              const identity = identityByRef.get(recordRef(r));
+              const severity = identity?.cper?.severity;
+              return (
+                <>
+                  <span className={`${styles.time} readout`} title={r.TimeCreated}><span>{recordDay.format(new Date(r.TimeCreated))}</span><span>{clock.format(new Date(r.TimeCreated))}</span></span>
+                  <span className={styles.level} title={severity ? `CPER severity: ${severity}` : `Windows event level: ${r.LevelDisplayName}`}>
+                    <Glyph kind={markerKind(r, identity)} />
+                    <span className={styles.srOnly}>{severity ? `CPER severity ${severity}` : r.LevelDisplayName || `Level ${r.Level}`}</span>
+                  </span>
+                  <span className={`${styles.eventId} readout`}>{r.Id}</span>
+                  <span className={styles.message}>
+                    <span className={`${styles.sourceLabel} readout`}>{r.Log === KERNEL_WHEA ? 'Kernel-WHEA' : 'System'}</span>{' '}
+                    {r.Log === KERNEL_WHEA
+                      ? identity?.cper ? `CPER header: ${severity} hardware error${identity.cper.previous_session ? ' · from a previous Windows session' : ''}` : 'Hardware error record · header unavailable'
+                      : r.Message ? firstLine(r.Message) : <span className={styles.quiet}>no message text</span>}
+                  </span>
+                </>
+              );
+            }}
+            inspect={(r) => <RecordDetail record={r} identity={identityByRef.get(recordRef(r))} decoded={decoded.find((d) => recordRef(d) === recordRef(r))} envelope={whea.reading} count={count} />}
           />
         ) : null}
       </Section>
     </section>
+  );
+}
+
+function WheaSources({ collection, coverage }: { collection: WheaCollection; coverage: WheaCoverage | null }) {
+  const sources = [
+    { key: 'system' as const, label: 'System WHEA-Logger' },
+    { key: 'kernel_whea' as const, label: 'Kernel-WHEA/Errors' },
+  ];
+  return (
+    <div className={`${styles.sourceSummary} readout`}>
+      <p>{sources.map(({ key, label }) => {
+        const source = collection.sources[key];
+        const shown = coverage?.sources[key]?.shown ?? source.returned;
+        const reach = source.returned > shown ? ', more returned than shown' : source.truncated ? ', more retained' : source.stopped ? ', query stopped' : '';
+        return `${label}: ${source.outcome === 'ok' || source.outcome === 'empty' ? `${shown} shown${reach}` : 'not observed'}`;
+      }).join(' · ')}</p>
+      <details>
+        <summary>Source reach and limits</summary>
+        <dl>
+          {sources.map(({ key, label }) => {
+            const source = collection.sources[key];
+            const reach = coverage?.sources[key];
+            const oldest = reach?.retained_from ? new Date(reach.retained_from) : null;
+            const oldestText = oldest && !Number.isNaN(oldest.getTime()) ? recordDay.format(oldest) : 'not established';
+            return (
+              <div key={key}>
+                <dt>{label}</dt>
+                <dd>{source.outcome} · oldest retained event: {oldestText} · {reach?.enabled === false ? 'log disabled' : reach?.complete === true ? 'all retained matches shown' : 'some matches or source reach may be missing'}</dd>
+              </div>
+            );
+          })}
+        </dl>
+        <p>Windows logs have their own retention. An empty returned list says nothing about events older than each log keeps.</p>
+      </details>
+    </div>
   );
 }
 
@@ -395,20 +480,34 @@ function SignatureDetail({ signature }: { signature: Signature }) {
   );
 }
 
-/** One WHEA-Logger record in full, with the decoded structure of its payload beside it. */
-function RecordDetail({ record, decoded, envelope }: { record: EventRecord; decoded?: Decoded; envelope: Reading | null }) {
+/** One source record in full, with the decoded structure of its payload beside it. */
+function RecordDetail({ record, identity, decoded, envelope, count }: { record: EventRecord; identity?: WheaIdentity; decoded?: Decoded; envelope: Reading | null; count: number }) {
+  const cper = identity?.cper;
   return (
     <>
       <Facts
         rows={[
           ['Provider', <Value value={record.ProviderName} />],
+          ['Log', <Value value={record.Log ?? 'System'} />],
           ['Event', <Value value={record.TaskDisplayName ? `${record.Id} · ${record.TaskDisplayName}` : record.Id} />],
           ['Level', <Value value={record.LevelDisplayName} />],
           ['Record', <Value value={record.RecordId} />],
           ['Time', <Value value={`${record.TimeCreated} · ${ago(record.TimeCreated)}`} />],
+          ...(cper ? [
+            ['CPER severity', <Value value={cper.severity} />],
+            ['CPER record', <Value value={cper.record_id} />],
+            ['Previous session', <Value value={cper.previous_session ? 'The error occurred in an earlier Windows session; this event reports it after a restart' : 'Not marked as a previous-session error'} />],
+          ] as [string, ReactNode][] : []),
         ]}
       />
+      {identity?.error ? <p className={`${styles.notDecoded} readout`}><Glyph kind="warn" /> CPER header unavailable: {identity.error}</p> : null}
       {record.Message ? <p className={styles.fullMessage}>{record.Message}</p> : null}
+      {cper ? (
+        <details className={styles.decoded}>
+          <summary className="label">CPER header facts · derived</summary>
+          <div className={styles.decodedBody}><Tree value={cper} /></div>
+        </details>
+      ) : null}
       {decoded?.error ? (
         <p className={`${styles.notDecoded} readout`}>
           <Glyph kind="warn" /> Not decoded: {decoded.error}
@@ -422,13 +521,31 @@ function RecordDetail({ record, decoded, envelope }: { record: EventRecord; deco
           </div>
         </details>
       ) : null}
+      <RawReadout record={record} count={count} />
       <div className={styles.rowActions}>
         <MomentLink at={record.TimeCreated} />
         {envelope ? (
-          <AddToStack item={{ kind: 'selection', envelope, ids: [record.RecordId], title: `WHEA-Logger record ${record.RecordId}` }} label="Add this record to the stack" />
+          <AddToStack item={{ kind: 'selection', envelope, ids: [recordRef(record)], title: `${record.Log === KERNEL_WHEA ? 'Kernel-WHEA' : 'System WHEA-Logger'} record ${record.RecordId}` }} label="Add this record to the stack" />
         ) : null}
       </div>
     </>
+  );
+}
+
+function RawReadout({ record, count }: { record: EventRecord; count: number }) {
+  const [requested, setRequested] = useState(false);
+  const exact = useReading('whea', { count, unredacted: true }, requested);
+  const matching = part<EventRecord[]>(exact.reading, 'records')?.find((candidate) => recordRef(candidate) === recordRef(record) && candidate.TimeCreated === record.TimeCreated);
+  return (
+    <details className={styles.decoded}>
+      <summary className="label">Returned Windows fields · redacted</summary>
+      <div className={styles.decodedBody}><Tree value={record} /></div>
+      <button className={styles.exactRaw} type="button" onClick={() => requested ? exact.retake() : setRequested(true)} disabled={exact.state === 'taking'}>{requested ? 'Refresh exact readout' : 'Show exact returned fields and CPER bytes'}</button>
+      {exact.state === 'taking' ? <p className={`${styles.notDecoded} readout`}>Reading exact fields from Windows…</p> : null}
+      {exact.state === 'lost' || exact.reading && !observed(exact.reading) ? <p className={`${styles.notDecoded} readout`}>Exact readout unavailable: {exact.problem ?? exact.reading?.error?.detail ?? 'the source did not answer'}</p> : null}
+      {requested && exact.state === 'done' && observed(exact.reading) && !matching ? <p className={`${styles.notDecoded} readout`}>This record is no longer in the newest {count} returned rows. Take a wider reading and select it again.</p> : null}
+      {matching ? <div className={styles.exactRawBody}><p className="label">Exact Windows fields and CPER bytes · unredacted</p><div className={styles.decodedBody}><Tree value={matching} /></div></div> : null}
+    </details>
   );
 }
 

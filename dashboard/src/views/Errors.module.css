@@ -96,14 +96,24 @@
 .levelLegend { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; margin: 4px 0 10px; color: var(--muted); font-size: 12px; }
 .levelLegend ul { display: flex; flex-wrap: wrap; gap: 4px 14px; list-style: none; margin: 0; padding: 0; }
 .levelLegend li { display: inline-flex; align-items: center; gap: 5px; color: var(--body); }
+.sourceSummary { margin: 5px 0 13px; color: var(--body); font-size: 12px; max-width: 80ch; }
+.sourceSummary p { margin: 0; }
+.sourceSummary details { margin-top: 5px; color: var(--muted); }
+.sourceSummary summary { cursor: pointer; min-height: 36px; display: list-item; padding: 8px 0; }
+.sourceSummary summary:hover, .sourceSummary summary:focus-visible { color: var(--ink); }
+.sourceSummary dl { margin: 3px 0 10px; }
+.sourceSummary dl > div + div { margin-top: 10px; }
+.sourceSummary dt { color: var(--ink); }
+.sourceSummary dd { margin: 2px 0 0; overflow-wrap: anywhere; }
+.sourceLabel { color: var(--muted); font-size: 11px; margin-right: 3px; }
 .srOnly { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .recordRow {
-  grid-template-columns: 62px 14px minmax(0, 1fr);
+  grid-template-columns: 104px 14px minmax(0, 1fr);
   grid-template-areas:
     'time level id'
     'message message message';
 }
-.time { grid-area: time; color: var(--muted); }
+.time { grid-area: time; color: var(--muted); display: flex; flex-direction: column; white-space: nowrap; line-height: 1.35; }
 .level { grid-area: level; color: var(--ink); display: inline-flex; align-items: center; height: 1em; }
 .eventId { grid-area: id; color: var(--muted); text-align: right; }
 .message {
@@ -119,7 +129,7 @@
 
 @media (min-width: 900px) {
   .recordRow {
-    grid-template-columns: 76px 14px 52px minmax(0, 1fr);
+    grid-template-columns: 104px 14px 52px minmax(0, 1fr);
     grid-template-areas: 'time level id message';
   }
 }
@@ -138,6 +148,11 @@
   max-height: 340px;
   overflow: auto;
 }
+.exactRaw { color: var(--ink); font-family: var(--font-readout); font-size: 12.5px; border-bottom: 1px solid var(--rule); padding: 0 0 1px; min-height: 40px; }
+.exactRaw:hover { border-color: var(--muted); }
+.exactRaw:disabled { color: var(--muted); cursor: default; }
+.exactRawBody { margin-top: 8px; }
+.exactRawBody > p { margin: 0 0 6px; }
 .rowActions { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 18px; margin-top: 4px; }
 
 /* Since boot before the machine has said how long that is, or after it could not. */

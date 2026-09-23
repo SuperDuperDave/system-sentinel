@@ -5,7 +5,7 @@ import string
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from sentinel.redact import Identity, redact
+from sentinel.redact import PLACEHOLDER_CPER, Identity, redact
 
 
 def test_serial_fields_by_name():
@@ -13,6 +13,26 @@ def test_serial_fields_by_name():
     assert out["BIOS"]["SerialNumber"] == "<serial>"
     assert out["BIOS"]["Version"] == "P3.90"
     assert out["board"]["serial_number"] == "<serial>"
+    assert removed == ["serial"]
+
+
+def test_cper_binary_is_withheld_by_content_in_raw_data_properties_and_other_fields():
+    payload = "43504552" + "A1" * 160
+    value = {"RawData": payload, "Properties": [payload.lower()], "nested": {"evidence": payload}}
+    out, removed = redact(value)
+    assert out == {"RawData": PLACEHOLDER_CPER, "Properties": [PLACEHOLDER_CPER], "nested": {"evidence": PLACEHOLDER_CPER}}
+    assert removed == ["cper"]
+    twice, _ = redact(out)
+    assert twice == out
+    malformed, kinds = redact({"RawData": "43504552"})
+    assert malformed == {"RawData": PLACEHOLDER_CPER} and kinds == ["cper"]
+    unchanged, kinds = redact({"hex": "AB" * 160, "text": "CPER is a record format"})
+    assert unchanged == {"hex": "AB" * 160, "text": "CPER is a record format"} and kinds == []
+
+
+def test_partition_and_fru_text_fields_are_identifiers_but_flags_are_kept():
+    out, removed = redact({"PartitionId": "part-42", "FRUText": "part label", "FruTextByPlugin": False})
+    assert out == {"PartitionId": "<serial>", "FRUText": "<serial>", "FruTextByPlugin": False}
     assert removed == ["serial"]
 
 
