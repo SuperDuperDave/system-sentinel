@@ -123,7 +123,7 @@ A collector that returns one structured object must actually return exactly one 
 
 ## The catalog
 
-`GET /api/readings` lists every reading with its description, classes, parameters and their defaults, what it may carry that redaction removes, whether it is heavy, and whether it requires an exact selection. Beside the list is a `version`: the tool's own, which is how a caller tells what is answering. The live catalog is authoritative; this is the catalog as designed, with each reading's sections.
+`GET /api/readings` lists every reading with its description, classes, parameters and their defaults, fields or content that may contain details affected by default redaction, whether it is heavy, and whether it requires an exact selection. The catalog's `private` list is a cue to inspect the response's `redacted` list; it does not mean every listed field is removed. For paths, default redaction masks recognized user-profile segments while retaining the rest of the path. Beside the list is a `version`: the tool's own, which is how a caller tells what is answering. The live catalog is authoritative; this is the catalog as designed, with each reading's sections.
 
 | Reading | What it reads | Sections (class) | Parameters |
 | --- | --- | --- | --- |

@@ -4,6 +4,7 @@
 
 ### Changed
 - Compact `events` and `record` Stack handoffs keep source outcome and retention reach beside citable `Log:RecordId` rows. Selected rows keep that context and exact raw records. Older saved readings name missing context, and a requested summary that uses full sections says so.
+- The Agents catalog describes its `private` hints as places that may contain masked details. A listed path field is not removed wholesale by default redaction; recognized user-profile segments are masked and the rest remains available as evidence.
 
 ## [1.3.6] - 2026-09-23
 

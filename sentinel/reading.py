@@ -102,7 +102,7 @@ class Spec:
     take: Taker
     params: tuple[Param, ...] = ()
     private: tuple[str, ...] = ()
-    """What this reading may carry that the default redaction removes."""
+    """Fields or content that may contain details affected by default redaction."""
     heavy: bool = False
     """Takes seconds: the dashboard loads it on demand."""
     requires_selection: bool = False

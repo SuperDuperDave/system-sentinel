@@ -116,7 +116,7 @@ export function Agents() {
                   : 'no parameters'}
               </p>
               <p className={`${styles.toolMeta} readout`}>classes: {tool.classes.join(', ')}</p>
-              {tool.private.length ? <p className={`${styles.toolMeta} readout`}>redaction removes: {tool.private.join(', ')}</p> : null}
+              {tool.private.length ? <p className={`${styles.toolMeta} readout`}>may contain masked details: {tool.private.join(', ')}</p> : null}
             </div>
           )}
         />
