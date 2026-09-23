@@ -8,6 +8,8 @@
 2. Double-click it. The file is not code-signed, so Windows asks once before running it: either *Windows protected your PC* (click *More info*, then *Run anyway*) or *The publisher could not be verified* (click *Run*). To check what you downloaded first, `Get-FileHash SystemSentinel.exe` in PowerShell prints its SHA-256 and the release page lists the expected value. Which version it is, is in the file: right-click, *Properties*, *Details*.
 3. Within a few seconds your browser opens on the dashboard, already signed in, and the mark sits in the system tray: *Open dashboard*, *Sign in another device*, *Copy address for agents*, *Start with Windows*, a submenu named for the version it is running with *Check for updates…* and *Remove from this computer…* in it, and *Quit*. Double-clicking the file again opens the dashboard. It creates its token and keeps its stack, its prompts and its captures under `%LOCALAPPDATA%\SystemSentinel\`.
 
+If the Stack says its saved data is unavailable, the tool leaves the original `stack.json` or `prompts.json` untouched. A temporary file lock may clear on retry. For a damaged file, quit the app, copy the file for recovery, then move it aside; reopening starts a new empty Stack or prompt library. Keep the original copy until you have reviewed it.
+
 To build the file yourself instead: `build\windows\build.ps1` from the repository on Windows (Python 3.11 or newer and Node 22 or newer; about five minutes the first time).
 
 ## With your agent

@@ -32,7 +32,7 @@ from .paths import captures_dir
 from .reading import REGISTRY, Reading, ReadingCall, automatic_params, take
 from .redact import Redactor
 from .serialization import json_safe_integers
-from .stack import Prompts, Stack, compose
+from .stack import Prompts, Stack, StoreUnavailable, compose
 
 NAME = re.compile(r"^capture-\d{8}T\d{6}Z(-\d+)?\.zip$")
 
@@ -59,6 +59,7 @@ async def create(bridge: Bridge, stack: Stack, prompts: Prompts, redactor: Redac
     started = datetime.now(UTC)
     members: list[dict[str, Any]] = []
     removed: set[str] = set()
+    unavailable: list[dict[str, str]] = []
     omitted = [{"reading": name, "reason": "requires an exact selection"} for name, spec in REGISTRY.items() if spec.requires_selection]
     directory = captures_dir()
     _reap_stale_pending(directory)
@@ -80,15 +81,24 @@ async def create(bridge: Bridge, stack: Stack, prompts: Prompts, redactor: Redac
                 member = READINGS_MEMBER.format(name=name)
                 members.append({"path": member, "reading": name, "outcome": body["outcome"], "took_ms": body["took_ms"], "bytes": _write(archive, member, json.dumps(json_safe_integers(body), ensure_ascii=False, indent=1))})
 
-            state: dict[str, Any] = stack.state()
-            if redactor is not None:
-                state, taken_out = redactor.redact(state)
-                removed.update(taken_out)
-            members.append({"path": STACK_MEMBER, "items": len(state.get("items") or []), "bytes": _write(archive, STACK_MEMBER, json.dumps(json_safe_integers(state), ensure_ascii=False, indent=1))})
+            try:
+                state: dict[str, Any] = stack.state()
+                if redactor is not None:
+                    state, taken_out = redactor.redact(state)
+                    removed.update(taken_out)
+                members.append({"path": STACK_MEMBER, "items": len(state.get("items") or []), "bytes": _write(archive, STACK_MEMBER, json.dumps(json_safe_integers(state), ensure_ascii=False, indent=1))})
+            except StoreUnavailable:
+                unavailable.append({"member": STACK_MEMBER, "reason": "saved Stack data unavailable"})
 
-            composed = compose(stack, prompts, redactor)
-            removed.update(composed["redacted"])
-            members.append({"path": COMPOSED_MEMBER, "items": composed["items"], "bytes": _write(archive, COMPOSED_MEMBER, composed["text"])})
+            if not unavailable:
+                try:
+                    composed = compose(stack, prompts, redactor)
+                    removed.update(composed["redacted"])
+                    members.append({"path": COMPOSED_MEMBER, "items": composed["items"], "bytes": _write(archive, COMPOSED_MEMBER, composed["text"])})
+                except StoreUnavailable:
+                    unavailable.append({"member": COMPOSED_MEMBER, "reason": "saved Stack or prompt data unavailable"})
+            else:
+                unavailable.append({"member": COMPOSED_MEMBER, "reason": "saved Stack data unavailable"})
 
             manifest = {
                 "tool": "system-sentinel",
@@ -98,6 +108,7 @@ async def create(bridge: Bridge, stack: Stack, prompts: Prompts, redactor: Redac
                 "redacted": sorted(removed),
                 "readings": len(REGISTRY) - len(omitted),
                 "omitted": omitted,
+                "unavailable": unavailable,
                 "members": members,
             }
             if reason and redactor is None:
@@ -193,6 +204,16 @@ def _manifest_summary(path: Path) -> dict[str, Any]:
     omitted_names = [entry["reading"] for entry in omitted]
     if len(omitted_names) != len(set(omitted_names)) or set(omitted_names) & {row["reading"] for row in rows}:
         return {"status": "unreadable"}
+    unavailable = manifest.get("unavailable", [])
+    if not isinstance(unavailable, list) or any(
+        not isinstance(entry, dict) or entry.get("member") not in (STACK_MEMBER, COMPOSED_MEMBER)
+        or not isinstance(entry.get("reason"), str)
+        for entry in unavailable
+    ):
+        return {"status": "unreadable"}
+    unavailable_names = [entry["member"] for entry in unavailable]
+    if len(unavailable_names) != len(set(unavailable_names)) or set(unavailable_names) & {entry.get("path") for entry in members if isinstance(entry, dict)}:
+        return {"status": "unreadable"}
     counts = Counter(row["outcome"] for row in rows)
     return {
         "status": "read",
@@ -200,6 +221,7 @@ def _manifest_summary(path: Path) -> dict[str, Any]:
         "unredacted": unredacted,
         "readings": readings,
         "omitted": len(omitted_names),
+        "unavailable": unavailable_names,
         "outcomes": {outcome: counts[outcome] for outcome in OUTCOMES if counts[outcome]},
     }
 

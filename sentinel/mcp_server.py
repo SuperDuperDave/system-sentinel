@@ -37,7 +37,7 @@ from . import __version__, capture, readings  # noqa: F401  (readings registers 
 from .reading import REGISTRY, Spec
 from .redact import Redactor
 from .serialization import json_safe_integers
-from .stack import Duplicate, compose, new_item
+from .stack import Duplicate, StoreUnavailable, compose, new_item
 
 if TYPE_CHECKING:
     from .app import State
@@ -208,15 +208,16 @@ STACK_TOOLS: dict[str, RouteTool] = {
         RouteTool(
             "stack_add",
             "Add evidence to the stack: a reading the tool takes now ('take'), a reading you already hold ('envelope'), "
-            "some of its records or signals ('selection' with 'ids'), or a note you wrote. The same reading with the same parameters "
-            "and selected ids is refused rather than stacked twice.",
+            "some of its records or signals ('selection' with 'ids'), or a note you wrote. Re-adding the same observed "
+            "envelope and selected ids is refused; a new take is a new observation. After an uncertain add, inspect the Stack; "
+            "if you supplied an envelope, retry with that original envelope.",
             {
                 "type": "object",
                 "properties": {
                     "kind": {"type": "string", "enum": ["reading", "selection", "note"], "default": "reading"},
                     "title": {"type": "string", "description": "Optional; one is derived from the reading otherwise."},
                     "rank": {"type": "integer", "description": "1 first to 5 last in the composed handoff.", "default": 3},
-                    "verbosity": {"type": "string", "enum": ["summary", "full"], "description": "Defaults to summary for a whole storms reading and full for other items; can be changed later."},
+                    "verbosity": {"type": "string", "enum": ["summary", "full"], "description": "Defaults to summary for a whole storms or whea_reports reading, or for events, record, whea and faults with over 100 returned rows; full otherwise. Can be changed later."},
                     "ids": {"type": "array", "items": {"type": ["integer", "string"]}, "description": "For a selection: RecordIds unique within the reading, Log:RecordId for an exact record across logs, or signal ids for a signals reading. Each id must be present in the reading."},
                     "note": {"type": "string", "description": "For a note: the text, carried into the handoff verbatim."},
                     "take": {
@@ -276,8 +277,9 @@ CAPTURE_TOOLS: dict[str, RouteTool] = {
     for tool in (
         RouteTool(
             "capture_create",
-            "Take readings that need no exact selection and write them, the stack, the composed handoff and a manifest into "
-            "one ZIP in the captures directory. The manifest names readings omitted because they need a selection. "
+            "Take readings that need no exact selection and write them with saved Stack context and a manifest into "
+            "one ZIP in the captures directory. The manifest names readings omitted because they need a selection "
+            "and saved context unavailable at capture time. "
             "Takes as long as the slowest query on this machine. Nothing is sent anywhere.",
             _NO_ARGUMENTS,
             _capture_create,
@@ -486,8 +488,10 @@ class Surface:
                 arguments["reason"] = reason
             try:
                 payload = await tool.call(self.state, arguments, redactor)
-            except Duplicate:
-                return _refused("this evidence is already on the stack")
+            except Duplicate as exc:
+                return _refused(f"this observation ({exc.asked_at or 'time unknown'}) is already on the stack as item {exc}")
+            except StoreUnavailable as exc:
+                return _refused(str(exc))
             except KeyError as exc:
                 return _refused(f"nothing on the stack with id {exc}")
             except ValueError as exc:
@@ -509,12 +513,19 @@ class Surface:
     async def list_prompts(self, _ctx: Any = None, _params: Any = None) -> types.ListPromptsResult:
         """The prompt library, as prompts. The id is the name a client calls back with; the person's
         own title and description are what they see."""
+        try:
+            prompts = self.state.prompts.all()
+        except StoreUnavailable as exc:
+            raise MCPError(types.INTERNAL_ERROR, str(exc)) from exc
         return types.ListPromptsResult(
-            prompts=[types.Prompt(name=p["id"], title=p.get("name"), description=p.get("description") or None) for p in self.state.prompts.all()]
+            prompts=[types.Prompt(name=p["id"], title=p.get("name"), description=p.get("description") or None) for p in prompts]
         )
 
     async def get_prompt(self, _ctx: Any, params: types.GetPromptRequestParams) -> types.GetPromptResult:
-        prompt = self.state.prompts.get(params.name)
+        try:
+            prompt = self.state.prompts.get(params.name)
+        except StoreUnavailable as exc:
+            raise MCPError(types.INTERNAL_ERROR, str(exc)) from exc
         if prompt is None:
             raise MCPError(types.INVALID_PARAMS, f"no prompt {params.name!r}")
         return types.GetPromptResult(
@@ -531,7 +542,11 @@ class Surface:
             body = json.dumps({"readings": [spec.to_dict() for spec in REGISTRY.values()], "version": __version__}, indent=1)
             return _resource(uri, "application/json", body)
         if uri == HANDOFF_URI:
-            return _resource(uri, "text/markdown", compose(self.state.stack, self.state.prompts, self.state.redactor)["text"])
+            try:
+                text = compose(self.state.stack, self.state.prompts, self.state.redactor)["text"]
+            except StoreUnavailable as exc:
+                raise MCPError(types.INTERNAL_ERROR, str(exc)) from exc
+            return _resource(uri, "text/markdown", text)
         raise MCPError(types.INVALID_PARAMS, f"no resource at {uri!r}")
 
 

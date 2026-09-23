@@ -59,7 +59,7 @@ export interface Capture {
   /** File modification time. The manifest's captured_at is the original capture time when readable. */
   created_at: string;
   manifest?:
-    | { status: 'read'; captured_at: string; unredacted: boolean; readings: number; outcomes: Record<string, number> }
+    | { status: 'read'; captured_at: string; unredacted: boolean; readings: number; outcomes: Record<string, number>; unavailable?: string[] }
     | { status: 'missing' | 'unreadable' | 'limit' };
 }
 

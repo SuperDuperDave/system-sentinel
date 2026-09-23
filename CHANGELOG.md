@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+- Stack now distinguishes later observations of the same reading from retries of one held observation. Duplicate responses identify the existing item and observation time; selected log rows use the same identity whether supplied by numeric RecordId or its qualified `Log:RecordId` form.
+- Saved Stack and prompt edits use a cross-process lock and atomic, owner-only replacement. Malformed or unreadable saved files produce an explicit unavailable response and stay intact; the dashboard no longer presents that state as an empty Stack. Captures keep machine readings when saved context is unavailable and name any omitted Stack or handoff member in the manifest.
+- Direct agent calls validate Stack and prompt arguments before changing saved files. The API describes the observation and retry boundaries and how to recover an unreadable saved file.
+
+### Limits
+- A `take` creates a new observation on every call. After an uncertain add, inspect the Stack before retrying. A redacted response to a `take` is not a guaranteed duplicate key for the raw stored parameters.
+
 ## [1.3.5] - 2026-09-23
 
 ### Changed

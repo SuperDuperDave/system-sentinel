@@ -7,17 +7,20 @@ copy to drift from what is on disk and a second process sees what the first wrot
 
 An item keeps the reading's envelope as it was at the moment of adding: its ``asked_at``,
 ``outcome`` and ``method`` are the item's provenance, and the composed text states them, so a
-reading that failed cannot enter a handoff disguised as a finding. The same reading with the
-same parameters and the same records is refused rather than stacked twice.
+reading that failed cannot enter a handoff disguised as a finding. The same observation and
+selection are refused rather than stacked twice; a later reading is a new observation.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import re
 import threading
 import uuid
 from collections import Counter
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -25,6 +28,7 @@ from typing import Any
 
 from .bridge import Bridge
 from .paths import data_dir
+from .performance import locked
 from .reading import REGISTRY, ReadingCall, take
 from .redact import Redactor
 from .serialization import json_safe_integers
@@ -39,7 +43,15 @@ SUMMARY_LOG_EDGE = 5
 
 
 class Duplicate(Exception):
-    """The same reading, the same parameters, the same records: already on the stack."""
+    """This observation and selection are already on the stack."""
+
+    def __init__(self, item_id: str, asked_at: str | None):
+        super().__init__(item_id)
+        self.asked_at = asked_at
+
+
+class StoreUnavailable(Exception):
+    """Saved Stack or prompt data could not be read or changed without risking its contents."""
 
 
 @dataclass
@@ -69,13 +81,15 @@ class Item:
 
     @property
     def signature(self) -> tuple[Any, ...] | None:
-        """What makes two items the same evidence. A note is never a duplicate: it is written, not taken."""
+        """One observation and selection; notes are written, so never duplicates."""
         if self.kind == "note" or not self.reading:
             return None
-        # Signals are snapshots: a later scan can report different leads or evidence even
-        # with the same parameters. Keep it distinct without duplicating one held scan.
-        moment = self.reading.get("asked_at") if self.reading.get("reading") == "signals" else None
-        return (self.reading.get("reading"), json.dumps(self.reading.get("params"), sort_keys=True), tuple(sorted(str(i) for i in self.ids or ())), moment)
+        return (
+            self.reading.get("reading"),
+            json.dumps(self.reading.get("params"), sort_keys=True),
+            _observation_instant(self.reading.get("asked_at")),
+            _canonical_ids(self.reading, self.ids),
+        )
 
 
 def item_from_dict(raw: dict[str, Any]) -> Item:
@@ -93,7 +107,7 @@ def item_from_dict(raw: dict[str, Any]) -> Item:
 
 
 class Store:
-    """One JSON document in the data directory, read and written whole under a lock."""
+    """One JSON document, atomically replaced under a cross-process mutation lock."""
 
     def __init__(self, path: Path, empty: dict[str, Any]):
         self.path = path
@@ -102,19 +116,50 @@ class Store:
 
     def read(self) -> dict[str, Any]:
         try:
-            loaded = json.loads(self.path.read_text(encoding="utf-8"))
-        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            raw = self.path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            if not self.path.parent.is_dir():
+                raise StoreUnavailable(f"{self.path.name} directory is unavailable; no new file was written") from None
             return json.loads(json.dumps(self._empty))
-        return loaded if isinstance(loaded, dict) else json.loads(json.dumps(self._empty))
+        except (OSError, UnicodeError) as exc:
+            raise StoreUnavailable(f"{self.path.name} could not be read; its file was left intact") from exc
+        try:
+            loaded = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise StoreUnavailable(f"{self.path.name} is not valid JSON; its file was left intact") from exc
+        if not isinstance(loaded, dict):
+            raise StoreUnavailable(f"{self.path.name} has an invalid shape; its file was left intact")
+        return loaded
 
     def write(self, state: dict[str, Any]) -> None:
-        temp = self.path.with_suffix(self.path.suffix + ".new")
-        temp.write_text(json.dumps(state, ensure_ascii=False, indent=1), encoding="utf-8")
-        temp.replace(self.path)
+        temporary = self.path.with_name(f".{self.path.name}.{uuid.uuid4().hex}.tmp")
+        try:
+            fd = os.open(temporary, os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_BINARY", 0), 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                json.dump(state, handle, ensure_ascii=False, indent=1)
+                handle.flush()
+                os.fsync(handle.fileno())
+            temporary.replace(self.path)
+        except OSError as exc:
+            raise StoreUnavailable(f"{self.path.name} could not be written; inspect it before retrying") from exc
+        finally:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass  # A closed process can leave an owner-only scratch file; the saved file is authoritative.
 
-    @property
-    def lock(self) -> threading.Lock:
-        return self._lock
+    @contextmanager
+    def transaction(self) -> Iterator[None]:
+        with self._lock:
+            if not self.path.parent.is_dir():
+                raise StoreUnavailable(f"{self.path.name} directory is unavailable; no new file was written")
+            try:
+                with locked(self.path.with_name(self.path.name + ".lock")):
+                    yield
+            except StoreUnavailable:
+                raise
+            except (OSError, TimeoutError) as exc:
+                raise StoreUnavailable(f"{self.path.name} lock is unavailable; inspect the saved file before retrying") from exc
 
 
 class Stack:
@@ -124,28 +169,55 @@ class Stack:
         self.store = Store(path or data_dir() / "stack.json", {"items": [], "prompt_id": DEFAULT_PROMPT_ID, "system_prompt": True})
 
     def state(self) -> dict[str, Any]:
+        with self.store.transaction():
+            return self._state_locked()
+
+    def _state_locked(self) -> dict[str, Any]:
+        """Read and validate while the caller owns the Stack mutation lock."""
         raw = self.store.read()
-        items = [item_from_dict(i).to_dict() for i in raw.get("items", []) if isinstance(i, dict)]
+        saved = raw.get("items")
+        if (
+            not isinstance(saved, list)
+            or not isinstance(raw.get("system_prompt", True), bool)
+            or raw.get("prompt_id") is not None and not isinstance(raw["prompt_id"], str)
+        ):
+            raise StoreUnavailable("stack.json has an invalid shape; the file was left intact")
+        try:
+            items = [item_from_dict(i).to_dict() for i in saved]
+        except (KeyError, TypeError, ValueError) as exc:
+            raise StoreUnavailable("stack.json contains a malformed item; the file was left intact") from exc
+        if any(
+            not isinstance(item["id"], str) or not isinstance(item["added_at"], str)
+            or item["kind"] not in KINDS
+            or not isinstance(item["title"], str)
+            or item["reading"] is not None and not isinstance(item["reading"], dict)
+            or item["ids"] is not None and not isinstance(item["ids"], list)
+            or item["note"] is not None and not isinstance(item["note"], str)
+            for item in items
+        ):
+            raise StoreUnavailable("stack.json contains a malformed item; the file was left intact")
         return {"items": items, "prompt_id": raw.get("prompt_id"), "system_prompt": bool(raw.get("system_prompt", True))}
 
     def add(self, item: Item) -> Item:
-        with self.store.lock:
-            state = self.state()
+        with self.store.transaction():
+            state = self._state_locked()
             if item.signature is not None:
                 for existing in state["items"]:
                     if item_from_dict(existing).signature == item.signature:
-                        raise Duplicate(existing["id"])
+                        raise Duplicate(existing["id"], existing.get("reading", {}).get("asked_at"))
             state["items"].append(item.to_dict())
             self.store.write(state)
         return item
 
     def update(self, item_id: str, *, rank: int | None = None, verbosity: str | None = None, title: str | None = None) -> dict[str, Any]:
-        if rank is not None and rank not in RANKS:
+        if rank is not None and (type(rank) is not int or rank not in RANKS):
             raise ValueError(f"rank must be one of {list(RANKS)}")
         if verbosity is not None and verbosity not in VERBOSITIES:
             raise ValueError(f"verbosity must be one of {list(VERBOSITIES)}")
-        with self.store.lock:
-            state = self.state()
+        if title is not None and not isinstance(title, str):
+            raise ValueError("title must be text")
+        with self.store.transaction():
+            state = self._state_locked()
             for stored in state["items"]:
                 if stored["id"] == item_id:
                     if rank is not None:
@@ -159,8 +231,8 @@ class Stack:
             raise KeyError(item_id)
 
     def remove(self, item_id: str) -> None:
-        with self.store.lock:
-            state = self.state()
+        with self.store.transaction():
+            state = self._state_locked()
             kept = [i for i in state["items"] if i["id"] != item_id]
             if len(kept) == len(state["items"]):
                 raise KeyError(item_id)
@@ -168,15 +240,19 @@ class Stack:
             self.store.write(state)
 
     def clear(self) -> None:
-        with self.store.lock:
-            state = self.state()
+        with self.store.transaction():
+            state = self._state_locked()
             state["items"] = []
             self.store.write(state)
 
     def choose(self, *, prompt_id: str | None = None, system_prompt: bool | None = None, set_prompt: bool = False) -> dict[str, Any]:
         """Change which prompt leads the handoff, or whether one does at all."""
-        with self.store.lock:
-            state = self.state()
+        if set_prompt and prompt_id is not None and not isinstance(prompt_id, str):
+            raise ValueError("prompt_id must be text or null")
+        if system_prompt is not None and type(system_prompt) is not bool:
+            raise ValueError("system_prompt must be true or false")
+        with self.store.transaction():
+            state = self._state_locked()
             if set_prompt:
                 state["prompt_id"] = prompt_id
             if system_prompt is not None:
@@ -192,14 +268,23 @@ class Prompts:
         self.store = Store(path or data_dir() / "prompts.json", {"prompts": []})
 
     def all(self) -> list[dict[str, Any]]:
-        with self.store.lock:
-            state = self.store.read()
-            # Seeded once, on first use. An empty library afterwards is the person's choice, not a
-            # reason to bring the presets back.
-            if not state.get("seeded"):
-                state = {"prompts": [{"id": slug(p["name"]), "builtin": True, **p} for p in PRESET_PROMPTS], "seeded": True}
-                self.store.write(state)
-            return list(state["prompts"])
+        with self.store.transaction():
+            return self._all_locked()
+
+    def _all_locked(self) -> list[dict[str, Any]]:
+        """Read or seed the library while the caller owns its mutation lock."""
+        state = self.store.read()
+        if not self.store.path.exists():
+            state = {"prompts": [{"id": slug(p["name"]), "builtin": True, **p} for p in PRESET_PROMPTS], "seeded": True}
+            self.store.write(state)
+        prompts = state.get("prompts")
+        if not isinstance(prompts, list) or any(
+            not isinstance(p, dict) or not isinstance(p.get("id"), str)
+            or not isinstance(p.get("name"), str) or not isinstance(p.get("content"), str)
+            for p in prompts
+        ):
+            raise StoreUnavailable("prompts.json has an invalid shape; the file was left intact")
+        return prompts
 
     def get(self, prompt_id: str | None) -> dict[str, Any] | None:
         if not prompt_id:
@@ -207,18 +292,22 @@ class Prompts:
         return next((p for p in self.all() if p["id"] == prompt_id), None)
 
     def add(self, name: str, description: str = "", content: str = "") -> dict[str, Any]:
-        if not name.strip():
+        if not isinstance(name, str) or not name.strip():
             raise ValueError("a prompt needs a name")
-        prompts = self.all()
-        prompt = {"id": _unique(slug(name), {p["id"] for p in prompts}), "name": name, "description": description, "content": content, "builtin": False}
-        with self.store.lock:
+        if not isinstance(description, str) or not isinstance(content, str):
+            raise ValueError("prompt description and content must be text")
+        with self.store.transaction():
+            prompts = self._all_locked()
+            prompt = {"id": _unique(slug(name), {p["id"] for p in prompts}), "name": name, "description": description, "content": content, "builtin": False}
             prompts.append(prompt)
             self.store.write({"prompts": prompts, "seeded": True})
         return prompt
 
     def update(self, prompt_id: str, **fields: Any) -> dict[str, Any]:
-        prompts = self.all()
-        with self.store.lock:
+        if any(value is not None and not isinstance(value, str) for key, value in fields.items() if key in ("name", "description", "content")):
+            raise ValueError("prompt fields must be text")
+        with self.store.transaction():
+            prompts = self._all_locked()
             for prompt in prompts:
                 if prompt["id"] == prompt_id:
                     for key in ("name", "description", "content"):
@@ -229,11 +318,11 @@ class Prompts:
         raise KeyError(prompt_id)
 
     def remove(self, prompt_id: str) -> None:
-        prompts = self.all()
-        kept = [p for p in prompts if p["id"] != prompt_id]
-        if len(kept) == len(prompts):
-            raise KeyError(prompt_id)
-        with self.store.lock:
+        with self.store.transaction():
+            prompts = self._all_locked()
+            kept = [p for p in prompts if p["id"] != prompt_id]
+            if len(kept) == len(prompts):
+                raise KeyError(prompt_id)
             self.store.write({"prompts": kept, "seeded": True})
 
 
@@ -246,9 +335,14 @@ async def new_item(stack: Stack, bridge: Bridge, body: dict[str, Any], *, reader
     kind = body.get("kind") or "reading"
     if kind not in KINDS:
         raise ValueError(f"kind must be one of {list(KINDS)}")
-    rank = int(body["rank"]) if body.get("rank") is not None else 3
+    rank = body.get("rank") if body.get("rank") is not None else 3
+    if type(rank) is not int:
+        raise ValueError(f"rank must be one of {list(RANKS)}")
     if rank not in RANKS:
         raise ValueError(f"rank must be one of {list(RANKS)}")
+    title = body.get("title")
+    if title is not None and not isinstance(title, str):
+        raise ValueError("title must be text")
     requested_verbosity = body.get("verbosity")
     if requested_verbosity is not None and requested_verbosity not in VERBOSITIES:
         raise ValueError(f"verbosity must be one of {list(VERBOSITIES)}")
@@ -258,7 +352,10 @@ async def new_item(stack: Stack, bridge: Bridge, body: dict[str, Any], *, reader
     note: str | None = None
 
     if kind == "note":
-        note = (body.get("note") or "").strip()
+        supplied_note = body.get("note") or ""
+        if not isinstance(supplied_note, str):
+            raise ValueError("a note needs text")
+        note = supplied_note.strip()
         if not note:
             raise ValueError("a note needs text")
     else:
@@ -267,10 +364,14 @@ async def new_item(stack: Stack, bridge: Bridge, body: dict[str, Any], *, reader
         if bool(asked) == bool(given):
             raise ValueError("send either 'take' (the server reads the machine now) or 'envelope' (a reading you hold)")
         if asked:
+            if not isinstance(asked, dict):
+                raise ValueError("'take' must name a reading and its parameters")
             name = asked.get("name")
-            if name not in REGISTRY:
+            if not isinstance(name, str) or name not in REGISTRY:
                 raise ValueError(f"no reading named {name!r}")
             params = asked.get("params") or {}
+            if not isinstance(params, dict):
+                raise ValueError("'take' parameters must be an object")
             envelope = (await reader(name, params) if reader else await take(name, bridge, params)).to_dict()
         else:
             if not isinstance(given, dict):
@@ -285,10 +386,13 @@ async def new_item(stack: Stack, bridge: Bridge, body: dict[str, Any], *, reader
             valid_envelope = (
                 isinstance(envelope.get("reading"), str) and isinstance(envelope.get("outcome"), str)
                 and isinstance(envelope.get("params"), dict) and isinstance(envelope.get("method"), dict)
+                and _observation_instant(envelope.get("asked_at")) is not None
                 and valid_sections and (envelope.get("error") is None or isinstance(envelope["error"], dict))
             )
             if not valid_envelope:
-                raise ValueError("'envelope' must have the reading, outcome, params, method and section shapes returned by the API")
+                raise ValueError("'envelope' must have the reading, asked_at with a timezone, outcome, params, method and section shapes returned by the API")
+        if _observation_instant(envelope.get("asked_at")) is None:
+            raise ValueError("a stacked reading needs an observed-at time with a timezone")
         if kind == "selection":
             ids = _selection_ids(envelope, body.get("ids") or [])
 
@@ -300,7 +404,7 @@ async def new_item(stack: Stack, bridge: Bridge, body: dict[str, Any], *, reader
         id=uuid.uuid4().hex,
         added_at=_now(),
         kind=kind,
-        title=(body.get("title") or "").strip() or default_title(kind, envelope, ids, note),
+        title=(title or "").strip() or default_title(kind, envelope, ids, note),
         rank=rank,
         verbosity=verbosity,
         reading=envelope,
@@ -668,6 +772,41 @@ def _sections(envelope: dict[str, Any]) -> list[dict[str, Any]]:
     """Older saved envelopes may predate or violate today's section shape."""
     raw = envelope.get("sections")
     return [section for section in raw if isinstance(section, dict)] if isinstance(raw, list) else []
+
+
+def _observation_instant(value: Any) -> datetime | None:
+    """Normalize the envelope's time, including equivalent UTC offsets."""
+    if not isinstance(value, str) or not (value.endswith("Z") or re.search(r"[+-]\d{2}:\d{2}$", value)):
+        return None
+    try:
+        at = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return at.astimezone(UTC) if at.tzinfo is not None else None
+    except ValueError:
+        return None
+
+
+def _canonical_ids(envelope: dict[str, Any], ids: list[int | str] | None) -> tuple[str, ...]:
+    """Numeric and Log:RecordId forms of one selected row have the same identity."""
+    if not ids:
+        return ()
+    logs: dict[int, set[str]] = {}
+    for row in _records(envelope) or []:
+        number, log = _record_id(row), row.get("Log")
+        if number is not None and isinstance(log, str) and log:
+            logs.setdefault(number, set()).add(log)
+    canonical = []
+    for value in ids:
+        if isinstance(value, str) and ":" in value:
+            canonical.append(value)
+            continue
+        try:
+            number = int(value)
+        except (TypeError, ValueError, OverflowError):
+            canonical.append(str(value))  # An older malformed selection must not break the stack.
+            continue
+        matching = logs.get(number, set())
+        canonical.append(f"{next(iter(matching))}:{number}" if len(matching) == 1 else str(number))
+    return tuple(sorted(canonical))
 
 
 def _selection_ids(envelope: dict[str, Any], raw: Any) -> list[int | str]:

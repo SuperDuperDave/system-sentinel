@@ -1,14 +1,21 @@
 """The stack: what it accepts, what it refuses, what it composes, and that it outlives the process."""
 
+import asyncio
 import json
+import os
 import time
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from threading import Event
 
 import pytest
 from fastapi.testclient import TestClient
+from mcp import types
+from mcp.shared.exceptions import MCPError
 
 from sentinel.app import State, create_app
 from sentinel.bridge import BridgeResult
-from sentinel.stack import PRESET_PROMPTS, _item_lines
+from sentinel.stack import PRESET_PROMPTS, Prompts, Stack, _item_lines
 from tests.conftest import FakeBridge, LogBridge, identity_result
 
 TOKEN = "test-token-0123456789"
@@ -288,13 +295,178 @@ def test_adding_a_reading_takes_it_now_and_keeps_its_provenance(client: TestClie
     assert item["reading"]["sections"][0]["data"][0]["MachineName"] == "<host>"
 
 
-def test_the_same_evidence_twice_is_refused(client: TestClient):
+def test_one_observation_is_idempotent_but_a_new_take_is_new_evidence(client: TestClient, monkeypatch: pytest.MonkeyPatch):
+    from sentinel import reading as reading_module
+
+    stamps = iter(("2026-09-20T18:00:00.000Z", "2026-09-20T18:00:01.000Z", "2026-09-20T18:00:02.000Z"))
+    monkeypatch.setattr(reading_module, "_now", lambda: next(stamps))
     first = add(client, kind="reading", take={"name": "events", "params": {"count": 2}})
-    again = client.post("/api/stack/items", headers=AUTH, json={"kind": "reading", "take": {"name": "events", "params": {"count": 2}}})
+    again = client.post("/api/stack/items", headers=AUTH, json={"kind": "reading", "envelope": first["reading"]})
     assert again.status_code == 409 and again.json()["id"] == first["id"]
-    # Different parameters are different evidence; so is a selection of the same reading.
+    assert again.json()["asked_at"] == first["reading"]["asked_at"]
+    later = add(client, kind="reading", take={"name": "events", "params": {"count": 2}})
+    assert later["id"] != first["id"]
+    assert first["reading"]["asked_at"] in client.get("/api/stack/composed", headers=AUTH).json()["text"]
+    assert later["reading"]["asked_at"] in client.get("/api/stack/composed", headers=AUTH).json()["text"]
+    # Different parameters and a selection of the same reading are distinct too.
     assert client.post("/api/stack/items", headers=AUTH, json={"kind": "reading", "take": {"name": "events", "params": {"count": 5}}}).status_code == 201
-    assert client.post("/api/stack/items", headers=AUTH, json={"kind": "selection", "ids": [307001], "take": {"name": "events", "params": {"count": 2}}}).status_code == 201
+    assert client.post("/api/stack/items", headers=AUTH, json={"kind": "selection", "ids": [307001], "envelope": first["reading"]}).status_code == 201
+
+
+def test_equivalent_time_and_record_id_forms_are_one_observation(client: TestClient):
+    held = client.get("/api/readings/events?count=2", headers=AUTH).json()
+    held["sections"][0]["data"][0]["Log"] = "System"
+    first = add(client, kind="selection", ids=[307001], envelope=held)
+    equivalent = {**held, "asked_at": held["asked_at"].replace(".000Z", "Z")}
+    if equivalent["asked_at"] == held["asked_at"]:
+        equivalent["asked_at"] = held["asked_at"].replace("Z", "+00:00")
+    again = client.post("/api/stack/items", headers=AUTH, json={"kind": "selection", "ids": ["System:307001"], "envelope": equivalent})
+    assert again.status_code == 409 and again.json()["id"] == first["id"]
+
+
+@pytest.mark.parametrize("asked_at", [None, 17, "2026-09-20T18:00:00", "not a time"])
+def test_supplied_stack_observation_needs_an_explicit_time(client: TestClient, asked_at):
+    held = client.get("/api/readings/events?count=2", headers=AUTH).json()
+    held["asked_at"] = asked_at
+    response = client.post("/api/stack/items", headers=AUTH, json={"kind": "reading", "envelope": held})
+    assert response.status_code == 422 and client.get("/api/stack", headers=AUTH).json()["items"] == []
+
+
+@pytest.mark.parametrize("contents", [b"", b"{broken", b"\xff", b"[]", b'{"items":[{}]}'])
+def test_unreadable_stack_is_reported_and_never_overwritten(client: TestClient, contents: bytes):
+    path = client.app.state.sentinel.stack.store.path
+    path.write_bytes(contents)
+    for method, route, body in (
+        ("get", "/api/stack", None),
+        ("get", "/api/stack/composed", None),
+        ("post", "/api/stack/items", {"kind": "note", "note": "new evidence"}),
+        ("patch", "/api/stack", {"system_prompt": False}),
+        ("delete", "/api/stack", None),
+    ):
+        response = client.request(method, route, headers=AUTH, json=body)
+        assert response.status_code == 503 and response.json()["error"] == "saved_context_unavailable"
+        assert path.read_bytes() == contents
+
+
+def test_unreadable_prompt_library_is_reported_and_never_reseeded(client: TestClient):
+    path = client.app.state.sentinel.prompts.store.path
+    path.write_bytes(b"{broken")
+    for method, route, body in (
+        ("get", "/api/prompts", None),
+        ("post", "/api/prompts", {"name": "New prompt"}),
+        ("get", "/api/stack/composed", None),
+    ):
+        response = client.request(method, route, headers=AUTH, json=body)
+        assert response.status_code == 503 and path.read_bytes() == b"{broken"
+
+
+def test_mcp_resources_name_unavailable_saved_context(client: TestClient):
+    surface = client.app.state.mcp_surface
+    path = client.app.state.sentinel.stack.store.path
+    path.write_bytes(b"{broken")
+    with pytest.raises(MCPError, match="stack.json is not valid JSON"):
+        asyncio.run(surface.read_resource(None, types.ReadResourceRequestParams(uri="sentinel://handoff")))
+    path.unlink()
+    prompt_path = client.app.state.sentinel.prompts.store.path
+    prompt_path.write_bytes(b"{broken")
+    with pytest.raises(MCPError, match="prompts.json is not valid JSON"):
+        asyncio.run(surface.list_prompts())
+
+
+@pytest.mark.parametrize("arguments", [
+    {"system_prompt": "false"}, {"system_prompt": 1}, {"prompt_id": {"x": 1}},
+])
+def test_mcp_cannot_write_a_stack_state_it_would_refuse_to_read(client: TestClient, arguments):
+    surface = client.app.state.mcp_surface
+    path = client.app.state.sentinel.stack.store.path
+    result = asyncio.run(surface.call_tool(None, types.CallToolRequestParams(name="stack_prompt", arguments=arguments)))
+    assert result.is_error is True
+    assert not path.exists()
+    assert client.get("/api/stack", headers=AUTH).status_code == 200
+
+
+def test_mcp_cannot_write_a_nontext_title(client: TestClient):
+    surface = client.app.state.mcp_surface
+    result = asyncio.run(surface.call_tool(None, types.CallToolRequestParams(name="stack_add", arguments={"kind": "note", "note": "Observation", "title": {"bad": True}})))
+    assert result.is_error is True
+    assert client.get("/api/stack", headers=AUTH).json()["items"] == []
+
+
+def test_transient_stack_read_failure_is_not_an_empty_stack(client: TestClient, monkeypatch: pytest.MonkeyPatch):
+    path = client.app.state.sentinel.stack.store.path
+    original = Path.read_text
+
+    def unavailable(self: Path, *args, **kwargs):
+        if self == path:
+            raise PermissionError("simulated temporary file lock")
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", unavailable)
+    response = client.post("/api/stack/items", headers=AUTH, json={"kind": "note", "note": "new evidence"})
+    assert response.status_code == 503
+    assert path.exists() is False
+
+
+def test_separate_store_instances_keep_concurrent_additions(tmp_path):
+    path = tmp_path / "stack.json"
+
+    def add_note(index: int) -> None:
+        stack = Stack(path)
+        from sentinel.stack import Item
+        stack.add(Item(id=str(index), added_at=f"2026-09-23T00:00:{index:02d}Z", kind="note", title=str(index), note=str(index)))
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        list(pool.map(add_note, range(20)))
+    assert {item["id"] for item in Stack(path).state()["items"]} == {str(index) for index in range(20)}
+
+
+def test_separate_prompt_libraries_keep_concurrent_edits(tmp_path):
+    path = tmp_path / "prompts.json"
+
+    def add_prompt(index: int) -> None:
+        Prompts(path).add(f"Prompt {index}")
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        list(pool.map(add_prompt, range(20)))
+    prompts = Prompts(path).all()
+    assert len(prompts) == len(PRESET_PROMPTS) + 20
+    assert {prompt["name"] for prompt in prompts} >= {f"Prompt {index}" for index in range(20)}
+
+
+def test_a_stack_reader_holds_the_same_lock_as_a_writer(tmp_path):
+    from sentinel.stack import Item
+
+    path = tmp_path / "stack.json"
+    reader, writer = Stack(path), Stack(path)
+    writer.add(Item(id="first", added_at="2026-09-23T00:00:00Z", kind="note", title="first", note="first"))
+    started, release = Event(), Event()
+
+    def held_read():
+        with path.open(encoding="utf-8") as handle:
+            started.set()
+            assert release.wait(5)
+            return json.load(handle)
+
+    reader.store.read = held_read
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        reading = pool.submit(reader.state)
+        assert started.wait(5)
+        writing = pool.submit(writer.add, Item(id="second", added_at="2026-09-23T00:00:01Z", kind="note", title="second", note="second"))
+        time.sleep(0.05)
+        assert not writing.done()
+        release.set()
+        reading.result(timeout=5)
+        writing.result(timeout=5)
+    assert {item["id"] for item in writer.state()["items"]} == {"first", "second"}
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows text-mode descriptor behavior")
+def test_windows_stack_json_has_no_doubled_carriage_returns(tmp_path):
+    from sentinel.stack import Item
+
+    path = tmp_path / "stack.json"
+    Stack(path).add(Item(id="first", added_at="2026-09-23T00:00:00Z", kind="note", title="first", note="first"))
+    assert b"\r\r\n" not in path.read_bytes()
 
 
 def test_one_signal_can_be_handed_on_with_its_basis_and_evidence(client: TestClient):
@@ -539,8 +711,8 @@ def test_the_agent_sees_the_same_stack(client: TestClient):
     assert added["reading"]["outcome"] == "ok" and "TESTBOX" not in json.dumps(added)
     assert json.loads(call(client, "stack_list")["content"][0]["text"])["items"][0]["id"] == added["id"]
 
-    refused = call(client, "stack_add", {"kind": "reading", "take": {"name": "events", "params": {"count": 2}}})
-    assert refused["isError"] is True and "already on the stack" in refused["content"][0]["text"]
+    refused = call(client, "stack_add", {"kind": "reading", "envelope": added["reading"]})
+    assert refused["isError"] is True and added["id"] in refused["content"][0]["text"]
 
     composed = call(client, "compose")["content"][0]["text"]
     assert composed.startswith("# System Sentinel handoff") and "| Time | Level |" in composed

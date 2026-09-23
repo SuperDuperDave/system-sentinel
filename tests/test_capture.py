@@ -99,6 +99,20 @@ def test_a_reading_that_cannot_be_taken_is_written_with_its_outcome(client: Test
     assert json.loads(files["readings/record.json"])["params"]["before"].endswith("Z")
 
 
+def test_capture_keeps_machine_readings_when_saved_stack_is_unavailable(client: TestClient):
+    path = client.app.state.sentinel.stack.store.path
+    path.write_bytes(b"{broken")
+    response = client.post("/api/captures", headers=AUTH)
+    assert response.status_code == 200
+    files = members(response.content)
+    manifest = json.loads(files["manifest.json"])
+    assert {"stack.json", "composed.md"}.isdisjoint(files)
+    assert {entry["member"] for entry in manifest["unavailable"]} == {"stack.json", "composed.md"}
+    assert "readings/events.json" in files and path.read_bytes() == b"{broken"
+    listed = client.get("/api/captures", headers=AUTH).json()["captures"][0]["manifest"]
+    assert set(listed["unavailable"]) == {"stack.json", "composed.md"}
+
+
 def test_captures_are_listed_and_fetched_and_nothing_wanders(client: TestClient):
     first = client.post("/api/captures", headers=AUTH)
     name = first.headers["X-Capture-Name"]

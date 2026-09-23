@@ -43,6 +43,7 @@ export function Stack() {
   const [handoff, setHandoff] = useState<Composed | null>(null);
   const [captures, setCaptures] = useState<Capture[]>([]);
   const [problem, setProblem] = useState<string | null>(null);
+  const [savedContextProblem, setSavedContextProblem] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const setSession = useApp((s) => s.setSession);
 
@@ -61,13 +62,20 @@ export function Stack() {
 
   /** The stack and the text it composes into always arrive together: one is derived from the other. */
   const refresh = useCallback(
-    () =>
-      guard(async () => {
+    async () => {
+      try {
         const [state, text] = await Promise.all([getStack(), composedText()]);
         setStack(state);
         setHandoff(text);
-      }),
-    [guard],
+        setSavedContextProblem(null);
+      } catch (err: unknown) {
+        if (err instanceof Unauthorized) return setSession('closed');
+        setStack(null);
+        setHandoff(null);
+        setSavedContextProblem(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [setSession],
   );
 
   const refreshPrompts = useCallback(() => guard(async () => setPrompts(await getPrompts())), [guard]);
@@ -101,12 +109,19 @@ export function Stack() {
       <Head title="Stack">
         <button className={styles.refresh} aria-disabled={refreshing} onClick={() => void refreshVisible()}>{refreshing ? 'Refreshing…' : 'Refresh this view'}</button>
       </Head>
-      <p className={`${styles.state} readout`}>
-        {items.length === 0 ? 'Nothing on the stack' : `${items.length} ${items.length === 1 ? 'item' : 'items'}`}
-        {stack?.system_prompt && leading ? ` · led by ${leading.name}` : ' · no prompt'}
-      </p>
-      {problem ? <p className={`${styles.problem} readout`} role="status">{problem}</p> : null}
+      {stack ? (
+        <p className={`${styles.state} readout`}>
+          {items.length === 0 ? 'Nothing on the stack' : `${items.length} ${items.length === 1 ? 'item' : 'items'}`}
+          {stack.system_prompt && leading ? ` · led by ${leading.name}` : ' · no prompt'}
+        </p>
+      ) : (
+        <p className={`${savedContextProblem ? styles.problem : styles.state} readout`} role={savedContextProblem ? 'alert' : 'status'}>
+          {savedContextProblem ? `Saved Stack or prompt data is unavailable: ${savedContextProblem}` : 'Loading saved context…'}
+        </p>
+      )}
+      {problem && !savedContextProblem ? <p className={`${styles.problem} readout`} role="status">{problem}</p> : null}
 
+      {stack ? <>
       <div className={styles.block}>
         <h2 className={`${styles.blockTitle} label`}>Evidence</h2>
         {items.length === 0 ? (
@@ -154,6 +169,7 @@ export function Stack() {
         <h2 className={`${styles.blockTitle} label`}>Handoff</h2>
         <Handoff handoff={handoff} />
       </div>
+      </> : null}
 
       <div className={styles.block}>
         <h2 className={`${styles.blockTitle} label`}>Capture</h2>
@@ -347,7 +363,7 @@ function Captures({ captures, onTaken, guard }: { captures: Capture[]; onTaken: 
   return (
     <>
       <p className={styles.what}>
-        Readings that need no exact file or event selection, taken now and written into the data directory as one ZIP: an envelope for each, the stack, and the handoff. The manifest lists readings omitted because they need a selection.
+        Readings that need no exact file or event selection, taken now and written into the data directory as one ZIP: an envelope for each, the stack, and the handoff when saved context is available. The manifest names anything omitted or unavailable.
         It takes as long as the slowest query on this machine. Nothing is sent anywhere. The list below reads each manifest; it does not verify the rest of the ZIP.
       </p>
       <p className={styles.handoffLine}>
@@ -381,6 +397,7 @@ function Captures({ captures, onTaken, guard }: { captures: Capture[]; onTaken: 
                   <>
                     <span className={c.manifest.unredacted ? styles.captureUnredacted : undefined}>{c.manifest.unredacted ? 'Manifest: unredacted · review before sharing' : 'Manifest: redacted'}</span>
                     <span>{c.manifest.readings} {c.manifest.readings === 1 ? 'reading' : 'readings'} · {Object.entries(c.manifest.outcomes).map(([outcome, count]) => `${count} ${captureOutcome(outcome)}`).join(' · ')}</span>
+                    {c.manifest.unavailable?.length ? <span>Saved context unavailable in this capture: {c.manifest.unavailable.join(', ')}. See its manifest.</span> : null}
                   </>
                 ) : <span>Manifest {captureManifestState(c.manifest?.status)} · privacy and reading outcomes unknown</span>}
               </span>

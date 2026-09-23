@@ -269,7 +269,7 @@ def test_agent_can_hand_on_one_signal_with_its_basis(surface: Surface):
 
 
 def test_agent_stacks_a_whole_storm_reading_in_summary_without_asking_for_full(surface: Surface):
-    envelope = {"reading": "storms", "outcome": "empty", "params": {"hours": 24}, "method": {"kind": "powershell"}, "sections": []}
+    envelope = {"reading": "storms", "asked_at": "2026-09-21T00:00:00Z", "outcome": "empty", "params": {"hours": 24}, "method": {"kind": "powershell"}, "sections": []}
     added = payload(call(surface, "stack_add", kind="reading", envelope=envelope))
     assert added["verbosity"] == "summary"
 

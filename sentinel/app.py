@@ -31,7 +31,7 @@ from .readings.health import learn_identity
 from .redact import Identity, Redactor
 from .serialization import json_safe_integers
 from .service import ReadingService
-from .stack import Duplicate, Prompts, Stack, compose, new_item
+from .stack import Duplicate, Prompts, Stack, StoreUnavailable, compose, new_item
 from .stream import Stream
 
 STATIC = Path(__file__).parent / "static"
@@ -228,6 +228,10 @@ def create_app(state: State | None = None, mcp: bool = True) -> FastAPI:
     app.state.mcp_surface = mcp_app.state.surface if mcp_app is not None else None
     app.add_middleware(TokenMiddleware, token=state.token)
 
+    @app.exception_handler(StoreUnavailable)
+    async def saved_context_unavailable(_request: Request, exc: StoreUnavailable) -> JSONResponse:
+        return JSONResponse({"error": "saved_context_unavailable", "detail": str(exc)}, status_code=503)
+
     async def handoff_changed() -> None:
         if mcp_app is not None:
             await mcp_app.state.surface.handoff_changed()
@@ -417,14 +421,14 @@ def create_app(state: State | None = None, mcp: bool = True) -> FastAPI:
     @app.post("/api/stack/items", tags=["stack"], status_code=201)
     async def stack_add(item: NewStackItem, unredacted: bool = False) -> Response:
         """Add evidence: a reading the server takes now, a reading the caller holds, some of its
-        records, or a note. The same reading with the same parameters and records is refused."""
+        records, or a note. The same observation and selection are refused."""
         try:
             added = await new_item(state.stack, state.bridge, item.model_dump(exclude_unset=True), reader=state.readings.take)
             response = guarded(state.stack.add(added).to_dict(), unredacted, status_code=201)
             await handoff_changed()
             return response
         except Duplicate as exc:
-            return JSONResponse({"error": "duplicate", "detail": "this evidence is already on the stack", "id": str(exc)}, status_code=409)
+            return JSONResponse({"error": "duplicate", "detail": "this observation is already on the stack", "id": str(exc), "asked_at": exc.asked_at}, status_code=409)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 

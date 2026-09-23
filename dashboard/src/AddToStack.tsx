@@ -12,7 +12,7 @@ import styles from './AddToStack.module.css';
  *
  * It answers in place. Nothing opens, nothing moves, and the answer distinguishes the three
  * things that can happen: it went on the stack, the stack already holds this same evidence
- * (the boundary's own rule: same reading, same parameters, same records), or the add failed.
+ * (the boundary's own rule: same observation and selection), or the add failed.
  */
 export function AddToStack({ item, label = 'Add to stack' }: { item: NewItem; label?: string }) {
   const [state, setState] = useState<'ready' | 'adding' | 'added' | 'duplicate' | 'failed'>('ready');
@@ -21,9 +21,7 @@ export function AddToStack({ item, label = 'Add to stack' }: { item: NewItem; la
   const key = signature(item);
   const [seen, setSeen] = useState(key);
 
-  // The same control offered for different evidence is a fresh offer: a new reading was taken,
-  // or another record was picked. The signature is the boundary's duplicate rule, so the reset
-  // and the refusal cannot disagree.
+  // A retake offers a new observation even when its parameters and selected IDs are unchanged.
   if (seen !== key) {
     setSeen(key);
     setState('ready');
@@ -65,13 +63,12 @@ export function AddToStack({ item, label = 'Add to stack' }: { item: NewItem; la
   );
 }
 
-/** What makes two offers the same evidence: the boundary refuses a second one on exactly this. */
+/** Reset the control when the observation or selection changes. The server owns duplicate checks. */
 function signature(item: NewItem): string {
   if (item.kind === 'note') return `note:${item.note}`;
   const ids = 'ids' in item ? item.ids : null;
   if ('envelope' in item) {
-    const moment = item.envelope.reading === 'signals' ? item.envelope.asked_at : null;
-    return JSON.stringify([item.kind, item.envelope.reading, item.envelope.params, ids, moment]);
+    return JSON.stringify([item.kind, item.envelope.reading, item.envelope.params, ids, item.envelope.asked_at]);
   }
   return JSON.stringify([item.kind, item.take.name, item.take.params, ids]);
 }
