@@ -4,7 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from sentinel.app import State, create_app
-from sentinel.bridge import BridgeResult
+from sentinel.bridge import Bridge, BridgeResult
 from sentinel.readings import health
 from tests.conftest import FakeBridge, LogBridge, identity_result
 
@@ -85,10 +85,14 @@ def test_a_failed_relearn_keeps_names_already_learned():
 def test_native_windows_identity_fallback_keeps_the_bridge_failure_visible(monkeypatch: pytest.MonkeyPatch):
     from types import SimpleNamespace
 
+    class FailingBridge(Bridge):
+        def run(self, script: str, *, timeout: float = 60, depth: int = 6) -> BridgeResult:
+            return BridgeResult("unavailable", error="temporary outage")
+
     monkeypatch.setattr(health, "sys", SimpleNamespace(platform="win32"))
     monkeypatch.setenv("COMPUTERNAME", "TESTBOX")
     monkeypatch.setenv("USERNAME", "tester")
-    bridge = FakeBridge(result=BridgeResult("unavailable", error="temporary outage"))
+    bridge = FailingBridge(exe="powershell.exe")
     identity, facts = health.learn_identity(bridge)
     assert identity.host == "TESTBOX" and identity.user == "tester"
     assert facts == {"outcome": "unavailable", "error": "temporary outage"}

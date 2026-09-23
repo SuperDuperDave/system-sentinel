@@ -162,10 +162,14 @@ class State:
         """Ask the machine its names. Field-name redaction never depends on this; replacing the
         names inside message text does, so an answer that did not come is asked for again later."""
         self._learned_at = time.time()
-        learned, _ = learn_identity(self.bridge)
+        learned, facts = learn_identity(self.bridge)
         previous = self.identity
         # One policy owns the identity. A later failed lookup must not erase names already learned.
-        self._redactor = Redactor(Identity(host=learned.host or previous.host, user=learned.user or previous.user))
+        if facts["outcome"] == "ok":
+            identity = Identity(host=learned.host or previous.host, user=learned.user or previous.user)
+        else:
+            identity = Identity(host=previous.host or learned.host, user=previous.user or learned.user)
+        self._redactor = Redactor(identity)
 
     @property
     def identity(self) -> Identity:
