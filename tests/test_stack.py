@@ -149,6 +149,32 @@ def test_whea_handoff_keeps_header_severity_with_exact_cross_log_selection(clien
     assert payload not in composed and "<cper bytes withheld" in composed
 
 
+def test_an_exact_whea_report_keeps_previous_session_meaning_in_compact_and_selected_handoffs():
+    channel = "Microsoft-Windows-Kernel-WHEA/Errors"
+    record = {"Log": channel, "RecordId": 73, "TimeCreated": "2026-09-23T02:00:00Z", "Id": 20,
+              "LevelDisplayName": "Information", "RawData": "SYNTHETIC-CPER-BYTES"}
+    envelope = {
+        "reading": "whea_record", "params": {"source": "kernel_whea", "record_id": 73},
+        "asked_at": "2026-09-23T03:00:00Z", "method": {"kind": "powershell"},
+        "outcome": "ok", "count": 1, "warnings": [],
+        "sections": [
+            {"name": "records", "class": "raw", "data": [record]},
+            {"name": "identity", "class": "derived", "data": [
+                {"Log": channel, "RecordId": 73, "cper": {"severity": "fatal", "previous_session": True}}
+            ]},
+            {"name": "decoded", "class": "derived", "data": [{"Log": channel, "RecordId": 73, "error": "detail decoding deferred"}]},
+            {"name": "collection", "class": "raw", "data": {"source": "kernel_whea", "outcome": "ok"}},
+        ],
+    }
+    compact = "\n".join(_item_lines(1, {"kind": "reading", "title": "Exact report", "reading": envelope, "verbosity": "summary"}))
+    assert '"previous_session": true' in compact and '"severity": "fatal"' in compact
+    assert "SYNTHETIC-CPER-BYTES" not in compact and "detail decoding deferred" in compact
+    selected = "\n".join(_item_lines(1, {"kind": "selection", "title": "Exact report", "reading": envelope,
+                                       "ids": [f"{channel}:73"], "verbosity": "full"}))
+    assert '"previous_session": true' in selected and '"severity": "fatal"' in selected
+    assert "SYNTHETIC-CPER-BYTES" in selected and "detail decoding deferred" in selected
+
+
 def test_a_week_of_storm_buckets_has_a_bounded_default_handoff_with_full_evidence_available(client: TestClient):
     from tests.test_whea import _powershell_stamp, load, storms
 

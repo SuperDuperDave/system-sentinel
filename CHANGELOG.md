@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.3.2] - 2026-09-23
+
+### Added
+- Hardware errors now lists the returned Kernel-WHEA report references under their report-time trace. Selecting a lit stretch filters the list in place; opening a report reads its exact retained record with default redaction, checks its source, RecordId and timestamp against the timeline, and shows the CPER bytes only after a separate explicit action. The list reveals 50 rows at a time up to 500 and names query, retention and display limits.
+
+### Changed
+- Opening another record or stop detail keeps the chosen row at its viewport position. Crash fault-kind cards filter their rows without jumping the page. The report trace exposes its selected stretch and keyboard controls.
+- A compact or selected Stack handoff for an exact `whea_record` now carries its CPER header severity and PreviousError fact alongside the selected raw row, with default redaction accurately described.
+
+### Limits
+- The timeline dates when Windows wrote a report, not necessarily when the hardware condition occurred. An exact record may disappear or be replaced as the Windows log rotates; the UI declines to attach a mismatched re-read. The visible list is bounded, while the complete returned reading remains available through the API and Stack.
+
 ## [1.3.1] - 2026-09-23
 
 ### Added

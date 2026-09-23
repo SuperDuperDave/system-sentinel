@@ -413,10 +413,10 @@ def _item_lines(position: int, item: dict[str, Any]) -> list[str]:
         return lines
     if envelope.get("reading") == "changes" and (item.get("verbosity") == "summary" or item.get("ids") is not None):
         lines += _json_block(_change_handoff_sections(envelope, records if item.get("ids") is not None else None, item.get("verbosity") == "summary"))
-    elif envelope.get("reading") == "whea" and records is not None and (item.get("verbosity") == "summary" or item.get("ids") is not None):
+    elif envelope.get("reading") in ("whea", "whea_record") and records is not None and (item.get("verbosity") == "summary" or item.get("ids") is not None):
         compact = item.get("verbosity") == "summary"
         if compact:
-            lines.append("CPER severity and previous-session status come from the record header; Windows event level can differ. Raw bytes remain in the stored reading; set this item to full to include them.")
+            lines.append("CPER severity and previous-session status come from the record header; Windows event level can differ. Set this item to full for its stored fields. Default redaction may withhold CPER bytes.")
             if len(records) > SUMMARY_LOG_LIMIT:
                 lines.append(f"Showing the first and last {SUMMARY_LOG_EDGE} of {len(records)} returned records.")
             lines.append("")

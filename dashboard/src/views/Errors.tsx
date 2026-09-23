@@ -1,10 +1,11 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { EventRecord, Reading, type RecordId, observed } from '../api';
 import { AddToStack } from '../AddToStack';
 import { Glyph, OutcomeLine, clock, firstLine } from '../Outcome';
 import { Facts, Head, MomentLink, RowList, Section, Segmented, Tree, Value, ago, basisOf, part, shortDay } from '../Sections';
 import { useApp } from '../store';
 import { useReading } from '../useReading';
+import { KernelReports, type KernelReport, type ReportRange, type ReportReach, type ReportSource } from './KernelReports';
 import styles from './Errors.module.css';
 
 /** The window counted into wall-clock buckets, idle ones included. */
@@ -129,6 +130,7 @@ const COUNTS = [30, 100, 500];
 export function Errors() {
   const [span, setSpan] = useState<Span>(24);
   const [count, setCount] = useState(30);
+  const [reportSelection, setReportSelection] = useState<{ reading: Reading; range: ReportRange } | null>(null);
 
   // The machine supplies uptime; both readings accept whole hours, so rounding up can include
   // some time before this session. Say that rather than calling the query an exact boot cutoff.
@@ -161,6 +163,9 @@ export function Errors() {
   const signatures = part<Signature[]>(storms.reading, 'signatures') ?? [];
   const reportBuckets = part<ReportBuckets>(reports.reading, 'buckets');
   const reportCoverage = part<ReportCoverage>(reports.reading, 'coverage')?.kernel_whea;
+  const reportRows = part<KernelReport[]>(reports.reading, 'reports') ?? [];
+  const reportSource = part<{ kernel_whea: ReportSource }>(reports.reading, 'collection')?.kernel_whea ?? null;
+  const selectedReportRange = reportSelection?.reading === reports.reading ? reportSelection.range : null;
   const emptyReportText = reportCoverage?.complete
     ? `No Kernel-WHEA reports recorded ${inWindow}`
     : reportCoverage?.covered_from == null
@@ -254,8 +259,19 @@ export function Errors() {
           <p className={`${styles.windowNote} readout`}>This trace places reports when Windows wrote them. A CPER PreviousError flag means the hardware condition occurred in an earlier Windows session; a cluster here does not establish when those errors occurred.</p>
           {observed(reports.reading) && reportBuckets ? (
             <>
-              <Trace buckets={reportBuckets} source="Kernel-WHEA reports" interactive={false} />
+              <Trace buckets={reportBuckets} source="Kernel-WHEA reports" interactive={false}
+                pick={reports.reading ? (range) => setReportSelection({ reading: reports.reading!, range }) : undefined}
+                selectedRange={selectedReportRange} />
               <p className={`${styles.rates} readout`}>{reportBuckets.previous_session} returned report{reportBuckets.previous_session === 1 ? '' : 's'} marked previous session · {reportBuckets.header_unreadable} with unreadable headers · {reportBuckets.unknown_buckets} buckets with incomplete coverage</p>
+              {reports.reading ? <>
+                <div className={styles.reportControls}>
+                  <button type="button" className={styles.exactRaw} aria-pressed={selectedReportRange === null} onClick={() => setReportSelection(null)}>All returned reports</button>
+                  {selectedReportRange ? <span className="readout">Selected: {shortDay.format(new Date(selectedReportRange.from))} {clock.format(new Date(selectedReportRange.from))}–{shortDay.format(new Date(selectedReportRange.to))} {clock.format(new Date(selectedReportRange.to))} · choose another above or show all</span> : <span className="readout">Choose a lit stretch above to narrow these reports in place</span>}
+                </div>
+                <KernelReports reading={reports.reading} reports={reportRows} range={selectedReportRange}
+                  source={reportSource} reach={reportCoverage as ReportReach | null}
+                  inspect={(report) => <ReportDetail report={report} />} />
+              </> : null}
             </>
           ) : null}
         </Section>
@@ -360,8 +376,27 @@ function WheaSources({ collection, coverage }: { collection: WheaCollection; cov
  * somewhere in the window at a glance, and keep an empty window reading as a window rather than
  * as a blank.
  */
-function Trace({ buckets, source = 'WHEA-Logger records', interactive = true }: { buckets: TimelineBuckets; source?: string; interactive?: boolean }) {
+function Trace({ buckets, source = 'WHEA-Logger records', interactive = true, pick, selectedRange }: {
+  buckets: TimelineBuckets;
+  source?: string;
+  interactive?: boolean;
+  pick?: (range: ReportRange) => void;
+  selectedRange?: ReportRange | null;
+}) {
   const setMoment = useApp((s) => s.setMoment);
+  const stage = useRef<HTMLDivElement>(null);
+  const [stageWidth, setStageWidth] = useState(720);
+  const picking = Boolean(pick);
+  useEffect(() => {
+    if (!picking || !stage.current) return;
+    const node = stage.current;
+    const measure = () => setStageWidth(Math.max(1, node.clientWidth));
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [picking]);
   const unknownPattern = interactive ? 'stormUnknown' : 'reportUnknown';
   const totals = buckets.totals ?? [];
   const active = new Map(buckets.active.map((bucket) => [bucket.index, bucket.total]));
@@ -374,12 +409,14 @@ function Trace({ buckets, source = 'WHEA-Logger records', interactive = true }: 
     const from = Math.floor(i * per);
     const to = Math.max(from + 1, Math.floor((i + 1) * per));
     let top = 0;
+    let total = 0;
     let known = true;
     for (let j = from; j < to && j < totals.length; j += 1) {
       if (totals[j] === null) known = false;
       top = Math.max(top, totals[j] ?? active.get(j) ?? 0);
+      total += totals[j] ?? active.get(j) ?? 0;
     }
-    return { top, known, ends: Math.min(to, totals.length) };
+    return { top, total, known, ends: Math.min(to, totals.length) };
   });
   const peak = peaks.reduce((a, b) => Math.max(a, b.top), 0);
   const floor = height - 3;
@@ -399,13 +436,22 @@ function Trace({ buckets, source = 'WHEA-Logger records', interactive = true }: 
   // control: a hit target over each run of columns that holds a record, and nothing at all over a
   // quiet one. The line itself is untouched; the targets are a layer above it.
   const unit = 100 / Math.max(1, columns - 1);
-  const runs = (interactive ? lit(peaks) : [])
-    .map((run) => ({ from: run.from, to: run.to, at: endOf(buckets, peaks[run.to].ends) }))
-    .filter((run): run is { from: number; to: number; at: string } => run.at !== null);
+  const litRuns = interactive || pick ? lit(peaks) : [];
+  const reachableRuns = pick ? mergeNearby(litRuns, Math.ceil(32 * columns / stageWidth)) : litRuns;
+  const runs = reachableRuns
+    .map((run) => ({
+      from: run.from, to: run.to,
+      at: endOf(buckets, peaks[run.to].ends),
+      starts: startOf(buckets, Math.floor(run.from * per)),
+      ends: endOf(buckets, peaks[run.to].ends),
+      count: peaks.slice(run.from, run.to + 1).reduce((sum, column) => sum + column.total, 0),
+    }))
+    .filter((run): run is { from: number; to: number; at: string; starts: string; ends: string; count: number } => run.at !== null && run.starts !== null && run.ends !== null);
+  const selectedRun = runs.findIndex((run) => selectedRange?.from === run.starts && selectedRange.to === run.ends);
 
   return (
     <figure className={styles.traceFigure}>
-      <div className={styles.traceStage}>
+      <div className={styles.traceStage} ref={stage}>
         <svg className={styles.trace} viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" role="img" aria-label={label}>
           <defs>
             <pattern id={unknownPattern} width="7" height="7" patternUnits="userSpaceOnUse"><path className={styles.traceUnknownHatch} d="M0 7L7 0" /></pattern>
@@ -423,17 +469,30 @@ function Trace({ buckets, source = 'WHEA-Logger records', interactive = true }: 
           {peaks.map((p, i) => !p.known && p.top > 0 ? <circle key={`partial-${i}`} className={styles.tracePartialPoint} cx={x(i)} cy={floor - p.top * scale} r="2.5" /> : null)}
         </svg>
         {runs.length ? (
-          <div className={styles.traceHits}>
-            {runs.map((run) => {
+          <div className={styles.traceHits} role={pick ? 'toolbar' : undefined} aria-orientation={pick ? 'horizontal' : undefined} aria-label={pick ? 'Choose a report-time stretch' : undefined}>
+            {runs.map((run, index) => {
               const when = new Date(run.at);
-              const words = `the record before ${shortDay.format(when)} ${clock.format(when)}`;
+              const start = new Date(run.starts);
+              const end = new Date(run.ends);
+              const words = pick
+                ? `Show ${run.count} report${run.count === 1 ? '' : 's'} written ${shortDay.format(start)} ${clock.format(start)} to ${shortDay.format(end)} ${clock.format(end)}`
+                : `the record before ${shortDay.format(when)} ${clock.format(when)}`;
+              const selected = selectedRange?.from === run.starts && selectedRange.to === run.ends;
               return (
                 <button
                   key={run.from}
                   type="button"
                   className={styles.traceHit}
                   style={{ left: `${Math.max(0, run.from * unit - unit / 2)}%`, width: `${(run.to - run.from + 1) * unit}%` }}
-                  onClick={() => setMoment(run.at)}
+                  onClick={() => pick ? pick({ from: run.starts, to: run.ends }) : setMoment(run.at)}
+                  onKeyDown={pick ? (event) => {
+                    const buttons = Array.from(event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('button') ?? []);
+                    const direction = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1 : event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 0;
+                    const next = event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1 : direction ? (index + direction + buttons.length) % buttons.length : -1;
+                    if (next >= 0 && buttons[next]) { event.preventDefault(); buttons[next].focus(); }
+                  } : undefined}
+                  tabIndex={pick ? (selected || selectedRun < 0 && index === 0 ? 0 : -1) : undefined}
+                  aria-pressed={pick ? Boolean(selected) : undefined}
                   aria-label={words}
                   title={words}
                 />
@@ -477,6 +536,17 @@ function lit(peaks: { top: number }[]): { from: number; to: number }[] {
   return runs;
 }
 
+/** Neighboring report stretches share one touch target when separate targets would overlap. */
+function mergeNearby(runs: { from: number; to: number }[], minimumGap: number): { from: number; to: number }[] {
+  const merged: { from: number; to: number }[] = [];
+  for (const run of runs) {
+    const last = merged[merged.length - 1];
+    if (last && run.from - last.to - 1 < minimumGap) last.to = run.to;
+    else merged.push({ ...run });
+  }
+  return merged;
+}
+
 /** Where a column ends in wall-clock time, from the window's own start and bucket size. Never past
  *  the window's end, so the last column of a partly filled bucket does not point into the future. */
 function endOf(buckets: TimelineBuckets, bucketIndex: number): string | null {
@@ -485,6 +555,12 @@ function endOf(buckets: TimelineBuckets, bucketIndex: number): string | null {
   if (Number.isNaN(from)) return null;
   const at = from + bucketIndex * buckets.bucket_seconds * 1000;
   return new Date(Number.isNaN(to) ? at : Math.min(at, to)).toISOString();
+}
+
+function startOf(buckets: TimelineBuckets, bucketIndex: number): string | null {
+  const from = Date.parse(buckets.from);
+  if (Number.isNaN(from)) return null;
+  return new Date(from + bucketIndex * buckets.bucket_seconds * 1000).toISOString();
 }
 
 /** What the signature was made of, and the last record that matched it. */
@@ -514,8 +590,32 @@ function SignatureDetail({ signature }: { signature: Signature }) {
   );
 }
 
+/** One report reference can open its own exact, redacted reading without leaving the timeline. */
+function ReportDetail({ report }: { report: KernelReport }) {
+  const taken = useReading('whea_record', { source: 'kernel_whea', record_id: report.record_id });
+  const record = part<EventRecord[]>(taken.reading, 'records')?.[0];
+  const matches = observed(taken.reading) && taken.reading?.outcome === 'ok'
+    && record?.Log === KERNEL_WHEA && record.RecordId === report.record_id && record.TimeCreated === report.reported_at;
+  const identity = part<WheaIdentity[]>(taken.reading, 'identity')?.find((entry) => entry.Log === KERNEL_WHEA && entry.RecordId === report.record_id);
+  const decoded = part<Decoded[]>(taken.reading, 'decoded')?.find((entry) => entry.Log === KERNEL_WHEA && entry.RecordId === report.record_id);
+  const announcement = taken.state === 'taking' ? 'Reading exact report'
+    : matches ? 'Exact report matches the timeline reference'
+      : taken.reading?.outcome === 'empty' ? 'Report is no longer returned'
+        : taken.state === 'lost' || taken.reading && !observed(taken.reading) ? 'Report could not be read'
+          : taken.reading?.outcome === 'ok' ? 'Report no longer matches the timeline reference' : '';
+  return <>
+    <p className={styles.srOnly} role="status">{announcement ? `${announcement} #${report.record_id}` : ''}</p>
+    <OutcomeLine taken={taken} noun="returned record" singular="returned record" emptyText={`The channel no longer holds RecordId ${report.record_id}`} />
+    {taken.reading?.outcome === 'empty' ? <p className={`${styles.notDecoded} readout`}>The channel may have rotated since this timeline was taken; this does not mean the report never existed.</p> : null}
+    {taken.reading && !observed(taken.reading) ? <p className={`${styles.notDecoded} readout`}>This report could not be read. The query outcome does not establish that the report is absent.</p> : null}
+    {taken.reading?.outcome === 'ok' && !matches ? <p className={`${styles.notDecoded} readout`}>This RecordId now names a different report. Take the timeline again before relying on it.</p> : null}
+    {matches && record ? <RecordDetail record={record} identity={identity} decoded={decoded} envelope={taken.reading}
+      stackTitle={`Kernel-WHEA report #${report.record_id} · reported ${record.TimeCreated}${identity?.cper?.previous_session ? ' · earlier-session error' : ''}`} /> : null}
+  </>;
+}
+
 /** One source record in full, with the decoded structure of its payload beside it. */
-function RecordDetail({ record, identity, decoded, envelope }: { record: EventRecord; identity?: WheaIdentity; decoded?: Decoded; envelope: Reading | null }) {
+function RecordDetail({ record, identity, decoded, envelope, stackTitle }: { record: EventRecord; identity?: WheaIdentity; decoded?: Decoded; envelope: Reading | null; stackTitle?: string }) {
   const cper = identity?.cper;
   return (
     <>
@@ -526,11 +626,12 @@ function RecordDetail({ record, identity, decoded, envelope }: { record: EventRe
           ['Event', <Value value={record.TaskDisplayName ? `${record.Id} · ${record.TaskDisplayName}` : record.Id} />],
           ['Level', <Value value={record.LevelDisplayName} />],
           ['Record', <Value value={record.RecordId} />],
-          ['Time', <Value value={`${record.TimeCreated} · ${ago(record.TimeCreated)}`} />],
+          [record.Log === KERNEL_WHEA ? 'Reported by Windows' : 'Time', <Value value={`${record.TimeCreated} · ${ago(record.TimeCreated)}`} />],
           ...(cper ? [
             ['CPER severity', <Value value={cper.severity} />],
             ['CPER record', <Value value={cper.record_id} />],
-            ['Previous session', <Value value={cper.previous_session ? 'The error occurred in an earlier Windows session; this event reports it after a restart' : 'Not marked as a previous-session error'} />],
+            ['PreviousError flag', <Value value={cper.previous_session ? 'Set: the error occurred in an earlier Windows session; this event reports it after a restart' : 'Not set; the error moment is not established by this report'} />],
+            ...(cper.timestamp ? [['Header time', <Value value={`${cper.timestamp} · as written, no time zone; not verified as the error moment`} />] as [string, ReactNode]] : []),
           ] as [string, ReactNode][] : []),
         ]}
       />
@@ -557,9 +658,9 @@ function RecordDetail({ record, identity, decoded, envelope }: { record: EventRe
       ) : null}
       <RawReadout record={record} />
       <div className={styles.rowActions}>
-        <MomentLink at={record.TimeCreated} />
+        <MomentLink at={record.TimeCreated} label={record.Log === KERNEL_WHEA ? 'System log before this report' : undefined} />
         {envelope ? (
-          <AddToStack item={{ kind: 'selection', envelope, ids: [recordRef(record)], title: `${record.Log === KERNEL_WHEA ? 'Kernel-WHEA' : 'System WHEA-Logger'} record ${record.RecordId}` }} label="Add this record to the stack" />
+          <AddToStack item={{ kind: 'selection', envelope, ids: [recordRef(record)], title: stackTitle ?? `${record.Log === KERNEL_WHEA ? 'Kernel-WHEA' : 'System WHEA-Logger'} record ${record.RecordId}` }} label="Add this record to the stack" />
         ) : null}
       </div>
     </>

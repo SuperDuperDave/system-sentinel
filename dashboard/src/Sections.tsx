@@ -13,11 +13,26 @@
  * returned, it shows the machine's own field name in the readout face: that is the same vocabulary
  * the JSON hands an agent, and it cannot fall out of step with a field the reading adds.
  */
-import { Fragment, ReactNode, useState } from 'react';
+import { Fragment, ReactNode, useLayoutEffect, useRef, useState } from 'react';
 import { Cls, Reading, section } from './api';
 import { clock } from './Outcome';
 import { useApp } from './store';
 import styles from './Sections.module.css';
+
+/** Keep an inspection target in the same viewport position when another detail above it closes. */
+export function useKeepButtonInPlace() {
+  const place = useRef<{ button: HTMLButtonElement; top: number } | null>(null);
+  useLayoutEffect(() => {
+    const saved = place.current;
+    place.current = null;
+    if (saved?.button.isConnected) {
+      window.scrollBy(0, saved.button.getBoundingClientRect().top - saved.top);
+    }
+  });
+  return (button: HTMLButtonElement) => {
+    place.current = { button, top: button.getBoundingClientRect().top };
+  };
+}
 
 const CLASS_MEANING: Record<Cls, { short: string; detail: string }> = {
   raw: {
@@ -192,16 +207,22 @@ export function RowList<T>({
   layout,
   cells,
   inspect,
+  canInspect,
 }: {
   items: T[];
   layout?: string;
   cells: (item: T) => ReactNode;
   inspect?: (item: T) => ReactNode;
+  canInspect?: (item: T) => boolean;
 } & RowIdentity<T>) {
   const [selection, setSelection] = useState<{ id: RowId | null; snapshot: object | undefined }>({ id: null, snapshot });
   const localOpen = idOf || selection.snapshot === snapshot ? selection.id : null;
   const open = openId === undefined ? localOpen : openId;
-  const setOpen = (id: RowId | null) => {
+  const keepButtonInPlace = useKeepButtonInPlace();
+  const setOpen = (id: RowId | null, button: HTMLButtonElement) => {
+    // Closing an earlier detail shortens the page above this row. Keep the button the person
+    // chose at its original viewport position while its own detail opens below it.
+    keepButtonInPlace(button);
     if (onOpenChange) onOpenChange(id);
     else setSelection({ id, snapshot });
   };
@@ -210,12 +231,13 @@ export function RowList<T>({
       {items.map((item, position) => {
         const index = idOf ? idOf(item) : position;
         const isOpen = open === index;
+        const selectable = inspect && (!canInspect || canInspect(item));
         return (
           <li key={index} className={`${styles.row} ${isOpen ? styles.rowOpen : ''}`}>
-            {inspect ? (
+            {selectable ? (
               <button
                 className={`${styles.rowBody} ${styles.rowButton} ${layout ?? ''}`}
-                onClick={() => setOpen(isOpen ? null : index)}
+                onClick={(event) => setOpen(isOpen ? null : index, event.currentTarget)}
                 aria-expanded={isOpen}
                 data-row-id={index}
               >
@@ -224,7 +246,7 @@ export function RowList<T>({
             ) : (
               <div className={`${styles.rowBody} ${layout ?? ''}`}>{cells(item)}</div>
             )}
-            {inspect && isOpen ? <div className={styles.inspect}>{inspect(item)}</div> : null}
+            {selectable && isOpen ? <div className={styles.inspect}>{inspect(item)}</div> : null}
           </li>
         );
       })}

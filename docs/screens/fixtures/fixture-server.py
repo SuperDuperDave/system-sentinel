@@ -258,7 +258,7 @@ def answer_whea_reports(script: str) -> BridgeResult:
     cap = max(int(value) for value in _MAXEVENTS_RE.findall(script)) - 1
     first, until = _parse_stamp(start), _parse_stamp(end)
     rows = []
-    for record in kernel_whea_records(now):
+    for record in kernel_whea_records(WHEA_ANCHOR):
         if not first <= _parse_stamp(record["TimeCreated"]) < until:
             continue
         raw = record["RawData"]

@@ -40,6 +40,8 @@
   transition: background 120ms ease;
 }
 .traceHit:hover { background: rgba(111, 240, 168, 0.14); }
+.traceHit[aria-pressed='true'] { background: rgba(111, 240, 168, 0.14); box-shadow: inset 0 -2px var(--phosphor); }
+.traceHit:focus-visible { outline-offset: -2px; }
 .traceTick { stroke: var(--rule-soft); stroke-width: 1; }
 .traceUnknownHatch { stroke: var(--muted); stroke-width: 1; opacity: .42; }
 .tracePath {
@@ -54,6 +56,24 @@
 .traceScale { display: block; margin: 8px 0 0; }
 .traceEnds { display: flex; justify-content: space-between; color: var(--muted); }
 .tracePeak { display: block; margin-top: 4px; color: var(--body); }
+
+.reportControls { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; margin: 10px 0 0; color: var(--muted); font-size: 12px; }
+.reportList { margin-top: 12px; }
+.reportListStatus { margin: 7px 0 12px; color: var(--muted); max-width: 80ch; }
+.reportDay { margin: 18px 0 5px; color: var(--muted); }
+.reportRow {
+  grid-template-columns: 100px minmax(0, 1fr) 58px;
+  grid-template-areas: 'time severity id' 'meaning meaning meaning';
+}
+.reportTime { grid-area: time; display: flex; flex-direction: column; gap: 2px; color: var(--muted); }
+.reportSeverity { grid-area: severity; display: inline-flex; align-items: baseline; gap: 6px; color: var(--ink); min-width: 0; }
+.reportId { grid-area: id; color: var(--muted); text-align: right; }
+.reportMeaning { grid-area: meaning; color: var(--body); min-width: 0; overflow-wrap: anywhere; }
+
+@media (min-width: 900px) {
+  .reportRow { grid-template-columns: 135px 155px 62px minmax(0, 1fr); grid-template-areas: 'time severity id meaning'; }
+  .reportTime { flex-direction: row; gap: 8px; }
+}
 
 @media (min-width: 900px) {
   .trace { height: 72px; }

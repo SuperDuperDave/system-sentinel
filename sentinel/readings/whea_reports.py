@@ -91,9 +91,9 @@ BASIS = (
     "the channel's retention, query limit, early stop, or unreadable time cannot establish a quiet "
     "bucket. Header facts use only the fixed 128-byte CPER header and do not validate the entire "
     "record. Top-level PreviousError and unreadable-header counts include returned reports whose "
-    "time could not be placed; active bucket counts require a readable time. The separate whea "
-    "reading offers exact payload bytes for its own bounded newest records, which may not include "
-    "every report in this timeline."
+    "time could not be placed; active bucket counts require a readable time. The separate "
+    "whea_record reading retrieves one retained event by this channel's log-local RecordId, "
+    "with CPER bytes only on explicit unredacted request."
 )
 
 

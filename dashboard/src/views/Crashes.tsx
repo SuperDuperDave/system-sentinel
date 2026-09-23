@@ -2,7 +2,7 @@ import { ReactNode, useEffect, useRef, useState } from 'react';
 import { AddToStack } from '../AddToStack';
 import { EventRecord, Reading, type RecordId, observed } from '../api';
 import { OutcomeLine, clock } from '../Outcome';
-import { Basis, Facts, Head, MomentLink, RowList, Section, Segmented, Value, ago, basisOf, byDay, duration, part, size } from '../Sections';
+import { Basis, Facts, Head, MomentLink, RowList, Section, Segmented, Value, ago, basisOf, byDay, duration, part, size, useKeepButtonInPlace } from '../Sections';
 import { useReading } from '../useReading';
 import { useApp } from '../store';
 import { ReliabilityHistory } from './ReliabilityHistory';
@@ -219,11 +219,6 @@ export function Crashes() {
     if (!faults.reading) return;
     returnTo.current = null;
     setCrashesView({ faultKind: kind, faultId: null, focus: null });
-    requestAnimationFrame(() => {
-      const target = faultRowsRef.current?.querySelector<HTMLButtonElement>('ol > li > button');
-      (target ?? faultRowsRef.current)?.scrollIntoView({ block: 'center' });
-      (target ?? faultRowsRef.current)?.focus({ preventScroll: true });
-    });
   }
 
   return (
@@ -267,7 +262,7 @@ export function Crashes() {
         ) : <p className={`${styles.faultSummaryMissing} readout`}>The derived fault summary was not returned; the decoded entries remain below.</p> : null}
         {observed(faults.reading) && decoded.length > 0 ? (
           <div className={styles.faultRows} ref={faultRowsRef} tabIndex={-1} aria-label="Decoded fault instances in this returned sample">
-          <p className={`${styles.faultRowsCount} readout`}>{shownFaults.length} of {decoded.length} decoded fault {decoded.length === 1 ? 'instance' : 'instances'} shown{selectedFaultKind ? ` · ${faultKindLabel(selectedFaultKind)}` : ' · all kinds'}</p>
+          <p className={`${styles.faultRowsCount} readout`} role="status">{shownFaults.length} of {decoded.length} decoded fault {decoded.length === 1 ? 'instance' : 'instances'} shown{selectedFaultKind ? ` · ${faultKindLabel(selectedFaultKind)}` : ' · all kinds'}</p>
           <RowList
             items={shownFaults}
             idOf={faultIdentity}
@@ -375,10 +370,10 @@ function FaultOverview({ summary, rawCount, decodedCount, basis, selected, onCho
       {basis ? <div className={styles.faultBasis}><Basis text={basis} /></div> : null}
       <div className={styles.faultChoices} role="group" aria-label="Show decoded fault instances by kind">
         <button type="button" className={`${styles.faultChoice} ${selected === null ? styles.faultChoiceSelected : ''}`} aria-pressed={selected === null} onClick={() => onChoose(null)}>
-          <span className="readout">All returned kinds</span><strong>{decodedCount}</strong><span className={`${styles.faultChoiceAction} readout`}>Show exact rows ↓</span>
+          <span className="readout">All returned kinds</span><strong>{decodedCount}</strong><span className={`${styles.faultChoiceAction} readout`}>Filter rows below</span>
         </button>
         {kinds.map(([kind, count]) => <button key={kind} type="button" className={`${styles.faultChoice} ${selected === kind ? styles.faultChoiceSelected : ''}`} aria-pressed={selected === kind} onClick={() => onChoose(kind)}>
-          <span className="readout">{faultKindLabel(kind)}</span><strong>{count}</strong><span className={styles.faultChoiceBar} aria-hidden="true"><span style={{ width: `${(count / peak) * 100}%` }} /></span><span className={`${styles.faultChoiceAction} readout`}>Show exact rows ↓</span>
+          <span className="readout">{faultKindLabel(kind)}</span><strong>{count}</strong><span className={styles.faultChoiceBar} aria-hidden="true"><span style={{ width: `${(count / peak) * 100}%` }} /></span><span className={`${styles.faultChoiceAction} readout`}>Filter rows below</span>
         </button>)}
       </div>
       <div className={styles.faultGroups}>
@@ -415,6 +410,7 @@ function StopSequence({ stops, selected, envelope, onInspect, registerButton }: 
   onInspect: (index: number) => void;
   registerButton: (index: number, node: HTMLButtonElement | null) => void;
 }) {
+  const keepButtonInPlace = useKeepButtonInPlace();
   return (
     <section className={styles.sequence} aria-labelledby="stop-sequence-title">
       <div className={styles.sequenceHead}>
@@ -431,7 +427,7 @@ function StopSequence({ stops, selected, envelope, onInspect, registerButton }: 
               ref={(node) => registerButton(index, node)}
               type="button"
               className={`${styles.sequenceButton} ${selected === index ? styles.sequenceSelected : ''}`}
-              onClick={() => onInspect(index)}
+              onClick={(event) => { keepButtonInPlace(event.currentTarget); onInspect(index); }}
               aria-expanded={selected === index}
               aria-controls={`stop-detail-${index}`}
             >
