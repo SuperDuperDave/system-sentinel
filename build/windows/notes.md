@@ -39,7 +39,7 @@ Windows 10 or 11, 64-bit. Nothing else: the server, the dashboard and the decode
 
 ## What it does not do
 
-It sends no readings, token, captures or handoffs off the machine, listens on localhost only, installs no service and asks for no account. A person-triggered update check contacts GitHub for release metadata and an accepted download; there is no background poll. Reaching the app from elsewhere is a transport you put in front of it, and every request still needs the token.
+It makes no background transfer of readings, token, captures or handoffs, listens on localhost by default, installs no service and asks for no account. A person-triggered update check contacts GitHub for release metadata and an accepted download; it sends no machine readings or token, and there is no background poll. Authenticated replies to a phone travel over the private transport you choose to put in front of the app.
 
 ## For agents
 
