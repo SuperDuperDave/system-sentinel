@@ -14,8 +14,7 @@ from typing import Any
 
 from ..bridge import Bridge
 from ..reading import Param, Reading, Section, Spec, from_object, register
-from .event_coverage import COVERAGE_BASIS, LOG_METADATA_SCRIPT
-from .event_coverage import coverage as _coverage
+from .event_coverage import LOG_METADATA_SCRIPT, WINDOW_COVERAGE_BASIS, window_coverage
 from .event_coverage import metadata as _metadata
 from .event_coverage import parse_stamp as _parse
 from .event_coverage import stamp_key as _stamp_key
@@ -49,6 +48,7 @@ $until = $until.AddTicks(-($until.Ticks % 10000))
 $since = $until.AddHours(-{hours})
 $startIso = $since.ToString('o')
 $endIso = $until.ToString('o')
+$queriedAt = (Get-Date).ToUniversalTime().ToString('o')
 $limit = {count}
 $specs = @(
     [pscustomobject]@{{ name = 'windows_update'; log = 'System'; provider = 'Microsoft-Windows-WindowsUpdateClient'; ids = '(EventID=19 or EventID=20)' }},
@@ -119,7 +119,7 @@ $sources = foreach ($spec in $specs) {{
         log_oldest = $meta.log_oldest; oldest_state = $meta.oldest_state; oldest_error = $meta.oldest_error
     }}
 }}
-[pscustomobject]@{{ window_start = $startIso; window_end = $endIso; sources = @($sources) }}
+[pscustomobject]@{{ window_start = $startIso; window_end = $endIso; queried_at = $queriedAt; sources = @($sources) }}
 """
 
 CHANGES_BASIS = (
@@ -151,7 +151,7 @@ def take_changes(bridge: Bridge, params: dict[str, Any]) -> Reading:
     rows: list[dict[str, Any]] = []
 
     def build(payload: dict[str, Any]) -> list[Section]:
-        collection.update({"window_start": payload.get("window_start"), "window_end": payload.get("window_end")})
+        collection.update({"window_start": payload.get("window_start"), "window_end": payload.get("window_end"), "queried_at": payload.get("queried_at")})
         sources = payload.get("sources")
         grouped: dict[str, list[dict[str, Any]]] = {name: [] for name in SOURCES}
         if isinstance(sources, list):
@@ -163,7 +163,9 @@ def take_changes(bridge: Bridge, params: dict[str, Any]) -> Reading:
         for name in SOURCES:
             source, records = _source(name, grouped[name][0] if len(grouped[name]) == 1 else None, int(params["count"]), collection["window_start"], collection["window_end"])
             collection[name] = source
-            coverage[name] = _coverage(source, records, collection["window_start"], collection["window_end"])
+            in_window = [row for row in records if _in_window(row, collection["window_start"], collection["window_end"])]
+            coverage[name] = window_coverage(source, in_window, collection["window_start"], collection["window_end"], collection["queried_at"],
+                                             end_is_query_time=not bool(str(params["before"]).strip()))
             rows.extend(records)
         rows.sort(key=lambda r: (str(r.get("TimeCreated") or ""), str(r.get("Log") or ""), int(r.get("RecordId") or 0)))
         decoded = [_change(row) for row in rows]
@@ -173,12 +175,18 @@ def take_changes(bridge: Bridge, params: dict[str, Any]) -> Reading:
             Section("changes", "derived", decoded, basis=CHANGES_BASIS),
             Section("summary", "derived", {"by_kind": dict(sorted(kinds.items())), "returned": len(rows)}, basis="Counts only the returned records; source limits are in collection and retention reach is in coverage."),
             Section("collection", "raw", collection),
-            Section("coverage", "derived", coverage, basis=COVERAGE_BASIS),
+            Section("coverage", "derived", coverage, basis=WINDOW_COVERAGE_BASIS),
         ]
 
     reading = from_object("changes", params, script, result, build)
     if not reading.observed:
         return reading
+    if str(params["before"]).strip():
+        query_time, requested_end = _stamp_key(collection["queried_at"]), _stamp_key(collection["window_end"])
+        if query_time is None:
+            reading.warnings.append("the machine's query time was not reported; the requested window's upper reach is unknown")
+        elif requested_end is not None and requested_end > query_time:
+            reading.warnings.append("the requested end is after the machine's query time; records after that time cannot exist yet")
     failures = [name for name in SOURCES if collection[name]["outcome"] not in ("ok", "empty")]
     for name in SOURCES:
         source = collection[name]
@@ -186,6 +194,8 @@ def take_changes(bridge: Bridge, params: dict[str, Any]) -> Reading:
             reading.warnings.append(f"{name} did not answer: {source['error']}")
         if source["truncated"]:
             reading.warnings.append(f"{name} reached its {source['limit']}-record limit; older matching records in the window were not returned")
+        if source.get("row_issues", {}).get("outside_window"):
+            reading.warnings.append(f"{name} returned {source['row_issues']['outside_window']} record times outside the requested window; the raw rows remain visible and completeness cannot be established")
         if coverage[name]["complete"] is False:
             reading.warnings.append(
                 f"{name} log coverage could not be established" if coverage[name]["covered_from"] is None
@@ -214,7 +224,7 @@ def _source(name: str, value: Any, limit: int, start: Any, end: Any) -> tuple[di
         if outcome in ("ok", "empty"):
             valid = (
                 isinstance(raw_rows, list)
-                and all(_valid_row(name, row, start, end) for row in rows)
+                and all(_valid_row(name, row) for row in rows)
                 and value.get("log") == SOURCE_EXPECTED[name][0]
                 and type(value.get("returned")) is int and value["returned"] == len(rows)
                 and type(value.get("limit")) is int and value["limit"] == limit and type(value.get("truncated")) is bool
@@ -224,20 +234,25 @@ def _source(name: str, value: Any, limit: int, start: Any, end: Any) -> tuple[di
             )
             if valid:
                 metadata = _metadata(value)
+                outside = sum(not _in_window(row, start, end) for row in rows)
                 return {
                     **metadata, "outcome": outcome, "returned": len(rows), "limit": limit,
-                    "truncated": value["truncated"], "error": None,
+                    "truncated": value["truncated"], "error": None, "row_issues": {"outside_window": outside},
                 }, rows
             problem = "the source result or record projection failed validation"
     return {**_metadata({}), "log": SOURCE_EXPECTED[name][0], "outcome": "failed", "returned": 0, "limit": limit, "truncated": None, "error": problem, "log_state": "failed", "oldest_state": "failed"}, []
 
 
-def _valid_row(name: str, row: Any, start: Any, end: Any) -> bool:
+def _in_window(row: dict[str, Any], start: Any, end: Any) -> bool:
+    at, first, until = _stamp_key(row.get("TimeCreated")), _stamp_key(start), _stamp_key(end)
+    return at is not None and first is not None and until is not None and first <= at < until
+
+
+def _valid_row(name: str, row: Any) -> bool:
     if not isinstance(row, dict) or not set(row) <= RAW_KEYS or not isinstance(row.get("Data"), dict):
         return False
     log, provider, ids = SOURCE_EXPECTED[name]
-    at, first, until = _stamp_key(row.get("TimeCreated")), _stamp_key(start), _stamp_key(end)
-    if at is None or first is None or until is None:
+    if _stamp_key(row.get("TimeCreated")) is None:
         return False
     data = row["Data"]
     return (
@@ -250,7 +265,6 @@ def _valid_row(name: str, row: Any, start: Any, end: Any) -> bool:
         and type(row.get("OmittedFieldCount")) is int and 0 <= row["OmittedFieldCount"] <= row["FieldCount"]
         and row["FieldCount"] >= len(data) and row["OmittedFieldCount"] == row["FieldCount"] - len(data)
         and (row.get("ProjectionError") is None or isinstance(row["ProjectionError"], str))
-        and first <= at < until
         and set(data) <= SAFE_DATA_KEYS[name]
         and all(isinstance(key, str) and (value is None or isinstance(value, str)) for key, value in data.items())
     )

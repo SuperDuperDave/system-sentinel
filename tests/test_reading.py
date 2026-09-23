@@ -131,8 +131,8 @@ def test_object_warning_extraction_and_builder_changes_preserve_the_bridge_paylo
 
 def test_spec_coerces_defaults_types_and_choices():
     spec = REGISTRY["events"]
-    assert spec.coerce({}) == {"log": "System", "levels": [1, 2], "count": 50, "since": ""}
-    assert spec.coerce({"levels": "1,2,3", "count": "5", "log": "Application"}) == {"log": "Application", "levels": [1, 2, 3], "count": 5, "since": ""}
+    assert spec.coerce({}) == {"log": "System", "levels": [1, 2], "count": 50, "since": "", "before": ""}
+    assert spec.coerce({"levels": "1,2,3", "count": "5", "log": "Application"}) == {"log": "Application", "levels": [1, 2, 3], "count": 5, "since": "", "before": ""}
     with pytest.raises(ValueError):
         spec.coerce({"log": "Security"})
     with pytest.raises(ValueError):
@@ -259,7 +259,7 @@ def test_take_events_through_a_fake_bridge():
     bridge = FakeBridge(log_collector_result([{"RecordId": 1, "Id": 41}], limit=3))
     r = asyncio.run(take("events", bridge, {"count": "3"}))
     assert r.outcome == "ok" and r.count == 1
-    assert r.params == {"log": "System", "levels": [1, 2], "count": 3, "since": ""}
+    assert r.params == {"log": "System", "levels": [1, 2], "count": 3, "since": "", "before": ""}
     assert "-MaxEvents 4" in bridge.scripts[0]
 
 
@@ -322,6 +322,74 @@ def test_a_future_start_cannot_establish_a_complete_window_even_when_the_log_is_
     reading = asyncio.run(take("events", FakeBridge(result), {"since": "2026-10-01T00:00:00Z", "count": 5}))
     assert reading.outcome == "empty" and reading.section("coverage").data["complete"] is False
     assert any("window completeness" in warning for warning in reading.warnings)
+
+
+def test_events_exclusive_end_normalizes_offsets_and_refuses_an_empty_window_before_querying():
+    script = events_script("System", [1, 2], 5, "2026-09-20T10:00:00+02:00", "2026-09-20T11:00:00+02:00")
+    assert "@SystemTime&gt;='2026-09-20T08:00:00.000Z'" in script
+    assert "@SystemTime&lt;'2026-09-20T09:00:00.000Z'" in script
+    assert "window_end = '2026-09-20T09:00:00.000Z'" in script
+    bridge = FakeBridge()
+    for before in ("2026-09-20T08:00:00Z", "2026-09-20T08:00:00.0009Z", "2026-09-20T09:00:00"):
+        with pytest.raises(ValueError, match="before"):
+            asyncio.run(take("events", bridge, {"since": "2026-09-20T08:00:00Z", "before": before}))
+    assert bridge.scripts == []
+    boot_script = events_script("System", [], 5, "boot", "2026-09-20T09:00:00Z")
+    assert "Win32_OperatingSystem" in boot_script and "@SystemTime&gt;='$since'" in boot_script
+    assert "@SystemTime&lt;'2026-09-20T09:00:00.000Z'" in boot_script
+
+
+def test_window_end_reports_observed_reach_without_completing_unobserved_future():
+    start = "2026-09-20T00:00:00.000Z"
+    now = "2026-09-21T00:00:00.000Z"
+    future = "2026-09-22T00:00:00.000Z"
+    observed = log_collector_result([], limit=5, window_start=start, window_end=now, queried_at=now)
+    complete = asyncio.run(take("events", FakeBridge(observed), {"since": start, "before": now, "count": 5}))
+    assert complete.section("coverage").data["complete"] is True
+    assert complete.section("coverage").data["covered_until"] == now
+
+    pending = log_collector_result([], limit=5, window_start=start, window_end=future, queried_at=now)
+    reading = asyncio.run(take("events", FakeBridge(pending), {"since": start, "before": future, "count": 5}))
+    assert reading.section("coverage").data["covered_until"] == now
+    assert reading.section("coverage").data["complete"] is False
+    assert any("after the machine's query time" in warning for warning in reading.warnings)
+
+    pending.items[0].pop("queried_at")
+    unknown = asyncio.run(take("events", FakeBridge(pending), {"since": start, "before": future, "count": 5}))
+    assert unknown.section("coverage").data["covered_until"] is None
+    assert unknown.section("coverage").data["complete"] is None
+
+
+def test_outside_window_event_remains_raw_and_cannot_prove_reach():
+    start, end = "2026-09-20T00:00:00.000Z", "2026-09-21T00:00:00.000Z"
+    outlier = {"RecordId": 7, "TimeCreated": end}
+    result = log_collector_result([outlier], limit=5, window_start=start, window_end=end, queried_at=end)
+    reading = asyncio.run(take("events", FakeBridge(result), {"since": start, "before": end, "count": 5}))
+    assert reading.section("records").data == [outlier]
+    assert reading.section("collection").data["row_issues"]["outside_window"] == 1
+    assert reading.section("coverage").data["covered_from"] == start
+    assert reading.section("coverage").data["complete"] is False
+
+
+def test_window_entirely_after_query_time_names_time_as_the_gap():
+    start, end, observed = "2026-09-23T00:00:00.000Z", "2026-09-24T00:00:00.000Z", "2026-09-22T00:00:00.000Z"
+    result = log_collector_result([], limit=5, window_start=start, window_end=end, queried_at=observed)
+    reading = asyncio.run(take("events", FakeBridge(result), {"since": start, "before": end, "count": 5}))
+    assert reading.section("coverage").data["complete"] is False
+    assert reading.section("coverage").data["covered_until"] is None
+    assert any("start is at or after the machine's query time" in warning for warning in reading.warnings)
+    assert not any("retention reach could not" in warning for warning in reading.warnings)
+
+
+def test_record_boundary_outlier_keeps_raw_evidence_without_a_completeness_claim():
+    moment = "2026-09-20T18:04:11.000Z"
+    row = {"RecordId": 9, "TimeCreated": moment}
+    result = log_collector_result([row], limit=5, window_start=None, window_end=moment)
+    reading = asyncio.run(take("record", FakeBridge(result), {"before": moment, "count": 5}))
+    assert reading.section("records").data == [row]
+    assert reading.section("coverage").data["reaches_before"] is True
+    assert any("outside the requested window" in warning for warning in reading.warnings)
+    assert not any("completeness" in warning for warning in reading.warnings)
 
 
 def test_recent_records_show_retention_without_claiming_a_complete_window():

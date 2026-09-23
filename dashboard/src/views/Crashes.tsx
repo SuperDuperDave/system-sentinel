@@ -56,7 +56,7 @@ interface Stop {
 }
 
 /** One fault decoded: a program that crashed or hung, or one live kernel report folded from its records. */
-interface Fault {
+export interface Fault {
   RecordId: RecordId;
   Log?: string;
   kind: string;
@@ -703,7 +703,7 @@ function DumpStreamDirectory({ status, declared, streams }: { status: string; de
 }
 
 /** One fault named field by field, in the words of the record it came from, and the moment it happened. */
-function FaultDetail({ fault, at: moment, envelope, rawRecords }: { fault: Fault; at?: string; envelope: Reading | null; rawRecords: EventRecord[] }) {
+export function FaultDetail({ fault, at: moment, envelope, rawRecords, showMomentLink = true }: { fault: Fault; at?: string; envelope: Reading | null; rawRecords: EventRecord[]; showMomentLink?: boolean }) {
   const f = fault.fields;
   const rawIds = fault.report?.records?.length ? fault.report.records : [fault.RecordId];
   const log = fault.Log ?? 'Application';
@@ -747,7 +747,7 @@ function FaultDetail({ fault, at: moment, envelope, rawRecords }: { fault: Fault
       </details> : <p className={`${styles.faultRawMissing} readout`}>No matching raw record was returned in this reading.</p>}
       {missingRaw.length ? <p className={`${styles.faultRawMissing} readout`}>Raw {missingRaw.length === 1 ? 'record' : 'records'} {missingRaw.join(', ')} {missingRaw.length === 1 ? 'was' : 'were'} named by this decoded entry but not returned.</p> : null}
       <div className={styles.actions}>
-        <MomentLink at={moment} />
+        {showMomentLink ? <MomentLink at={moment} /> : null}
         {envelope ? (
           <AddToStack
             item={{ kind: 'selection', envelope, ids: rawIds.map((id) => `${log}:${id}`), title: `${KIND_WORD[fault.kind] ?? fault.kind} at ${moment ?? 'an unknown time'}` }}

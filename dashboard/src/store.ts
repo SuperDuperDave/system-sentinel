@@ -41,8 +41,14 @@ function navigationFromAddress(): { view: ViewId; moment: string | null } {
   const requested = query.get('view');
   const view = VIEWS.find((item) => item.id === requested)?.id ?? 'record';
   const candidate = query.get('moment');
-  const moment = candidate && candidate.length <= 64 && /^\d{4}-\d{2}-\d{2}T/.test(candidate) && !Number.isNaN(Date.parse(candidate)) ? candidate : null;
+  const moment = candidate && candidate.length <= 64 && /^\d{4}-\d{2}-\d{2}T/.test(candidate) ? qualifiedMoment(candidate) : null;
   return { view, moment };
+}
+
+function qualifiedMoment(value: string): string | null {
+  const parsed = Date.parse(value);
+  if (Number.isNaN(parsed)) return null;
+  return /(?:Z|[+-]\d{2}:\d{2})$/i.test(value) ? value : new Date(parsed).toISOString();
 }
 
 function writeAddress(view: ViewId, moment: string | null) {
@@ -95,6 +101,7 @@ export const useApp = create<AppState>((set, get) => ({
   },
   moment: initial.moment,
   setMoment: (at) => {
+    at = at ? qualifiedMoment(at) : null;
     if (at === get().moment && (!at || get().view === 'record')) return;
     set(at ? { moment: at, view: 'record' } : { moment: null });
     writeAddress(get().view, at);

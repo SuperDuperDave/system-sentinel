@@ -32,7 +32,7 @@ from ..reading import Param, Reading, Section, Spec, from_object, register
 from .dumps import DUMPS_SCRIPT, inventory, missing_file
 from .event_coverage import LOG_METADATA_SCRIPT, stamp_key
 from .event_coverage import metadata as log_metadata
-from .events import _utc_stamp, from_log_collector, log_records_script, record_projection, since_clause
+from .events import _utc_stamp, from_log_collector, log_records_script, record_projection, since_clause, window_clauses
 from .fault_process import APPLICATION_ERROR, APPLICATION_ERROR_1000, APPLICATION_HANG, APPLICATION_HANG_1002, process_identity
 
 # The providers, spelled once. The same event id means different things under different providers:
@@ -267,7 +267,10 @@ FAULTS_BASIS = (
     "that report's latest returned record, carrying the record ids returned for it. Application process facts "
     "require a supported provider GUID, event ID, version and property count. Start values are interpreted as "
     "FILETIME with the per-provider basis in process.source; each field retains its own validation status. "
-    "Encoding resolution is not clock accuracy, and PID/start time does not certify a unique process identity."
+    "Encoding resolution is not clock accuracy, and PID/start time does not certify a unique process identity. "
+    "Time windows select Application records by filing time, not when the fault occurred. A report whose "
+    "records straddle a window boundary is interpreted from the records the window query returned; "
+    "any out-of-window records are flagged."
 )
 
 SUMMARY_BASIS = (
@@ -656,10 +659,9 @@ def record_cap(count: int, moment: str | None) -> int:
     return MOMENT_RECORDS if moment else 12 * count + 24
 
 
-def faults_script(count: int, since: str) -> str:
-    prelude, clause = since_clause(since)
-    start = "$since" if since.strip().lower() == "boot" else (f"'{_utc_stamp(since)}'" if since.strip() else "$null")
-    return log_records_script("Application", faults_query(clause), count, prelude=prelude, window_start=start, projection=record_projection("Log = $_.LogName"))
+def faults_script(count: int, since: str, before: str = "") -> str:
+    prelude, clause, start, end = window_clauses(since, before)
+    return log_records_script("Application", faults_query(clause), count, prelude=prelude, window_start=start, window_end=end, projection=record_projection("Log = $_.LogName"))
 
 
 # ---------------------------------------------------------------------------
@@ -1216,12 +1218,12 @@ def take_faults(bridge: Bridge, params: dict[str, Any]) -> Reading:
     count = int(params["count"])
     if not 1 <= count <= MAX_FAULTS:
         raise ValueError(f"parameter 'count': must be between 1 and {MAX_FAULTS}")
-    try:
-        script = faults_script(count, str(params.get("since") or ""))
-    except ValueError as exc:
-        raise ValueError(f"parameter 'since': {exc}") from exc
+    script = faults_script(count, str(params.get("since") or ""), str(params.get("before") or ""))
 
-    reading = from_log_collector("faults", params, script, bridge.run(script, depth=8), "Application", count, window=bool(params.get("since", "").strip()))
+    has_since = bool(str(params.get("since") or "").strip())
+    before = str(params.get("before") or "").strip()
+    reading = from_log_collector("faults", params, script, bridge.run(script, depth=8), "Application", count, window=has_since,
+                                 before=_utc_stamp(before) if before and not has_since else None)
     if not reading.observed:
         return reading
     record_section = reading.section("records")
@@ -1406,6 +1408,7 @@ register(
         params=(
             Param("count", "int", 30, f"How many of the most recent records; 1 to {MAX_FAULTS}.", minimum=1, maximum=MAX_FAULTS),
             Param("since", "str", "", "ISO timestamp, or 'boot' for Windows' reported kernel-session start. Empty for the most recent records."),
+            Param("before", "str", "", "Exclusive filing-time end with Z or an offset. Pair with since for an anchored window; empty uses the query time."),
         ),
         private=("AppPath", "ModulePath", "ExeFileName", "AttachedFiles", "StorePath", "user names inside Message"),
     )

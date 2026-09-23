@@ -1,5 +1,5 @@
-"""The real app (``sentinel.app.create_app``) with a bridge that answers every script the two
-screenshot views can run from fixtures. Nothing in the repository changes: the fixture is
+"""The real app (``sentinel.app.create_app``) with a bridge that answers the screenshot
+views from fixtures. Nothing in the repository changes: the fixture is
 injected at the one seam the readings already go through, so what's on screen is the same code
 that renders the real thing, over records that were never on this machine.
 
@@ -10,6 +10,7 @@ Answers:
     exercise fatal previous-session and unavailable-header presentation
   - the System log (``events``, ``record``): docs/screens/fixtures/system-log.json, filtered
     and paged the way Get-WinEvent would be
+  - nearby Application faults: tests/fixtures/fault-records.json, placed near the older restart
   - Memory and Power: synthetic source-outcome examples, optionally with selected source
     failures when ``SENTINEL_FIXTURE_DIAGNOSTIC_FAILURES=1`` is set
   - anything else: empty
@@ -52,6 +53,7 @@ from sentinel.app import State, create_app  # noqa: E402
 from sentinel.bridge import BridgeResult  # noqa: E402
 
 WHEA_FIXTURE = REPO / "tests" / "fixtures" / "whea-records.json"
+FAULT_FIXTURE = REPO / "tests" / "fixtures" / "fault-records.json"
 SYSTEM_LOG_FIXTURE = HERE / "system-log.json"
 WHEA_ANCHOR = time.time()  # exact re-reads must name the same synthetic event timestamp
 
@@ -174,6 +176,15 @@ def system_log_records(now: float) -> list[dict[str, Any]]:
     return sorted(out, key=lambda r: r["TimeCreated"], reverse=True)  # newest first, as Get-WinEvent returns
 
 
+def fault_records(now: float) -> list[dict[str, Any]]:
+    """A synthetic nearby report cluster for the older of the two System restart frames."""
+    rows = json.loads(FAULT_FIXTURE.read_text(encoding="utf-8"))["records"]
+    for index, row in enumerate(rows):
+        row["TimeCreated"] = _powershell_stamp(now - (2890 + index * 3) * 60)
+        row["MachineName"] = FIXTURE_HOST
+    return rows
+
+
 def _fill_template(text: str, moment: float) -> str:
     """The triad's two message templates carry their own moment as a parameter: 12's is its own
     boot instant, 6008's is the crash six minutes and change earlier — the Display 4101 moment."""
@@ -188,21 +199,36 @@ def _fill_template(text: str, moment: float) -> str:
 
 _LEVEL_RE = re.compile(r"Level=([\d,]+)")
 _MAXEVENTS_RE = re.compile(r"-MaxEvents (\d+)")
-_BEFORE_RE = re.compile(r"SystemTime&lt;'([^']+)'")
 
 
-def answer_events(script: str) -> BridgeResult:
-    levels = {int(v) for v in re.findall(r"Level=(\d+)", script)}
-    count = int(_MAXEVENTS_RE.search(script).group(1))
-    records = [r for r in system_log_records(time.time()) if not levels or r["Level"] in levels][:count]
-    return BridgeResult("ok" if records else "empty", items=records, took_ms=41)
-
-
-def answer_record(script: str) -> BridgeResult:
-    before = _parse_stamp(_BEFORE_RE.search(script).group(1))
-    count = int(_MAXEVENTS_RE.search(script).group(1))
-    records = [r for r in system_log_records(time.time()) if _parse_stamp(r["TimeCreated"]) < before][:count]
-    return BridgeResult("ok" if records else "empty", items=records, took_ms=37)
+def answer_log_records(script: str) -> BridgeResult:
+    """The current shared collector envelope, with real filtering and one-extra-row cutoff."""
+    now = time.time()
+    application = "log = 'Application'" in script
+    log = "Application" if application else "System"
+    all_rows = fault_records(now) if application else system_log_records(now)
+    cap = max(int(value) for value in _MAXEVENTS_RE.findall(script)) - 1
+    start_match = re.search(r"window_start = ('[^']+'|\$null|\$since)", script)
+    end_match = re.search(r"window_end = ('[^']+'|\$null)", script)
+    start_text = start_match.group(1).strip("'") if start_match and start_match.group(1) != "$null" else None
+    end_text = end_match.group(1).strip("'") if end_match and end_match.group(1) != "$null" else None
+    if start_text == "$since":
+        start_text = _powershell_stamp(now - 3300 * 60)
+    levels = {int(value) for value in _LEVEL_RE.findall(script)}
+    matching = [row for row in all_rows if
+                (not levels or row["Level"] in levels)
+                and (start_text is None or _parse_stamp(row["TimeCreated"]) >= _parse_stamp(start_text))
+                and (end_text is None or _parse_stamp(row["TimeCreated"]) < _parse_stamp(end_text))]
+    kept = matching[:cap]
+    # The Application log also contains older non-fault events outside this selected fixture.
+    oldest = _powershell_stamp(now - 5000 * 60) if application else (all_rows[-1]["TimeCreated"] if all_rows else None)
+    return BridgeResult("ok", items=[{
+        "log": log, "outcome": "ok" if kept else "empty", "error": None, "records": kept,
+        "returned": len(kept), "limit": cap, "truncated": len(matching) > cap, "stopped": None,
+        "window_start": start_text, "window_end": end_text, "queried_at": _powershell_stamp(now),
+        "metadata": {"log": log, "log_enabled": True, "log_mode": "Circular", "log_state": "ok", "log_error": None,
+                     "log_oldest": oldest, "oldest_state": "ok" if oldest else "empty", "oldest_error": None},
+    }], took_ms=37)
 
 
 def answer_whea(script: str) -> BridgeResult:
@@ -290,6 +316,8 @@ class FixtureBridge:
             # logs to a real high-water mark makes it read as caught up, not broken.
             top = max((r["RecordId"] for r in system_log_records(time.time())), default=0)
             return BridgeResult("ok", items=[{"log": "System", "record": top}, {"log": "Application", "record": 1}], took_ms=6)
+        if "metadata = $meta" in script and "records = @($records)" in script:
+            return answer_log_records(script)
         if "Read-WheaSource" in script and "sources = @(" in script:
             return answer_whea(script)
         if "Read-WheaSource" in script and "source = Read-WheaSource" in script:
@@ -346,12 +374,8 @@ class FixtureBridge:
         if "WHEA-Logger" in script:
             cap = _MAXEVENTS_RE.search(script)
             return BridgeResult("ok", items=whea_records(time.time(), int(cap.group(1)) if cap else None), took_ms=412)
-        if "Get-WinEvent -FilterXml $xml" in script and "SystemTime&lt;" not in script:
-            return answer_events(script)
-        if "SystemTime&lt;" in script:
-            return answer_record(script)
-        # every other reading (hardware.*, dumps, system, pcie, ...) answers empty: the two
-        # screenshot views never take them, and nothing here should render as if it were data.
+        # Every other reading answers empty: the screenshot views never take them, and nothing
+        # here should render as if it were machine data.
         return BridgeResult("empty", items=[], took_ms=5)
 
 

@@ -717,6 +717,9 @@ def test_the_faults_query_asks_the_three_selectors_and_the_window():
     at_boot = faults_script(30, "boot")
     assert "Win32_OperatingSystem" in at_boot and "TimeCreated[@SystemTime&gt;='$since']" in at_boot
     assert "TimeCreated[@SystemTime&gt;='2026-09-12T00:00:00.000Z']" in faults_script(30, "2026-09-12T00:00:00Z")
+    anchored = faults_script(30, "2026-09-12T00:00:00Z", "2026-09-13T00:00:00Z")
+    assert "@SystemTime&gt;='2026-09-12T00:00:00.000Z'" in anchored
+    assert "@SystemTime&lt;'2026-09-13T00:00:00.000Z'" in anchored
 
 
 def test_a_window_that_is_neither_boot_nor_a_timestamp_is_refused():
@@ -791,6 +794,30 @@ def test_fault_window_reach_is_application_report_retention_only():
     assert reading.section("coverage").data["complete"] is True
 
 
+def test_fault_window_future_end_is_pending_and_keeps_report_filing_times():
+    report = faults_fixture()[0]
+    result = log_collector_result([report], log="Application", limit=5,
+                                  window_start="2026-09-01T00:00:00.000Z", window_end="2026-10-02T00:00:00.000Z",
+                                  queried_at="2026-10-01T00:00:00.000Z")
+    reading = asyncio.run(take("faults", FakeBridge(result), {"since": "2026-09-01T00:00:00Z", "before": "2026-10-02T00:00:00Z", "count": 5}))
+    assert reading.section("records").data == [report]
+    assert reading.section("coverage").data["covered_until"] == "2026-10-01T00:00:00.000Z"
+    assert reading.section("coverage").data["complete"] is False
+
+
+def test_fault_outside_window_row_is_decoded_but_cannot_prove_complete_reach():
+    report = faults_fixture()[0]
+    end = report["TimeCreated"]
+    result = log_collector_result([report], log="Application", limit=5,
+                                  window_start="2026-09-01T00:00:00.000Z", window_end=end,
+                                  queried_at="2026-10-01T00:00:00.000Z")
+    reading = asyncio.run(take("faults", FakeBridge(result), {"since": "2026-09-01T00:00:00Z", "before": end, "count": 5}))
+    assert reading.section("records").data == [report]
+    assert any(item["RecordId"] == report["RecordId"] for item in reading.section("decoded").data)
+    assert reading.section("collection").data["row_issues"]["outside_window"] == 1
+    assert reading.section("coverage").data["complete"] is False
+
+
 # ---------------------------------------------------------------- the boundary
 
 
@@ -811,7 +838,7 @@ def test_the_catalog_lists_both_readings_with_their_parameters(client: TestClien
     body = client.get("/api/readings", headers=AUTH).json()
     listed = {r["name"]: r for r in body["readings"]}
     assert [p["name"] for p in listed["crash"]["params"]] == ["count", "moment"]
-    assert [p["name"] for p in listed["faults"]["params"]] == ["count", "since"]
+    assert [p["name"] for p in listed["faults"]["params"]] == ["count", "since", "before"]
     assert listed["crash"]["classes"] == ["raw", "derived"] and listed["faults"]["private"]
     assert REGISTRY["crash"].heavy is False
 

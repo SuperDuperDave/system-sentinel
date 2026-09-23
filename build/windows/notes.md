@@ -13,11 +13,11 @@ A stethoscope for a Windows computer. It gathers the record the machine keeps of
 
 ## New in {{VERSION}}
 
-**An empty log result has a boundary.** `events`, `record`, and `faults` now return the log's enabled state, mode, and oldest retained record alongside the matching records. Ask `events` or `faults` for a `since` moment and the answer says whether the returned window is complete, capped, interrupted, or beyond retained history. `record` says whether the log reaches before its requested moment. The raw records and source outcome remain available when the independent retention check cannot answer.
+**A bounded window around the moment you are investigating.** `events` and `faults` now accept an exclusive `before` end alongside `since`. The result says where the retained log reaches, whether the whole requested window is complete, and how far the machine had observed when the query began. A future end is never called complete. `changes` follows that same upper-reach rule. Returned rows outside a requested window remain available as raw evidence and lower the completeness claim.
 
-**Live streams keep their current privacy policy.** Already connected default-redacted streams use the current machine and user identity policy after each poll. A failed identity refresh preserves previously learned names. On Windows, an inherited machine or user name can stand in when the identity query fails, while the bridge failure is still reported.
+**Nearby fault reports without losing the System record.** A moment-framed Record view can open Application crashes, hangs and live kernel reports filed within one hour on either side. It shows that source's coverage, interpreted facts and exact raw records, with a Stack handoff for an agent. A nearby report is a lead, not proof of a cause; a report can be filed after a fault.
 
-**The `boot` boundary matches the log query.** Its resolved start is rounded to the UTC millisecond used by Windows' event index. Windows' reported kernel session can span power-ons with Fast Startup. Retention reach describes the records still in a log; it does not prove every event was emitted. `faults` covers Application reports by filing time.
+**Clearer agent handoffs.** Compact `events` and `record` Stack summaries now carry the log query's source outcome and retention reach beside citable `Log:RecordId` rows. Selected rows keep that context and the exact raw record. The Agents catalog accurately says recognized profile-path segments are masked, rather than claiming an entire path field disappears.
 
 **Update from 1.1.0 or later in the app.** Choose *Check for updates…* from the tray's version menu. From a source install, run `system-sentinel update`. The tool checks only when asked, verifies the downloaded file before starting it, and preserves the token, stack and prompts. An installed 1.0.1 still needs one manual download to gain this action.
 

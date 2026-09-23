@@ -2,9 +2,10 @@ import { Fragment, Ref, useCallback, useEffect, useLayoutEffect, useMemo, useRef
 import { AddToStack } from '../AddToStack';
 import { EventRecord, Reading, type RecordId, observed, section } from '../api';
 import { clock, Glyph, OutcomeLine, firstLine } from '../Outcome';
-import { Segmented, byDay, day } from '../Sections';
+import { Segmented, byDay, day, part } from '../Sections';
 import { useApp } from '../store';
 import { Taken, useReading } from '../useReading';
+import { FaultDetail, type Fault } from './Crashes';
 import styles from './Record.module.css';
 
 type Levels = 'errors' | 'all';
@@ -15,6 +16,7 @@ const COUNTS = [50, 200, 500];
 const BOOT_COUNT = 500;
 const PAGE = 25;
 const FRAME_LIMIT = 2000;
+const WINDOW_STAMP = new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 
 /**
  * The record: the System log, most recent first, each row inspectable in place, and for any row the
@@ -129,8 +131,60 @@ function Frame({ moment }: { moment: string }) {
           <Rows records={before.rows} reading={before.held} listRef={before.list} />
         </>
       ) : null}
+      <FaultWindow moment={moment} />
     </section>
   );
+}
+
+/** An optional second source beside the System frame, opened only when the person asks for it. */
+function FaultWindow({ moment }: { moment: string }) {
+  const [open, setOpen] = useState(false);
+  const [shown, setShown] = useState(10);
+  const at = Date.parse(moment);
+  const since = new Date(at - 60 * 60 * 1000).toISOString();
+  const before = new Date(at + 60 * 60 * 1000).toISOString();
+  const taken = useReading('faults', { since, before, count: 100 }, open);
+  const raw = part<EventRecord[]>(taken.reading, 'records') ?? [];
+  const decoded = part<Fault[]>(taken.reading, 'decoded') ?? [];
+  const reach = part<{ complete: boolean | null; covered_from: string | null; covered_until: string | null }>(taken.reading, 'coverage');
+  const times = new Map(raw.map((row) => [String(row.RecordId), row.TimeCreated]));
+  const reachText = reach?.complete === true && reach.covered_from && reach.covered_until ? `Requested window covered · ${WINDOW_STAMP.format(new Date(reach.covered_from))} to ${WINDOW_STAMP.format(new Date(reach.covered_until))}`
+    : !reach?.covered_from || !reach.covered_until ? 'Window coverage could not be established'
+      : Date.parse(reach.covered_until) < Date.parse(before)
+        ? `Observed from ${WINDOW_STAMP.format(new Date(reach.covered_from))} to ${WINDOW_STAMP.format(new Date(reach.covered_until))}; the requested end is after the machine's query time`
+        : `Partly covered · ${WINDOW_STAMP.format(new Date(reach.covered_from))} to ${WINDOW_STAMP.format(new Date(reach.covered_until))}`;
+
+  return <section className={styles.nearby} aria-labelledby="nearby-faults-title">
+    <div className={styles.nearbyHead}>
+      <div>
+        <p className="label">Application log · optional second source</p>
+        <h2 id="nearby-faults-title" className="display">Fault reports near this moment</h2>
+      </div>
+      <button className={styles.action} onClick={() => setOpen((value) => !value)} aria-expanded={open} aria-controls="nearby-faults-body">
+        {open ? 'Hide reports' : 'Read nearby reports'}
+      </button>
+    </div>
+    <p className={styles.nearbyIntro}>Looks for application crashes, hangs and live kernel reports filed from one hour before to one hour after this moment. A nearby report is a lead, not proof of a cause. Reports may be filed after the fault occurred.</p>
+    <div id="nearby-faults-body" hidden={!open}>
+      <OutcomeLine taken={taken} noun="Application-log records" singular="Application-log record" emptyText="No matching fault report returned from the queried Application-log window" />
+      {reach ? <p className={`${styles.nearbyReach} readout`}>{reachText}</p> : null}
+      {taken.reading && observed(taken.reading) ? <AddToStack item={{ kind: 'reading', envelope: taken.reading, title: `Fault reports near ${moment}` }} label="Stack this reading" /> : null}
+      {decoded.length ? <>
+        <p className={`${styles.nearbyCount} readout`}>{decoded.length} interpreted {decoded.length === 1 ? 'fault' : 'faults'} from {raw.length} returned {raw.length === 1 ? 'record' : 'records'}. A live kernel report can span several records.</p>
+        <ol className={styles.nearbyList}>{decoded.slice(0, shown).map((fault) => {
+          const time = times.get(String(fault.RecordId));
+          const subject = fault.report?.name ?? fault.report?.code ?? (typeof fault.fields.AppName === 'string' ? fault.fields.AppName : null);
+          return <li key={`${fault.Log ?? 'Application'}:${fault.RecordId}`}>
+            <details>
+              <summary><span>{fault.kind}{subject ? ` · ${subject}` : ''}</span><span className="readout">{time ? clock.format(new Date(time)) : 'time unknown'} · #{fault.RecordId}</span></summary>
+              <FaultDetail fault={fault} at={time} envelope={taken.reading} rawRecords={raw} showMomentLink={false} />
+            </details>
+          </li>;
+        })}</ol>
+        {decoded.length > shown ? <button className={styles.action} onClick={() => setShown((value) => value + 10)}>Show 10 more interpreted faults</button> : null}
+      </> : null}
+    </div>
+  </section>;
 }
 
 function Rows({ records, reading, listRef, overview = false }: { records: EventRecord[]; reading: Reading<EventRecord[]>; listRef?: Ref<HTMLOListElement>; overview?: boolean }) {

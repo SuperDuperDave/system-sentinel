@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from sentinel.app import State, create_app
 from sentinel.bridge import Bridge, BridgeResult
 from sentinel.readings import health
-from tests.conftest import FakeBridge, LogBridge, identity_result
+from tests.conftest import FakeBridge, LogBridge, identity_result, log_collector_result
 
 TOKEN = "test-token-0123456789"
 
@@ -56,7 +56,7 @@ def test_catalog(client: TestClient):
     names = {r["name"] for r in body["readings"]}
     assert {"health", "events", "record"} <= names
     events = next(r for r in body["readings"] if r["name"] == "events")
-    assert [p["name"] for p in events["params"]] == ["log", "levels", "count", "since"]
+    assert [p["name"] for p in events["params"]] == ["log", "levels", "count", "since", "before"]
     assert events["private"]
 
 
@@ -68,8 +68,22 @@ def test_reading_arrives_redacted_by_default(client: TestClient):
     assert "TESTBOX" not in rec["Message"] and "tester" not in rec["Message"]
     assert r"C:\Users\<user>\x" in rec["Message"]
     assert body["redacted"] == ["host", "user"]
-    assert body["params"] == {"log": "System", "levels": [1, 2], "count": 1, "since": ""}
+    assert body["params"] == {"log": "System", "levels": [1, 2], "count": 1, "since": "", "before": ""}
     assert body["method"]["kind"] == "powershell" and "Get-WinEvent" in body["method"]["query"]
+
+
+def test_bounded_window_reaches_an_agent_through_the_authenticated_route():
+    start, end = "2026-09-20T00:00:00.000Z", "2026-09-21T00:00:00.000Z"
+    bridge = FakeBridge(result=log_collector_result([], limit=5, window_start=start, window_end=end, queried_at=end),
+                        by_marker={"$env:COMPUTERNAME": identity_result("TESTBOX", "tester")})
+    with TestClient(create_app(State(bridge=bridge, token=TOKEN))) as client:
+        assert client.get(f"/api/readings/events?since={start}&before={end}&count=5").status_code == 401
+        response = client.get(f"/api/readings/events?since={start}&before={end}&count=5", headers=AUTH)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["outcome"] == "empty" and body["params"]["before"] == end
+    coverage = next(section["data"] for section in body["sections"] if section["name"] == "coverage")
+    assert coverage["complete"] is True and coverage["covered_until"] == end
 
 
 def test_a_failed_relearn_keeps_names_already_learned():

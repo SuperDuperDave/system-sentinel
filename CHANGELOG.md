@@ -2,7 +2,11 @@
 
 ## Unreleased
 
+## [1.3.7] - 2026-09-23
+
 ### Changed
+- `events` and `faults` accept an exclusive `before` bound alongside `since` for a bounded moment window. Window coverage now shows `covered_until` and never marks future requested time complete; `changes` follows the same rule. Out-of-window collector rows remain visible as raw evidence and lower the completeness claim.
+- The Record moment frame can open an on-demand Application-log fault window, with its own coverage, interpreted details, raw records and Stack handoff. It stays in place while the person inspects nearby reports.
 - Compact `events` and `record` Stack handoffs keep source outcome and retention reach beside citable `Log:RecordId` rows. Selected rows keep that context and exact raw records. Older saved readings name missing context, and a requested summary that uses full sections says so.
 - The Agents catalog describes its `private` hints as places that may contain masked details. A listed path field is not removed wholesale by default redaction; recognized user-profile segments are masked and the rest remains available as evidence.
 

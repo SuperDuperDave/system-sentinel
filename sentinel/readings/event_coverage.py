@@ -52,7 +52,8 @@ COVERAGE_BASIS = (
     "reach assumes event timestamps have not moved backward across retained record order; it does "
     "not prove Windows emitted every event."
 )
-LOG_WINDOW_COVERAGE_BASIS = COVERAGE_BASIS + " For events and faults, a requested start at or after the machine's query time cannot establish a complete window."
+WINDOW_COVERAGE_BASIS = COVERAGE_BASIS + " Complete describes the whole requested window; covered_until is its observed exclusive end, which cannot pass the machine's query time."
+LOG_WINDOW_COVERAGE_BASIS = WINDOW_COVERAGE_BASIS + " For events and faults, a requested start at or after the machine's query time, or an end after it, cannot establish a complete requested window."
 
 
 def metadata(value: dict[str, Any]) -> dict[str, Any]:
@@ -72,6 +73,31 @@ def coverage(source: dict[str, Any], rows: list[dict[str, Any]], start: str, end
         "covered_from_inclusive": None if covered is None else inclusive,
         "complete": covered is not None and inclusive and stamp_key(covered) == stamp_key(start) and not unplaced,
     }
+
+
+def window_coverage(
+    source: dict[str, Any], rows: list[dict[str, Any]], start: str, end: str, queried_at: str | None, *, end_is_query_time: bool,
+) -> dict[str, Any]:
+    """Qualify a requested window against the machine's pre-query clock without claiming future time."""
+    future_end = False
+    if not end_is_query_time:
+        requested, observed_at = stamp_key(end), stamp_key(queried_at)
+        if requested is None or observed_at is None:
+            return {"covered_from": None, "covered_from_inclusive": None, "covered_until": None, "complete": None}
+        future_end = requested > observed_at
+        observed_end = queried_at if future_end else end
+        assert observed_end is not None
+    else:
+        observed_end = end
+    reach = coverage(source, rows, start, observed_end)
+    complete = reach["complete"]
+    issues = source.get("row_issues")
+    outside = issues.get("outside_window", 0) if isinstance(issues, dict) else 0
+    if outside and complete is not None:
+        complete = False
+    if future_end and complete is not None:
+        complete = False
+    return {**reach, "covered_until": observed_end if reach["covered_from"] is not None else None, "complete": complete}
 
 
 def covered_from(source: dict[str, Any], rows: list[dict[str, Any]], start: str, end: str) -> str | None:

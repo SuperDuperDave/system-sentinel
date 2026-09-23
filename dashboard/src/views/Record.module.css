@@ -181,6 +181,19 @@
 /* The frame: what the list is, under the title that says it. */
 .frameLine { margin: 0 0 8px; color: var(--muted); max-width: 78ch; }
 
+.nearby { margin: 26px 0 0; padding: 18px 20px; border: 1px solid var(--rule); background: var(--surface-raised); }
+.nearbyHead { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 8px 20px; }
+.nearbyHead p { margin: 0 0 4px; }
+.nearbyHead h2 { margin: 0; font-size: clamp(19px, 2.5vw, 24px); }
+.nearbyIntro { margin: 10px 0 0; max-width: 80ch; color: var(--body); font-size: 13px; line-height: 1.5; }
+.nearbyReach, .nearbyCount { margin: 12px 0; color: var(--muted); font-size: 12px; }
+.nearbyList { margin: 12px 0; padding: 0; list-style: none; }
+.nearbyList li { border-top: 1px solid var(--rule-soft); }
+.nearbyList summary { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 4px 16px; min-height: 44px; align-items: center; cursor: pointer; color: var(--ink); }
+.nearbyList summary span:last-child { color: var(--muted); font-size: 12px; }
+.nearbyList details[open] { padding-bottom: 16px; }
+@media (max-width: 680px) { .nearby { padding: 16px; } }
+
 /* The way further back. It sits above the list, where the records it asks for arrive. */
 .more {
   display: block;

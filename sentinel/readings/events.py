@@ -17,7 +17,7 @@ from typing import Any
 
 from ..bridge import Bridge, BridgeResult
 from ..reading import Param, Reading, Section, Spec, from_bridge, register
-from .event_coverage import LOG_METADATA_SCRIPT, LOG_WINDOW_COVERAGE_BASIS, coverage, metadata, stamp_key
+from .event_coverage import LOG_METADATA_SCRIPT, LOG_WINDOW_COVERAGE_BASIS, metadata, stamp_key, window_coverage
 
 LOGS = ("System", "Application")
 MAX_LOG_RECORDS = 2000  # per-request cap for the log and its progressively widened Record frame
@@ -73,6 +73,31 @@ def since_clause(since: str) -> tuple[str, str]:
         raise ValueError(f"not an ISO timestamp or the word 'boot' ({exc})") from exc
 
 
+def window_clauses(since: str, before: str) -> tuple[str, str, str, str]:
+    """One half-open log window; before is exclusive and requires an explicit time zone."""
+    try:
+        prelude, clause = since_clause(since)
+        start = "$since" if since.strip().lower() == "boot" else (f"'{_utc_stamp(since)}'" if since.strip() else "$null")
+    except ValueError as exc:
+        raise ValueError(f"parameter 'since': {exc}") from exc
+    end = "$null"
+    if before.strip():
+        try:
+            parsed = datetime.fromisoformat(before.strip().replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                raise ValueError("include Z or a UTC offset")
+            bound = _utc_stamp(before)
+        except ValueError as exc:
+            raise ValueError(f"parameter 'before': not an ISO timestamp with Z or an offset ({exc})") from exc
+        if start != "$null" and start != "$since":
+            start_key, end_key = stamp_key(start.strip("'")), stamp_key(bound)
+            if start_key is not None and end_key is not None and start_key >= end_key:
+                raise ValueError("parameter 'before': must be after the requested start at millisecond precision")
+        clause += f" and TimeCreated[@SystemTime&lt;'{bound}']"
+        end = f"'{bound}'"
+    return prelude, clause, start, end
+
+
 def events_query(log: str, levels: list[int], window: str) -> str:
     """The levels asked for and the window, as one select. No level asked for is every level, which
     is the only thing an empty list can honestly mean."""
@@ -82,10 +107,9 @@ def events_query(log: str, levels: list[int], window: str) -> str:
     return query_list(log, f"*[System[{' and '.join(parts)}]]" if parts else "*")
 
 
-def events_script(log: str, levels: list[int], count: int, since: str = "") -> str:
-    prelude, window = since_clause(since)
-    start = "$since" if since.strip().lower() == "boot" else (f"'{_utc_stamp(since)}'" if since.strip() else "$null")
-    return log_records_script(log, events_query(log, levels, window), count, prelude=prelude, window_start=start)
+def events_script(log: str, levels: list[int], count: int, since: str = "", before: str = "") -> str:
+    prelude, window, start, end = window_clauses(since, before)
+    return log_records_script(log, events_query(log, levels, window), count, prelude=prelude, window_start=start, window_end=end)
 
 
 def record_script(log: str, before: str, count: int) -> str:
@@ -159,12 +183,12 @@ def _utc_stamp(before: str) -> str:
 
 
 def take_events(bridge: Bridge, params: dict[str, Any]) -> Reading:
-    try:
-        script = events_script(params["log"], params["levels"], params["count"], str(params.get("since") or ""))
-    except ValueError as exc:
-        raise ValueError(f"parameter 'since': {exc}") from exc
+    script = events_script(params["log"], params["levels"], params["count"], str(params.get("since") or ""), str(params.get("before") or ""))
     result = bridge.run(script, depth=8)
-    return from_log_collector("events", params, script, result, params["log"], params["count"], window=bool(params.get("since", "").strip()))
+    has_since = bool(str(params.get("since") or "").strip())
+    before = str(params.get("before") or "").strip()
+    return from_log_collector("events", params, script, result, params["log"], params["count"], window=has_since,
+                              before=_utc_stamp(before) if before and not has_since else None)
 
 
 def take_record(bridge: Bridge, params: dict[str, Any]) -> Reading:
@@ -230,10 +254,20 @@ def from_log_collector(
     reading.sections = [Section("records", "raw", rows)]
     reading.count = len(rows)
     reading.outcome = source_outcome
+    start_key, end_key = stamp_key(payload.get("window_start")), stamp_key(payload.get("window_end"))
+
+    def outside_window(row: dict[str, Any]) -> bool:
+        at = stamp_key(row.get("TimeCreated"))
+        return at is not None and ((start_key is not None and at < start_key) or (end_key is not None and at >= end_key))
+
+    in_window_rows = [row for row in rows if not outside_window(row)]
     source: dict[str, Any] = {
         "log": log, "outcome": source_outcome, "limit": limit, "returned": len(rows), "truncated": payload["truncated"], "stopped": stopped,
         "window_start": payload.get("window_start"), "window_end": payload.get("window_end"), "queried_at": payload.get("queried_at"),
-        "row_issues": {"unplaced": sum(stamp_key(row.get("TimeCreated")) is None for row in rows)},
+        "row_issues": {
+            "unplaced": sum(stamp_key(row.get("TimeCreated")) is None for row in rows),
+            "outside_window": len(rows) - len(in_window_rows),
+        },
     }
     meta = payload.get("metadata")
     valid_meta = meta if isinstance(meta, dict) and meta.get("log") == log else {}
@@ -246,6 +280,9 @@ def from_log_collector(
         reading.warnings.append(f"the event query stopped early after returning {len(rows)} records: {stopped['detail']}")
     if source["row_issues"]["unplaced"]:
         reading.warnings.append(f"{source['row_issues']['unplaced']} returned event times could not be read; time-based coverage may be incomplete")
+    if source["row_issues"]["outside_window"]:
+        reading.warnings.append(f"{source['row_issues']['outside_window']} returned record times fell outside the requested window; the raw rows remain visible" +
+                                (" and completeness cannot be established" if window else ""))
     if window and source["truncated"] is True:
         reading.warnings.append(f"the event query reached its {limit}-record limit; older matching records in the requested window were not returned")
     if source.get("log_state") == "ok" and source.get("log_enabled") is False:
@@ -253,19 +290,31 @@ def from_log_collector(
 
     retained = source.get("log_oldest") if source.get("oldest_state") == "ok" and stamp_key(source.get("log_oldest")) else None
     if window:
-        start, end = source["window_start"], source["queried_at"]
-        reach = coverage(source, reading.section("records").data, start, end) if isinstance(start, str) and isinstance(end, str) else {"covered_from": None, "covered_from_inclusive": None, "complete": None}
+        start = source["window_start"]
+        requested_end = source["queried_at"] if source["window_end"] is None else source["window_end"]
+        reach = (window_coverage(source, in_window_rows, start, requested_end, source["queried_at"], end_is_query_time=source["window_end"] is None)
+                 if isinstance(start, str) and isinstance(requested_end, str)
+                 else {"covered_from": None, "covered_from_inclusive": None, "covered_until": None, "complete": None})
         reading.sections.append(Section("coverage", "derived", {"log": log, "retained_from": retained, **reach}, basis=LOG_WINDOW_COVERAGE_BASIS))
-        if stamp_key(start) and stamp_key(end) and stamp_key(start) >= stamp_key(end):
+        start_at, end_at, observed_at, retained_at = stamp_key(start), stamp_key(requested_end), stamp_key(source["queried_at"]), stamp_key(retained)
+        if source["window_end"] is not None and end_at is None:
+            reading.warnings.append("the requested window end returned by the collector could not be read; upper reach is unknown")
+        elif source["window_end"] is not None and observed_at is None:
+            reading.warnings.append("the machine's query time was not reported; the requested window's upper reach is unknown")
+        elif source["window_end"] is not None and end_at is not None and observed_at is not None and end_at > observed_at:
+            reading.warnings.append("the requested end is after the machine's query time; records after that time cannot exist yet")
+        if start_at is not None and observed_at is not None and start_at >= observed_at:
             reading.warnings.append("the requested start is at or after the machine's query time; window completeness cannot yet be established")
-        elif retained and stamp_key(start) and stamp_key(retained) and stamp_key(retained) >= stamp_key(start):
+        elif source["window_end"] is not None and start_at is not None and end_at is not None and start_at >= end_at:
+            reading.warnings.append("the requested start is at or after the requested end; this window cannot establish complete coverage")
+        elif retained_at is not None and start_at is not None and retained_at >= start_at:
             reading.warnings.append("the log's oldest retained record does not precede the requested window; earlier events may be unavailable")
         elif reach["covered_from"] is None:
             reading.warnings.append("the requested window's retention reach could not be established")
     elif before is not None:
         oldest = stamp_key(retained)
         boundary = stamp_key(before)
-        reaches = True if rows else False if oldest and boundary and oldest >= boundary else (
+        reaches = True if in_window_rows else False if oldest and boundary and oldest >= boundary else (
             True if source.get("log_state") == "ok" and source.get("log_enabled") is True and source.get("log_mode") == "Circular" and oldest and boundary else None
         )
         reading.sections.append(Section("coverage", "derived", {"log": log, "retained_from": retained, "reaches_before": reaches}, basis=RECORD_COVERAGE_BASIS))
@@ -297,6 +346,7 @@ register(
             Param("levels", "list[int]", [1, 2], "Levels to include: 1 critical, 2 error, 3 warning, 4 information."),
             Param("count", "int", 50, "How many of the most recent records.", minimum=1, maximum=MAX_LOG_RECORDS),
             Param("since", "str", "", "ISO timestamp, or 'boot' for Windows' reported kernel-session start. Empty for the most recent records."),
+            Param("before", "str", "", "Exclusive ISO end with Z or an offset. Pair with since for an anchored window; empty uses the query time."),
         ),
         private=("MachineName", "user names inside Message", "profile paths inside Message", "CPER bytes in binary Properties"),
     )
