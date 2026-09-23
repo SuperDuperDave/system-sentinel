@@ -99,6 +99,43 @@ def test_records_are_redacted_like_every_other_response():
     assert got[1][1]["redacted"] == ["host"]
 
 
+def test_a_connected_stream_uses_identity_learned_after_it_connected():
+    record = {**RECORD, "Message": "TESTBOX signed in tester"}
+    bridge = stream_bridge(poll=BridgeResult("ok", items=[{"log": "System", "record": record}], took_ms=9))
+    bridge.by_marker["$env:COMPUTERNAME"] = BridgeResult("unavailable", error="bridge unavailable")
+    state = State(bridge=bridge, token=TOKEN)
+    state.learn()  # Startup could not learn names.
+    assert state.identity.host is None
+    stream = Stream(bridge, lambda: state.redactor, interval=0)
+    assert stream.start_cursors().observed
+    bridge.by_marker["$env:COMPUTERNAME"] = identity_result("TESTBOX", "tester")
+    state._learned_at = time.time() - 61  # The connected stream outlived the retry interval.
+    result, records = stream.poll()
+    assert result.observed and len(records) == 1
+    assert state.identity.host == "TESTBOX"
+    assert records[0]["record"]["Message"] == "<host> signed in <user>"
+    assert records[0]["record"]["MachineName"] == "<host>"
+    assert records[0]["redacted"] == ["host", "user"]
+
+
+def test_a_connected_stream_redacts_bridge_errors_with_the_current_identity():
+    current = {"policy": Redactor(Identity())}
+    bridge = stream_bridge(poll=BridgeResult("failed", error="TESTBOX refused tester", took_ms=4))
+    resolved_on: list[int] = []
+
+    def current_policy() -> Redactor:
+        resolved_on.append(threading.get_ident())
+        return current["policy"]
+
+    stream = Stream(bridge, current_policy, interval=0)
+    assert stream.start_cursors().observed
+    current["policy"] = Redactor(Identity(host="TESTBOX", user="tester"))
+    loop_thread = threading.get_ident()
+    got = asyncio.run(take_frames(stream, polls=1))
+    assert got[0] == ("bridge", {"outcome": "failed", "error": "<host> refused <user>", "redacted": ["host", "user"]})
+    assert resolved_on and all(thread != loop_thread for thread in resolved_on)
+
+
 def test_a_poll_that_did_not_observe_the_machine_says_so():
     bridge = stream_bridge(poll=BridgeResult("failed", error="There is not an event log that matches 'Nope'.", took_ms=4))
     got = asyncio.run(take_frames(Stream(bridge, None, interval=0), polls=2))
@@ -164,6 +201,41 @@ def test_the_route_streams_and_the_server_lets_go_when_the_client_does():
         server.should_exit = True
         thread.join(timeout=10)
     # A generator still running would hold the connection open and the shutdown would not finish.
+    assert not thread.is_alive()
+
+
+def test_the_route_updates_redaction_on_an_already_connected_stream():
+    record = {**RECORD, "Message": "TESTBOX signed in tester"}
+    bridge = stream_bridge(poll=BridgeResult("ok", items=[{"log": "System", "record": record}], took_ms=9))
+    bridge.by_marker["$env:COMPUTERNAME"] = BridgeResult("unavailable", error="identity unavailable")
+    state = State(bridge=bridge, token=TOKEN)
+    server, thread, port = serve(create_app(state, mcp=False))
+    try:
+        with httpx.stream("GET", f"http://127.0.0.1:{port}/api/stream", headers=AUTH, timeout=12) as response:
+            assert response.status_code == 200
+            block: list[str] = []
+            learned = False
+            received = False
+            for line in response.iter_lines():
+                if line:
+                    block.append(line)
+                    continue
+                if not block:
+                    continue
+                name, data = frames("\n".join(block))[0]
+                block = []
+                if name == "heartbeat" and not learned:
+                    bridge.by_marker["$env:COMPUTERNAME"] = identity_result("TESTBOX", "tester")
+                    state._learned_at = time.time() - 61
+                    learned = True
+                if name == "record":
+                    assert data["record"]["Message"] == "<host> signed in <user>"
+                    received = True
+                    break
+            assert learned and received
+    finally:
+        server.should_exit = True
+        thread.join(timeout=10)
     assert not thread.is_alive()
 
 

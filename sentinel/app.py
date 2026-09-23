@@ -123,10 +123,8 @@ class State:
         #: (``serve --reload``, a test app), there is no way to stop this process from inside it,
         #: and the route says so rather than pretending.
         self.on_quit: Callable[[], None] | None = None
-        self.identity = Identity()
-        self._redactor = Redactor(self.identity)
+        self._redactor = Redactor()
         self._learned_at: float | None = None
-        self.facts: dict[str, Any] = {}
         self.stack = Stack()
         self.prompts = Prompts()
         self.spent_codes: dict[str, float] = {}
@@ -164,8 +162,14 @@ class State:
         """Ask the machine its names. Field-name redaction never depends on this; replacing the
         names inside message text does, so an answer that did not come is asked for again later."""
         self._learned_at = time.time()
-        self.identity, self.facts = learn_identity(self.bridge)
-        self._redactor = Redactor(self.identity)
+        learned, _ = learn_identity(self.bridge)
+        previous = self.identity
+        # One policy owns the identity. A later failed lookup must not erase names already learned.
+        self._redactor = Redactor(Identity(host=learned.host or previous.host, user=learned.user or previous.user))
+
+    @property
+    def identity(self) -> Identity:
+        return self._redactor.identity
 
     @property
     def redactor(self) -> Redactor:
@@ -385,7 +389,7 @@ def create_app(state: State | None = None, mcp: bool = True) -> FastAPI:
     async def stream(request: Request, unredacted: bool = False) -> Response:
         """The log as it happens: ``record`` for each new record matching the presets, ``heartbeat``
         every poll, ``bridge`` when a poll did not observe the machine. Server-sent events."""
-        source = Stream(state.bridge, None if unredacted else state.redactor)
+        source = Stream(state.bridge, None if unredacted else lambda: state.redactor)
         return StreamingResponse(source.events(request.is_disconnected), media_type="text/event-stream", headers=SSE_HEADERS)
 
     @app.get("/api/stack", tags=["stack"])

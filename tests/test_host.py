@@ -6,6 +6,7 @@ envelope and that the outcome is one the machine can answer with.
 
 import asyncio
 import base64
+import os
 import sys
 import threading
 import time
@@ -233,6 +234,9 @@ def test_identity_is_learned_and_never_empty():
     identity, facts = learn_identity(bridge)
     assert facts["outcome"] == "ok"
     assert identity.host and identity.user
+    if sys.platform == "win32":
+        assert identity.host == os.environ.get("COMPUTERNAME")
+        assert identity.user == os.environ.get("USERNAME")
 
 
 def test_events_from_the_system_log():

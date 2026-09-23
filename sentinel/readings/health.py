@@ -7,6 +7,7 @@ redaction can replace those names wherever they appear.
 from __future__ import annotations
 
 import os
+import sys
 from typing import Any
 
 from ..bridge import Bridge, sessions_report
@@ -23,7 +24,10 @@ def learn_identity(bridge: Bridge) -> tuple[Identity, dict[str, Any]]:
     """Ask the machine its names. Returns the identity and the facts learned (already safe to show)."""
     result = bridge.run(IDENTITY_SCRIPT, timeout=30)
     if result.outcome != "ok":
-        return Identity(), {"outcome": result.outcome, "error": result.error}
+        # The native Windows child inherits these names from this process. Keep the bridge
+        # failure visible, while retaining enough identity to mask names in default responses.
+        native = Identity(host=os.environ.get("COMPUTERNAME") or None, user=os.environ.get("USERNAME") or None) if sys.platform == "win32" else Identity()
+        return native, {"outcome": result.outcome, "error": result.error}
     item = result.items[0]
     identity = Identity(host=item.get("host") or None, user=item.get("user") or None)
     return identity, {"outcome": "ok", "powershell": item.get("ps"), "windows": item.get("os"), "took_ms": result.took_ms}

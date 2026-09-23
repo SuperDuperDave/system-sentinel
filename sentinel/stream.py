@@ -93,7 +93,7 @@ def poll_script(cursors: Mapping[str, int], limit: int = MAX_PER_POLL) -> str:
 class Stream:
     """The poll loop behind ``GET /api/stream``. One instance per connected client."""
 
-    def __init__(self, bridge: Bridge, redactor: Redactor | None = None, *, interval: float = POLL_SECONDS, limit: int = MAX_PER_POLL):
+    def __init__(self, bridge: Bridge, redactor: Redactor | Callable[[], Redactor] | None = None, *, interval: float = POLL_SECONDS, limit: int = MAX_PER_POLL):
         self.bridge = bridge
         self.redactor = redactor
         self.interval = interval
@@ -104,6 +104,10 @@ class Stream:
     def ready(self) -> bool:
         """Every log has said where it is. Until then there is nothing to be new against."""
         return len(self.cursors) == len(LOGS)
+
+    def _current_redactor(self) -> Redactor | None:
+        """A long-lived stream uses the identity policy current at each poll, not at connect."""
+        return self.redactor() if callable(self.redactor) else self.redactor
 
     def start_cursors(self) -> BridgeResult:
         """Ask each log for its latest record, so the stream begins at now and replays nothing."""
@@ -117,6 +121,7 @@ class Stream:
     def poll(self) -> tuple[BridgeResult, list[dict[str, Any]]]:
         """One round trip. Returns what the bridge said and the new records as stream payloads."""
         result = self.bridge.run(poll_script(self.cursors, self.limit))
+        redactor = self._current_redactor()
         events: list[dict[str, Any]] = []
         for item in result.items:
             record = item.get("record")
@@ -126,8 +131,8 @@ class Stream:
                 continue  # not a record of a watched log: nothing to emit and nothing to advance
             self.cursors[log] = max(self.cursors.get(log, 0), rid)
             payload: dict[str, Any] = {"log": log, "record": record}
-            if self.redactor is not None:
-                payload = self.redactor.attach(payload)
+            if redactor is not None:
+                payload = redactor.attach(payload)
             events.append(payload)
         return result, events
 
@@ -149,7 +154,8 @@ class Stream:
                 if not result.observed:
                     # The error text is PowerShell's own and can quote a path or a name: it leaves redacted too.
                     detail = {"outcome": result.outcome, "error": result.error or ""}
-                    yield frame("bridge", self.redactor.attach(detail) if self.redactor is not None else detail)
+                    redactor = await asyncio.to_thread(self._current_redactor)
+                    yield frame("bridge", redactor.attach(detail) if redactor is not None else detail)
                 yield frame("heartbeat", {"at": _now(), "cursors": dict(self.cursors)})
                 # While the machine is not answering, every poll costs the bridge's full retries: ask less often.
                 await asyncio.sleep(self.interval if result.observed else self.interval * 4)

@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 from sentinel.app import State, create_app
 from sentinel.bridge import BridgeResult
+from sentinel.readings import health
 from tests.conftest import FakeBridge, identity_result
 
 TOKEN = "test-token-0123456789"
@@ -69,6 +70,28 @@ def test_reading_arrives_redacted_by_default(client: TestClient):
     assert body["redacted"] == ["host", "user"]
     assert body["params"] == {"log": "System", "levels": [1, 2], "count": 1, "since": ""}
     assert body["method"]["kind"] == "powershell" and "Get-WinEvent" in body["method"]["query"]
+
+
+def test_a_failed_relearn_keeps_names_already_learned():
+    bridge = FakeBridge(by_marker={"$env:COMPUTERNAME": identity_result("TESTBOX", "tester")})
+    state = State(bridge=bridge, token=TOKEN)
+    state.learn()
+    bridge.by_marker["$env:COMPUTERNAME"] = BridgeResult("unavailable", error="temporary outage")
+    state.learn()
+    assert state.identity.host == "TESTBOX"
+    assert state.redactor.attach({"Message": "TESTBOX signed in tester"})["Message"] == "<host> signed in <user>"
+
+
+def test_native_windows_identity_fallback_keeps_the_bridge_failure_visible(monkeypatch: pytest.MonkeyPatch):
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(health, "sys", SimpleNamespace(platform="win32"))
+    monkeypatch.setenv("COMPUTERNAME", "TESTBOX")
+    monkeypatch.setenv("USERNAME", "tester")
+    bridge = FakeBridge(result=BridgeResult("unavailable", error="temporary outage"))
+    identity, facts = health.learn_identity(bridge)
+    assert identity.host == "TESTBOX" and identity.user == "tester"
+    assert facts == {"outcome": "unavailable", "error": "temporary outage"}
 
 
 def test_unredacted_by_name(client: TestClient):
