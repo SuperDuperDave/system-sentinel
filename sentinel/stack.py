@@ -246,8 +246,8 @@ async def new_item(stack: Stack, bridge: Bridge, body: dict[str, Any], *, reader
     rank = int(body["rank"]) if body.get("rank") is not None else 3
     if rank not in RANKS:
         raise ValueError(f"rank must be one of {list(RANKS)}")
-    verbosity = body.get("verbosity") or "full"
-    if verbosity not in VERBOSITIES:
+    requested_verbosity = body.get("verbosity")
+    if requested_verbosity is not None and requested_verbosity not in VERBOSITIES:
         raise ValueError(f"verbosity must be one of {list(VERBOSITIES)}")
 
     envelope: dict[str, Any] | None = None
@@ -270,11 +270,26 @@ async def new_item(stack: Stack, bridge: Bridge, body: dict[str, Any], *, reader
             params = asked.get("params") or {}
             envelope = (await reader(name, params) if reader else await take(name, bridge, params)).to_dict()
         else:
-            envelope = dict(given or {})
-            if "reading" not in envelope or "outcome" not in envelope:
+            if not isinstance(given, dict):
                 raise ValueError("'envelope' must be a reading as the API returned it")
+            envelope = dict(given)
+            sections = envelope.get("sections")
+            valid_sections = isinstance(sections, list) and all(
+                isinstance(section, dict) and isinstance(section.get("name"), str)
+                and isinstance(section.get("class"), str) and "data" in section
+                for section in sections
+            )
+            valid_envelope = (
+                isinstance(envelope.get("reading"), str) and isinstance(envelope.get("outcome"), str)
+                and isinstance(envelope.get("params"), dict) and isinstance(envelope.get("method"), dict)
+                and valid_sections and (envelope.get("error") is None or isinstance(envelope["error"], dict))
+            )
+            if not valid_envelope:
+                raise ValueError("'envelope' must have the reading, outcome, params, method and section shapes returned by the API")
         if kind == "selection":
             ids = _selection_ids(envelope, body.get("ids") or [])
+
+    verbosity = requested_verbosity or ("summary" if kind == "reading" and envelope and envelope.get("reading") == "storms" else "full")
 
     return Item(
         id=uuid.uuid4().hex,
@@ -331,23 +346,34 @@ def render(prompt: dict[str, Any] | None, items: list[dict[str, Any]]) -> str:
 
 def _item_lines(position: int, item: dict[str, Any]) -> list[str]:
     kind = item.get("kind") or "reading"
-    envelope = item.get("reading") or {}
+    envelope = item.get("reading") if isinstance(item.get("reading"), dict) else {}
     lines = [f"## {position}. {item.get('title') or kind}", ""]
     lines.append(f"- kind: {kind}")
     if kind == "note":
         lines += ["", (item.get("note") or "").strip(), ""]
         return lines
 
-    classes = [s.get("class") for s in envelope.get("sections") or [] if s.get("class")]
+    sections = _sections(envelope)
+    classes = [section["class"] for section in sections if isinstance(section.get("class"), str)]
     if classes:
         lines.append(f"- class: {', '.join(dict.fromkeys(classes))}")
-    params = _params_text(envelope.get("params") or {})
+    params = _params_text(envelope["params"] if isinstance(envelope.get("params"), dict) else {})
     lines.append(f"- reading: `{envelope.get('reading', 'unknown')}`" + (f" ({params})" if params else ""))
     lines.append(f"- asked at: {envelope.get('asked_at', 'unknown')}")
     lines.append(f"- outcome: {_outcome_text(envelope)}")
     if isinstance(envelope.get("count"), int):
         lines.append(f"- reading count: {envelope['count']}")
-    lines.append(f"- method: {(envelope.get('method') or {}).get('kind', 'unknown')}")
+    method = envelope.get("method") if isinstance(envelope.get("method"), dict) else {}
+    lines.append(f"- method: {method.get('kind', 'unknown')}")
+    warnings = envelope.get("warnings")
+    if isinstance(warnings, list) and warnings:
+        if item.get("verbosity") == "summary":
+            warning_texts = [str(warning) for warning in warnings[:10]]
+            shown = [warning[:300] + ("…" if len(warning) > 300 else "") for warning in warning_texts]
+            more = len(warnings) - len(shown)
+            lines.append(f"- warnings: {json.dumps(shown, ensure_ascii=False)}" + (f" (+{more} more in the stored reading)" if more else ""))
+        else:
+            lines.append(f"- warnings: {json.dumps(warnings, ensure_ascii=False)}")
 
     records = _records(envelope)
     selected_signals = _signal_section(envelope) if envelope.get("reading") == "signals" and item.get("ids") is not None else None
@@ -369,14 +395,18 @@ def _item_lines(position: int, item: dict[str, Any]) -> list[str]:
 
     lines.append("")
     if envelope.get("outcome") not in ("ok", "empty"):
-        detail = (envelope.get("error") or {}).get("detail") or ""
+        error = envelope.get("error") if isinstance(envelope.get("error"), dict) else {}
+        detail = error.get("detail") or ""
         lines += [f"The machine was not observed{': ' + detail if detail else ''}.", ""]
-        source_context = [section for section in envelope.get("sections") or [] if isinstance(section, dict) and section.get("name") in ("collection", "coverage")]
+        source_context = [section for section in sections if section.get("name") in ("collection", "coverage")]
         if source_context:
             lines += _json_block(source_context)
         return lines
     if envelope.get("reading") == "changes" and (item.get("verbosity") == "summary" or item.get("ids") is not None):
         lines += _json_block(_change_handoff_sections(envelope, records if item.get("ids") is not None else None, item.get("verbosity") == "summary"))
+    elif envelope.get("reading") == "storms" and item.get("verbosity") == "summary":
+        lines += ["Bounded storm summary. Set this item to full for its stored buckets and signature samples; take `storms` again for a fresh observation.", ""]
+        lines += _json_block(_storm_handoff_sections(envelope))
     elif selected_signals is not None:
         if item.get("verbosity") == "summary":
             selected_signals["data"] = [{k: s.get(k) for k in ("id", "class", "title", "summary", "readings")} for s in selected_signals["data"]]
@@ -386,7 +416,7 @@ def _item_lines(position: int, item: dict[str, Any]) -> list[str]:
     elif item.get("verbosity") == "summary" and envelope.get("reading") == "dump_header":
         # The exact bytes remain on the stored reading and in the API. A handoff starts with
         # the meaning and the file identity; an agent can expand the item to full when needed.
-        lines += _json_block([s for s in envelope.get("sections") or [] if s.get("name") in ("file", "inspection")])
+        lines += _json_block([section for section in sections if section.get("name") in ("file", "inspection")])
     elif item.get("ids") is not None and records is not None:
         lines += _json_block(records)
     else:
@@ -397,6 +427,8 @@ def _item_lines(position: int, item: dict[str, Any]) -> list[str]:
 
 def _outcome_text(envelope: dict[str, Any]) -> str:
     outcome = envelope.get("outcome", "unknown")
+    if not isinstance(outcome, str):
+        return "unknown — the stored outcome is malformed"
     said = {
         "ok": "the machine was observed",
         "empty": "the query ran and matched nothing",
@@ -410,9 +442,7 @@ def _outcome_text(envelope: dict[str, Any]) -> str:
 
 def _records(envelope: dict[str, Any]) -> list[dict[str, Any]] | None:
     """The first section that is a list of log records, or nothing: not every reading has records."""
-    for section in envelope.get("sections") or []:
-        if not isinstance(section, dict):
-            continue
+    for section in _sections(envelope):
         data = section.get("data")
         if isinstance(data, list) and data and all(isinstance(d, dict) and ("RecordId" in d or "TimeCreated" in d) for d in data):
             return data
@@ -424,9 +454,7 @@ def _change_handoff_sections(envelope: dict[str, Any], selected: list[dict[str, 
     wanted = {(row.get("Log"), row.get("RecordId")) for row in selected} if selected is not None else None
     sections = []
     raw_section = None
-    for section in envelope.get("sections") or []:
-        if not isinstance(section, dict):
-            continue
+    for section in _sections(envelope):
         name = section.get("name")
         if name == "records" and selected is not None and not compact:
             raw_section = {**section, "data": selected}
@@ -449,14 +477,109 @@ def _change_handoff_sections(envelope: dict[str, Any], selected: list[dict[str, 
     return sections
 
 
+def _storm_handoff_sections(envelope: dict[str, Any]) -> list[dict[str, Any]]:
+    """Carry a bounded storm lead without copying every minute or raw signature sample."""
+    named = {
+        section.get("name"): section
+        for section in _sections(envelope)
+        if isinstance(section.get("name"), str)
+    }
+    output = [named[name] for name in ("status", "coverage", "collection") if name in named]
+    buckets = named.get("buckets")
+    if isinstance(buckets, dict) and isinstance(buckets.get("data"), dict):
+        data = buckets["data"]
+        count = data.get("bucket_count")
+        raw_totals = data.get("totals")
+        totals_valid = (
+            type(count) is int and isinstance(raw_totals, list) and len(raw_totals) == count
+            and all(value is None or type(value) is int and value >= 0 for value in raw_totals)
+        )
+        totals = raw_totals if totals_valid else []
+        active_valid = isinstance(data.get("active"), list)
+        active_rows = data["active"] if active_valid else []
+        active = [
+            row for row in active_rows
+            if isinstance(row, dict) and type(row.get("index")) is int and row["index"] >= 0
+            and type(row.get("total")) is int and row["total"] >= 0
+        ]
+        active.sort(key=lambda row: row["index"])
+        peak = sorted(active, key=lambda row: (-row["total"], -row["index"]))[:5]
+        recent = active[-5:]
+        highlighted = {row["index"]: row for row in [*peak, *recent]}
+        highlights = []
+        for row in sorted(highlighted.values(), key=lambda row: row["index"]):
+            highlight = {key: row.get(key) for key in ("index", "start", "total", "complete")}
+            signature_counts = row.get("signatures") if isinstance(row.get("signatures"), dict) else {}
+            counted = [(signature_id, count) for signature_id, count in signature_counts.items() if isinstance(signature_id, str) and type(count) is int]
+            ranked = sorted(counted, key=lambda entry: (-entry[1], entry[0]))[:3]
+            highlight["top_signatures"] = [{"id": signature_id, "count": count} for signature_id, count in ranked]
+            highlight["other_signatures"] = len(counted) - len(ranked)
+            highlights.append(highlight)
+        unknown_runs = 0
+        first_unknown = last_unknown = None
+        previous_unknown = False
+        for index, value in enumerate(totals):
+            if value is None:
+                if not previous_unknown:
+                    unknown_runs += 1
+                if first_unknown is None:
+                    first_unknown = index
+                last_unknown = index
+                previous_unknown = True
+            else:
+                previous_unknown = False
+        summary = {key: data.get(key) for key in ("from", "to", "bucket_seconds", "bucket_count", "total", "unplaced", "unknown_buckets")}
+        summary.update(
+            covered_buckets=sum(value is not None for value in totals) if totals_valid else None,
+            active_buckets=len(active) if active_valid else None,
+            invalid_active_rows=len(active_rows) - len(active) if active_valid else None,
+            highlight_rule="five highest returned counts plus five most recent active buckets",
+            highlighted_active=highlights,
+            other_active_buckets=len(active) - len(highlights) if active_valid else None,
+            unknown_runs=unknown_runs if totals_valid else None,
+            first_unknown_index=first_unknown,
+            last_unknown_index=last_unknown,
+        )
+        basis = (
+            "Bounded projection of the stored bucket array. Highlights unite the five highest returned counts "
+            "and five most recent active buckets; other_active_buckets counts the omitted active buckets. "
+            "unknown_runs counts contiguous null buckets, and the first/last indices are positions from `from`. "
+            "Computed fields are null if the stored array has the wrong shape; the full item retains the original arrays and basis."
+        )
+        output.append({**buckets, "data": summary, "basis": basis, "projection": "bounded summary"})
+    signatures = named.get("signatures")
+    if isinstance(signatures, dict) and isinstance(signatures.get("data"), list):
+        rows = [row for row in signatures["data"] if isinstance(row, dict)]
+        shown_rows = rows[:5]
+        shown_ids = {row.get("id") for row in shown_rows if isinstance(row.get("id"), str)}
+        status = named.get("status")
+        status_data = status.get("data") if isinstance(status, dict) else None
+        dominant = status_data.get("dominant") if isinstance(status_data, dict) else None
+        for signature_id in dominant[:3] if isinstance(dominant, list) else []:
+            if not isinstance(signature_id, str) or signature_id in shown_ids:
+                continue
+            matching = next((row for row in rows if row.get("id") == signature_id), None)
+            if matching is not None:
+                shown_rows.append(matching)
+                shown_ids.add(signature_id)
+        fields = ("id", "count", "description", "mci_status", "event_ids", "first_seen", "last_seen")
+        shown = [{key: row.get(key) for key in fields} for row in shown_rows]
+        output.append({**signatures, "data": {"distinct": len(rows), "shown": shown, "other_signatures": len(rows) - len(shown)}, "projection": "bounded summary"})
+    return output
+
+
 def _signal_section(envelope: dict[str, Any]) -> dict[str, Any] | None:
     """The signal rows and their basis travel together when only some leads are handed on."""
-    for section in envelope.get("sections") or []:
-        if not isinstance(section, dict):
-            continue
+    for section in _sections(envelope):
         if section.get("name") == "signals" and isinstance(section.get("data"), list) and all(isinstance(s, dict) and isinstance(s.get("id"), str) for s in section["data"]):
             return section
     return None
+
+
+def _sections(envelope: dict[str, Any]) -> list[dict[str, Any]]:
+    """Older saved envelopes may predate or violate today's section shape."""
+    raw = envelope.get("sections")
+    return [section for section in raw if isinstance(section, dict)] if isinstance(raw, list) else []
 
 
 def _selection_ids(envelope: dict[str, Any], raw: Any) -> list[int | str]:

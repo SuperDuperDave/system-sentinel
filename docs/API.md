@@ -248,7 +248,7 @@ An item:
 | --- | --- |
 | `kind` | `reading` (a whole reading), `selection` (some records chosen by `RecordId` or `Log:RecordId`, or signals chosen by string signal ID, in `ids`), `note` (text the person or agent wrote) |
 | `rank` | 1 first to 5 last in the composed handoff; default 3 |
-| `verbosity` | `summary` (a compact record table; for `changes`, interpreted entries with source outcomes and coverage; or signal identity, title, summary and source readings) or `full` (selected records or signals with evidence as JSON; a `changes` selection puts its interpreted entries before exact raw rows); default `full` |
+| `verbosity` | `summary` (a compact record table; for `changes`, interpreted entries with source outcomes and coverage; for `storms`, status, coverage, collection, bounded timeline highlights and returned signature counts; or signal identity, title, summary and source readings) or `full` (selected records or signals with evidence as JSON; a `changes` selection puts its interpreted entries before exact raw rows). Defaults to `summary` for a whole `storms` reading and `full` otherwise; either choice can be changed in the Stack. |
 | `reading` | The envelope, kept as it was at the moment of adding: its `asked_at`, `outcome` and `method` are the item's provenance |
 
 | Route | Does |
@@ -259,9 +259,11 @@ An item:
 | `PATCH /api/stack/items/{id}` | Change `rank`, `verbosity` or `title` |
 | `DELETE /api/stack/items/{id}` | Remove one |
 | `DELETE /api/stack` | Clear |
-| `GET /api/stack/composed` | `{ "text": "...", "items": 4, "redacted": [...] }`: the handoff as Markdown, the chosen prompt first (when `system_prompt` is on), then the items by rank, each headed with its kind, its class, its provenance (reading, parameters, when, outcome, method kind), the envelope's unit-neutral reading count when present, and rendered by its verbosity; redacted unless `unredacted=true` |
+| `GET /api/stack/composed` | `{ "text": "...", "items": 4, "redacted": [...] }`: the handoff as Markdown, the chosen prompt first (when `system_prompt` is on), then the items by rank, each headed with its kind, its class, its provenance (reading, parameters, when, outcome, method kind), the envelope's unit-neutral reading count and warnings when present, and rendered by its verbosity; redacted unless `unredacted=true` |
 | `GET /api/prompts` | The prompt library: `{ "prompts": [ { "id", "name", "description", "content", "builtin" }, ... ] }`; six presets to start |
 | `POST /api/prompts`, `PATCH /api/prompts/{id}`, `DELETE /api/prompts/{id}` | Yours to add, edit and delete, presets included; a deleted preset stays deleted |
+
+A supplied Stack envelope must carry the reading, outcome, params, method and section shapes returned by the API; malformed envelopes are refused before storage. Older malformed stored items are rendered defensively so they do not stop the rest of the handoff. Storm summaries show the five highest-count and five most recent active buckets, with at most three signature counts per highlight, and the top five overall signatures plus up to three recent dominant signatures. They report omitted counts; full verbosity preserves the original arrays and samples. Summary warnings show at most ten entries of 300 characters each and count any further warnings.
 
 The composed text is what the dashboard copies to the clipboard or downloads as a Markdown file. An agent reads the same text and needs no clipboard.
 

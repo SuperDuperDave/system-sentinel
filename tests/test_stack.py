@@ -1,6 +1,7 @@
 """The stack: what it accepts, what it refuses, what it composes, and that it outlives the process."""
 
 import json
+import time
 
 import pytest
 from fastapi.testclient import TestClient
@@ -108,6 +109,67 @@ def test_change_handoff_leads_with_meaning_and_keeps_raw_selection_available():
     failed_storm = {**failed, "reading": "storms"}
     storm_handoff = "\n".join(_item_lines(1, {"kind": "reading", "title": "Hardware errors", "reading": failed_storm, "verbosity": "summary"}))
     assert "one source failed" in storm_handoff and '"complete": false' in storm_handoff
+
+
+def test_a_week_of_storm_buckets_has_a_bounded_default_handoff_with_full_evidence_available(client: TestClient):
+    from tests.test_whea import _powershell_stamp, load, storms
+
+    moment = time.time()
+    reading = storms(load(now=moment), host_now=moment, hours=168, bucket_seconds=60).to_dict()
+    signatures = next(section["data"] for section in reading["sections"] if section["name"] == "signatures")
+    signatures[0]["sample"]["Message"] = r"C:\Users\SentinelPrivateName\Desktop\synthetic.txt"
+    collection = next(section["data"] for section in reading["sections"] if section["name"] == "collection")
+    collection["system"]["log_error"] = r"C:\Users\SentinelPrivateName\Desktop\synthetic.log"
+    saved = add(client, kind="reading", title="Synthetic storm week", envelope=reading)
+    assert saved["verbosity"] == "summary"
+    composed = client.get("/api/stack/composed", headers=AUTH)
+    assert composed.status_code == 200
+    assert len(composed.json()["text"]) < 10_000 and "Bounded storm summary" in composed.json()["text"]
+    assert "SentinelPrivateName" not in composed.json()["text"]
+    assert "<user>" in composed.json()["text"] and "synthetic.log" in composed.json()["text"]
+    expanded = client.patch(f"/api/stack/items/{saved['id']}", headers=AUTH, json={"verbosity": "full"})
+    assert expanded.status_code == 200 and expanded.json()["verbosity"] == "full"
+    expanded_handoff = client.get("/api/stack/composed", headers=AUTH)
+    assert expanded_handoff.status_code == 200 and len(expanded_handoff.json()["text"]) > 70_000
+    assert "SentinelPrivateName" not in expanded_handoff.json()["text"]
+
+    item = {"kind": "reading", "title": "Synthetic storm week", "reading": reading, "verbosity": "summary"}
+    compact = "\n".join(_item_lines(1, item))
+    full = "\n".join(_item_lines(1, {**item, "verbosity": "full"}))
+    assert len(compact) < 8000 and len(full) > 70_000
+    assert '"state": "burst"' in compact and '"complete": true' in compact
+    assert '"bucket_count": 10080' in compact and '"active_buckets": 29' in compact
+    assert '"other_active_buckets":' in compact and '"highlighted_active":' in compact and '"unknown_runs": 0' in compact
+    assert '"top_signatures":' in compact and '"mci_status":' in compact
+    assert '"sample"' not in compact and '"sample"' in full
+
+    gap = storms([], outcome="empty", oldest=_powershell_stamp(moment - 12 * 3600), host_now=moment, hours=168).to_dict()
+    unknown = "\n".join(_item_lines(1, {**item, "reading": gap}))
+    assert '"state": "unknown"' in unknown and '"unknown_runs": 1' in unknown
+    assert '"unknown_buckets":' in unknown and "does not cover" in unknown
+
+    malformed = json.loads(json.dumps(reading))
+    next(section for section in malformed["sections"] if section["name"] == "buckets")["data"]["totals"] = "broken"
+    uncertain = "\n".join(_item_lines(1, {**item, "reading": malformed}))
+    assert '"covered_buckets": null' in uncertain and '"unknown_runs": null' in uncertain
+
+    warned = {**reading, "warnings": ["synthetic warning " + "x" * 400] * 12}
+    bounded = "\n".join(_item_lines(1, {**item, "reading": warned}))
+    assert "(+2 more in the stored reading)" in bounded and "…" in bounded
+    assert len(bounded) < 10_000
+
+
+def test_a_malformed_supplied_envelope_is_refused_and_an_older_bad_item_does_not_break_the_handoff(client: TestClient):
+    from sentinel.stack import render
+
+    malformed = {"reading": "storms", "outcome": "ok", "params": {}, "method": {}, "sections": [1]}
+    response = client.post("/api/stack/items", headers=AUTH, json={"kind": "reading", "envelope": malformed})
+    assert response.status_code == 422 and "envelope" in response.json()["detail"]
+
+    older = {"kind": "reading", "title": "Older stored item", "reading": {**malformed, "params": [], "method": [], "sections": 1, "outcome": ["ok"], "error": []}}
+    note = {"kind": "note", "title": "Person's note", "note": "The machine restarted while idle."}
+    handoff = render(None, [older, note])
+    assert "stored outcome is malformed" in handoff and "The machine restarted while idle." in handoff
 
 
 def test_the_stack_starts_empty_with_a_prompt_chosen(client: TestClient):

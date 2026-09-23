@@ -418,7 +418,7 @@ def test_a_question_in_a_live_session_cannot_see_the_one_before_it(monkeypatch):
     assert second.items == [{"leaked": False}]
 
     report = sessions_report(bridge)
-    assert report["alive"] == 1 and report["answered"] == 2  # and it was one session that answered both
+    assert report["alive"] == 1 and report["answered"] == 2, report  # and it was one session that answered both
 
 
 def test_the_pool_survives_the_whole_catalog_taken_twice(monkeypatch):
