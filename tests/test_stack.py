@@ -198,6 +198,42 @@ def test_a_week_of_storm_buckets_has_a_bounded_default_handoff_with_full_evidenc
     assert len(bounded) < 10_000
 
 
+def test_a_kernel_report_timeline_has_a_bounded_default_handoff(client: TestClient):
+    returned = 150
+    bucket_count = 10080
+    reading = {
+        "reading": "whea_reports", "outcome": "ok", "count": returned,
+        "params": {"hours": 168, "bucket_seconds": 60}, "method": {"kind": "powershell", "query": "synthetic bounded query"},
+        "asked_at": "2026-09-23T06:00:00Z", "error": None, "warnings": [],
+        "sections": [
+            {"name": "reports", "class": "derived", "data": [
+                {"record_id": i + 1, "reported_at": "2026-09-23T06:00:00Z", "header": {"severity": "fatal", "previous_session": True}, "header_error": None}
+                for i in range(returned)
+            ]},
+            {"name": "buckets", "class": "derived", "data": {
+                "from": "2026-09-16T06:00:00Z", "to": "2026-09-23T06:00:00Z", "bucket_seconds": 60,
+                "bucket_count": bucket_count, "total": returned, "unplaced": 0, "unknown_buckets": 0,
+                "previous_session": returned, "header_unreadable": 0,
+                "totals": [1] * returned + [0] * (bucket_count - returned),
+                "active": [{"index": i, "start": "2026-09-16T06:00:00Z", "total": 1, "complete": True,
+                            "previous_session": 1, "header_unreadable": 0} for i in range(returned)],
+            }},
+            {"name": "collection", "class": "raw", "data": {"kernel_whea": {"outcome": "ok", "returned": returned}}},
+            {"name": "coverage", "class": "derived", "data": {"kernel_whea": {"complete": True}}},
+        ],
+    }
+    saved = add(client, kind="reading", title="Synthetic Kernel-WHEA reports", envelope=reading)
+    assert saved["verbosity"] == "summary"
+    compact = client.get("/api/stack/composed", headers=AUTH).json()["text"]
+    assert len(compact) < 10_000 and "Bounded Kernel-WHEA report-time summary" in compact
+    assert '"previous_session": 150' in compact and '"other_reports": 140' in compact
+    assert '"highlighted_active":' in compact and '"totals":' not in compact
+    expanded = client.patch(f"/api/stack/items/{saved['id']}", headers=AUTH, json={"verbosity": "full"})
+    assert expanded.status_code == 200
+    full = client.get("/api/stack/composed", headers=AUTH).json()["text"]
+    assert len(full) > len(compact) * 10 and '"totals":' in full
+
+
 def test_a_malformed_supplied_envelope_is_refused_and_an_older_bad_item_does_not_break_the_handoff(client: TestClient):
     from sentinel.stack import render
 

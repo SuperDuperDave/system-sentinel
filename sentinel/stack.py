@@ -293,8 +293,8 @@ async def new_item(stack: Stack, bridge: Bridge, body: dict[str, Any], *, reader
             ids = _selection_ids(envelope, body.get("ids") or [])
 
     large_log = bool(kind == "reading" and envelope and envelope.get("reading") in ("events", "record", "whea", "faults") and len(_records(envelope) or []) > SUMMARY_LOG_LIMIT)
-    is_storm = bool(kind == "reading" and envelope and envelope.get("reading") == "storms")
-    verbosity = requested_verbosity or ("summary" if is_storm or large_log else "full")
+    is_timeline = bool(kind == "reading" and envelope and envelope.get("reading") in ("storms", "whea_reports"))
+    verbosity = requested_verbosity or ("summary" if is_timeline or large_log else "full")
 
     return Item(
         id=uuid.uuid4().hex,
@@ -424,6 +424,9 @@ def _item_lines(position: int, item: dict[str, Any]) -> list[str]:
     elif envelope.get("reading") == "storms" and item.get("verbosity") == "summary":
         lines += ["Bounded storm summary. Set this item to full for its stored buckets and signature samples; take `storms` again for a fresh observation.", ""]
         lines += _json_block(_storm_handoff_sections(envelope))
+    elif envelope.get("reading") == "whea_reports" and item.get("verbosity") == "summary":
+        lines += ["Bounded Kernel-WHEA report-time summary. These are report times, not error occurrence times; PreviousError marks an earlier Windows session. Set this item to full for every stored report and bucket, or take `whea_reports` again for a fresh observation.", ""]
+        lines += _json_block(_report_handoff_sections(envelope))
     elif selected_signals is not None:
         if item.get("verbosity") == "summary":
             selected_signals["data"] = [{k: s.get(k) for k in ("id", "class", "title", "summary", "readings")} for s in selected_signals["data"]]
@@ -615,6 +618,39 @@ def _storm_handoff_sections(envelope: dict[str, Any]) -> list[dict[str, Any]]:
         fields = ("id", "count", "description", "mci_status", "event_ids", "first_seen", "last_seen")
         shown = [{key: row.get(key) for key in fields} for row in shown_rows]
         output.append({**signatures, "data": {"distinct": len(rows), "shown": shown, "other_signatures": len(rows) - len(shown)}, "projection": "bounded summary"})
+    return output
+
+
+def _report_handoff_sections(envelope: dict[str, Any]) -> list[dict[str, Any]]:
+    """Carry channel reach, header flags and a few report-time highlights, never whole arrays."""
+    named = {section.get("name"): section for section in _sections(envelope) if isinstance(section.get("name"), str)}
+    output = [named[name] for name in ("coverage", "collection") if name in named]
+    buckets = named.get("buckets")
+    if isinstance(buckets, dict) and isinstance(buckets.get("data"), dict):
+        data = buckets["data"]
+        count, totals = data.get("bucket_count"), data.get("totals")
+        valid_totals = (type(count) is int and isinstance(totals, list) and len(totals) == count
+                        and all(value is None or type(value) is int and value >= 0 for value in totals))
+        rows = data.get("active") if isinstance(data.get("active"), list) else []
+        active = [row for row in rows if isinstance(row, dict) and type(row.get("index")) is int
+                  and type(row.get("total")) is int and row["index"] >= 0 and row["total"] >= 0]
+        active.sort(key=lambda row: row["index"])
+        peak = sorted(active, key=lambda row: (-row["total"], -row["index"]))[:5]
+        highlighted = {row["index"]: row for row in [*peak, *active[-5:]]}
+        sample = [{key: row.get(key) for key in ("index", "start", "total", "complete", "previous_session", "header_unreadable")}
+                  for row in sorted(highlighted.values(), key=lambda row: row["index"])]
+        summary = {key: data.get(key) for key in ("from", "to", "bucket_seconds", "bucket_count", "total", "unplaced", "unknown_buckets", "previous_session", "header_unreadable")}
+        summary.update(covered_buckets=sum(value is not None for value in totals) if valid_totals else None,
+                       active_buckets=len(active), highlighted_active=sample, other_active_buckets=len(active) - len(sample))
+        output.append({**buckets, "data": summary, "projection": "bounded summary",
+                       "basis": "Five highest report counts and five most recent active buckets, with their PreviousError and unreadable-header counts. Full report and bucket arrays remain in the stored reading. Times are report times, not error occurrence times."})
+    reports = named.get("reports")
+    if isinstance(reports, dict) and isinstance(reports.get("data"), list):
+        rows = [row for row in reports["data"] if isinstance(row, dict)]
+        indices = sorted(set([*range(min(5, len(rows))), *range(max(0, len(rows) - 5), len(rows))]))
+        shown = [{key: rows[index].get(key) for key in ("record_id", "reported_at", "header", "header_error")} for index in indices]
+        output.append({**reports, "data": {"returned": len(rows), "shown": shown, "other_reports": len(rows) - len(shown)},
+                       "projection": "bounded summary"})
     return output
 
 

@@ -41,7 +41,6 @@
 }
 .traceHit:hover { background: rgba(111, 240, 168, 0.14); }
 .traceTick { stroke: var(--rule-soft); stroke-width: 1; }
-.traceUnknown { fill: url(#stormUnknown); }
 .traceUnknownHatch { stroke: var(--muted); stroke-width: 1; opacity: .42; }
 .tracePath {
   stroke: var(--phosphor);

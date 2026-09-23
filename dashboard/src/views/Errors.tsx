@@ -8,7 +8,7 @@ import { useReading } from '../useReading';
 import styles from './Errors.module.css';
 
 /** The window counted into wall-clock buckets, idle ones included. */
-interface Buckets {
+interface TimelineBuckets {
   from: string;
   to: string;
   bucket_seconds: number;
@@ -17,10 +17,20 @@ interface Buckets {
   unplaced: number;
   totals: (number | null)[];
   unknown_buckets: number;
-  active: { index: number; start: string; total: number; complete: boolean; signatures: Record<string, number> }[];
+  active: { index: number; start: string; total: number; complete: boolean }[];
+}
+
+interface Buckets extends TimelineBuckets {
+  active: (TimelineBuckets['active'][number] & { signatures: Record<string, number> })[];
+}
+
+interface ReportBuckets extends TimelineBuckets {
+  previous_session: number;
+  header_unreadable: number;
 }
 
 interface Coverage { system: { covered_from: string | null; covered_from_inclusive: boolean | null; complete: boolean | null } }
+interface ReportCoverage { kernel_whea: { covered_from: string | null; covered_from_inclusive: boolean | null; complete: boolean | null } }
 
 /** The burst and acceleration rules applied to those buckets: a lead, never a diagnosis. */
 interface Status {
@@ -109,30 +119,27 @@ const COUNTS = [30, 100, 500];
 /**
  * Hardware errors: what the firmware told Windows, and the shape of it over time.
  *
- * Two readings, each with its own outcome line, because they answer different questions and can
- * fail apart: `storms` counts the window and applies the burst rules, `whea` fetches the records
- * themselves with the CPER payload decoded beside each one. The status is a lead — it is typed
+ * Three readings, each with its own outcome line, because they answer different questions and can
+ * fail apart: `storms` counts System-log errors, `whea_reports` counts separate Kernel-WHEA report
+ * times, and `whea` fetches the records themselves with their CPER headers. The status is a lead — it is typed
  * inferred, it carries its rule in the open, and it is never lit. The one lit thing on this page
- * is the trace, which is the window itself: one line over every wall-clock bucket, flat when the
- * machine reported nothing, which on a healthy machine is what it should be.
+ * is the trace, which is the window itself: one line over every wall-clock bucket, flat only
+ * where covered buckets returned nothing and hatched where a quiet claim is unsupported.
  */
 export function Errors() {
   const [span, setSpan] = useState<Span>(24);
   const [count, setCount] = useState(30);
 
-  // Since boot is the machine's number, not the dashboard's: the window is only as long as this
-  // session has been up, so the snapshot is taken when that option is chosen and not before.
+  // The machine supplies uptime; both readings accept whole hours, so rounding up can include
+  // some time before this session. Say that rather than calling the query an exact boot cutoff.
   const boot = span === 'boot';
   const system = useReading('system', {}, boot);
   const uptime = part<{ uptime_seconds: number | null }>(system.reading, 'snapshot')?.uptime_seconds ?? null;
   const bootHours = uptime == null ? null : Math.max(1, Math.ceil(uptime / 3600));
   const hours = boot ? bootHours : span;
-  const windowLabel = boot ? (hours == null ? 'since boot' : `since boot, ${hours} hours`) : WINDOWS.find((w) => w.value === span)?.label ?? `${span} hours`;
-  const inWindow = boot ? windowLabel : `in the last ${windowLabel}`;
-  // Once the machine has said how long it has been up, the option says how long the window is:
-  // "since boot" is a question until then and an answer afterwards. Only the machine's number
-  // goes on it, never the fixed span that happens to be chosen.
-  const windows = WINDOWS.map((w) => (w.value === 'boot' && bootHours !== null ? { value: w.value, label: `since boot · ${bootHours} h` } : w));
+  const windowLabel = boot ? (hours == null ? 'this session' : `${hours}-hour window around this session`) : WINDOWS.find((w) => w.value === span)?.label ?? `${span} hours`;
+  const inWindow = boot ? `in the ${windowLabel}` : `in the last ${windowLabel}`;
+  const windows = WINDOWS.map((w) => (w.value === 'boot' && bootHours !== null ? { value: w.value, label: `since boot · ${bootHours} h window` } : w));
 
   // The reading counts the window into buckets and refuses one that would take more than its cap,
   // so a long window asks for wider buckets: sixty seconds up to about two weeks, then five
@@ -140,6 +147,7 @@ export function Errors() {
   // can draw, and the status names the bucket it was computed over.
   const bucketSeconds = hours === null ? 60 : bucketFor(hours);
   const storms = useReading('storms', hours === null ? { hours: 24 } : { hours, bucket_seconds: bucketSeconds }, hours !== null);
+  const reports = useReading('whea_reports', hours === null ? { hours: 24 } : { hours, bucket_seconds: bucketSeconds }, hours !== null);
   const whea = useReading('whea', { count });
 
   const buckets = part<Buckets>(storms.reading, 'buckets');
@@ -151,6 +159,13 @@ export function Errors() {
       ? `System log timeline: no WHEA-Logger records returned ${inWindow}; log coverage could not be established`
       : `System log timeline: no WHEA-Logger records returned ${inWindow}; the window is not fully covered`;
   const signatures = part<Signature[]>(storms.reading, 'signatures') ?? [];
+  const reportBuckets = part<ReportBuckets>(reports.reading, 'buckets');
+  const reportCoverage = part<ReportCoverage>(reports.reading, 'coverage')?.kernel_whea;
+  const emptyReportText = reportCoverage?.complete
+    ? `No Kernel-WHEA reports recorded ${inWindow}`
+    : reportCoverage?.covered_from == null
+      ? `No Kernel-WHEA reports returned ${inWindow}; channel coverage could not be established`
+      : `No Kernel-WHEA reports returned ${inWindow}; the channel does not cover the full window`;
 
   const records = part<EventRecord[]>(whea.reading, 'records') ?? [];
   const decoded = part<Decoded[]>(whea.reading, 'decoded') ?? [];
@@ -181,7 +196,7 @@ export function Errors() {
       ) : (
         <OutcomeLine taken={storms} noun={coverage?.complete ? 'WHEA-Logger records' : 'returned WHEA-Logger records'} singular={coverage?.complete ? 'WHEA-Logger record' : 'returned WHEA-Logger record'} emptyText={emptyStormText} />
       )}
-      {hours !== null ? <p className={`${styles.windowNote} readout`}>This timeline uses the System log. The records below also check Windows’ separate hardware-error channel; a quiet timeline cannot clear that channel.</p> : null}
+      {hours !== null ? <p className={`${styles.windowNote} readout`}>This status uses the System log. Kernel-WHEA has its own report timeline below; a quiet System timeline cannot clear that channel.{boot ? ' The whole-hour window can include time before this session began.' : ''}</p> : null}
 
       {hours !== null && observed(storms.reading) && status ? (
         <Section
@@ -225,6 +240,24 @@ export function Errors() {
             )}
             inspect={(s) => <SignatureDetail signature={s} />}
           />
+        </Section>
+      ) : null}
+
+      {hours !== null ? (
+        <Section
+          title="Kernel-WHEA reports"
+          cls="derived"
+          basis={basisOf(reports.reading, 'buckets')}
+          controls={reports.reading ? <AddToStack item={{ kind: 'reading', envelope: reports.reading, title: `Kernel-WHEA reports, ${windowLabel}` }} /> : null}
+        >
+          <OutcomeLine taken={reports} noun={reportCoverage?.complete ? 'Kernel-WHEA reports' : 'returned Kernel-WHEA reports'} singular={reportCoverage?.complete ? 'Kernel-WHEA report' : 'returned Kernel-WHEA report'} emptyText={emptyReportText} />
+          <p className={`${styles.windowNote} readout`}>This trace places reports when Windows wrote them. A CPER PreviousError flag means the hardware condition occurred in an earlier Windows session; a cluster here does not establish when those errors occurred.</p>
+          {observed(reports.reading) && reportBuckets ? (
+            <>
+              <Trace buckets={reportBuckets} source="Kernel-WHEA reports" interactive={false} />
+              <p className={`${styles.rates} readout`}>{reportBuckets.previous_session} returned report{reportBuckets.previous_session === 1 ? '' : 's'} marked previous session · {reportBuckets.header_unreadable} with unreadable headers · {reportBuckets.unknown_buckets} buckets with incomplete coverage</p>
+            </>
+          ) : null}
         </Section>
       ) : null}
 
@@ -327,8 +360,9 @@ function WheaSources({ collection, coverage }: { collection: WheaCollection; cov
  * somewhere in the window at a glance, and keep an empty window reading as a window rather than
  * as a blank.
  */
-function Trace({ buckets }: { buckets: Buckets }) {
+function Trace({ buckets, source = 'WHEA-Logger records', interactive = true }: { buckets: TimelineBuckets; source?: string; interactive?: boolean }) {
   const setMoment = useApp((s) => s.setMoment);
+  const unknownPattern = interactive ? 'stormUnknown' : 'reportUnknown';
   const totals = buckets.totals ?? [];
   const active = new Map(buckets.active.map((bucket) => [bucket.index, bucket.total]));
   const width = 720;
@@ -359,13 +393,13 @@ function Trace({ buckets }: { buckets: Buckets }) {
     if (last && last.to === index - 1) last.to = index;
     else group.push({ from: index, to: index });
   });
-  const label = `${buckets.total} returned WHEA-Logger records over ${buckets.bucket_count} buckets of ${buckets.bucket_seconds} seconds; coverage unknown for ${buckets.unknown_buckets} buckets; highest returned count ${peak} in one bucket`;
+  const label = `${buckets.total} returned ${source} over ${buckets.bucket_count} buckets of ${buckets.bucket_seconds} seconds; coverage unknown for ${buckets.unknown_buckets} buckets; highest returned count ${peak} in one bucket`;
 
   // The lit stretches are the only ones worth going to, so they are the only ones that are a
   // control: a hit target over each run of columns that holds a record, and nothing at all over a
   // quiet one. The line itself is untouched; the targets are a layer above it.
   const unit = 100 / Math.max(1, columns - 1);
-  const runs = lit(peaks)
+  const runs = (interactive ? lit(peaks) : [])
     .map((run) => ({ from: run.from, to: run.to, at: endOf(buckets, peaks[run.to].ends) }))
     .filter((run): run is { from: number; to: number; at: string } => run.at !== null);
 
@@ -374,9 +408,9 @@ function Trace({ buckets }: { buckets: Buckets }) {
       <div className={styles.traceStage}>
         <svg className={styles.trace} viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" role="img" aria-label={label}>
           <defs>
-            <pattern id="stormUnknown" width="7" height="7" patternUnits="userSpaceOnUse"><path className={styles.traceUnknownHatch} d="M0 7L7 0" /></pattern>
+            <pattern id={unknownPattern} width="7" height="7" patternUnits="userSpaceOnUse"><path className={styles.traceUnknownHatch} d="M0 7L7 0" /></pattern>
           </defs>
-          {unknownRuns.map((run) => <rect key={`unknown-${run.from}`} className={styles.traceUnknown} x={(run.from / columns) * width} y="0" width={((run.to - run.from + 1) / columns) * width} height={height} />)}
+          {unknownRuns.map((run) => <rect key={`unknown-${run.from}`} className={styles.traceUnknown} style={{ fill: `url(#${unknownPattern})` }} x={(run.from / columns) * width} y="0" width={((run.to - run.from + 1) / columns) * width} height={height} />)}
           {Array.from({ length: quarters - 1 }, (_, i) => {
             const x = ((i + 1) / quarters) * width;
             return <line key={i} className={styles.traceTick} x1={x} y1="0" x2={x} y2={height} vectorEffect="non-scaling-stroke" />;
@@ -445,7 +479,7 @@ function lit(peaks: { top: number }[]): { from: number; to: number }[] {
 
 /** Where a column ends in wall-clock time, from the window's own start and bucket size. Never past
  *  the window's end, so the last column of a partly filled bucket does not point into the future. */
-function endOf(buckets: Buckets, bucketIndex: number): string | null {
+function endOf(buckets: TimelineBuckets, bucketIndex: number): string | null {
   const from = Date.parse(buckets.from);
   const to = Date.parse(buckets.to);
   if (Number.isNaN(from)) return null;

@@ -5,7 +5,7 @@ that renders the real thing, over records that were never on this machine.
 
 Answers:
   - the identity probe (``$env:COMPUTERNAME``): a placeholder host and user
-  - WHEA (``whea``, ``storms``): tests/fixtures/whea-records.json for System rows, with each
+  - WHEA (``whea``, ``storms``, ``whea_reports``): tests/fixtures/whea-records.json for System rows, with each
     binary System record given a decodable CPER payload; two synthetic Kernel-WHEA channel rows
     exercise fatal previous-session and unavailable-header presentation
   - the System log (``events``, ``record``): docs/screens/fixtures/system-log.json, filtered
@@ -229,6 +229,35 @@ def answer_whea(script: str) -> BridgeResult:
     return BridgeResult("ok", items=[{"sources": [source, channel]}], took_ms=412)
 
 
+def answer_whea_reports(script: str) -> BridgeResult:
+    """The bounded report-time projection; the two channel rows are both synthetic."""
+    now = time.time()
+    bucket_seconds = int(re.search(r"\$bucketTicks = \[long\](\d+)", script).group(1))
+    count = int(re.search(r"\(\[long\]\((\d+) - 1\)", script).group(1))
+    start = _powershell_stamp((int(now // bucket_seconds) - count + 1) * bucket_seconds)
+    end = _powershell_stamp(int(now * 1000) / 1000)
+    cap = max(int(value) for value in _MAXEVENTS_RE.findall(script)) - 1
+    first, until = _parse_stamp(start), _parse_stamp(end)
+    rows = []
+    for record in kernel_whea_records(now):
+        if not first <= _parse_stamp(record["TimeCreated"]) < until:
+            continue
+        raw = record["RawData"]
+        rows.append({
+            "RecordId": record["RecordId"], "Id": record["Id"], "ProviderName": record["ProviderName"],
+            "LogName": record["Log"], "TimeCreated": record["TimeCreated"],
+            "HeaderHex": raw[:256], "PayloadBytes": len(raw) // 2,
+        })
+    kept = rows[:cap]
+    source = {
+        "log": "Microsoft-Windows-Kernel-WHEA/Errors", "outcome": "ok" if kept else "empty", "error": None,
+        "returned": len(kept), "limit": cap, "truncated": len(rows) > cap, "stopped": None, "records": kept,
+        "log_enabled": True, "log_mode": "Circular", "log_state": "ok", "log_error": None,
+        "log_oldest": _powershell_stamp(_parse_stamp(start) - 86400), "oldest_state": "ok", "oldest_error": None,
+    }
+    return BridgeResult("ok", items=[{"window_start": start, "window_end": end, "source": source}], took_ms=24)
+
+
 class FixtureBridge:
     exe = "fixture"
     available = True
@@ -244,6 +273,8 @@ class FixtureBridge:
             return BridgeResult("ok", items=[{"log": "System", "record": top}, {"log": "Application", "record": 1}], took_ms=6)
         if "Read-WheaSource" in script and "sources = @(" in script:
             return answer_whea(script)
+        if "window_start = $startIso" in script and "Provider[@Name='Microsoft-Windows-Kernel-WHEA']" in script:
+            return answer_whea_reports(script)
         if "window_start = $startIso" in script and "WHEA-Logger" in script:
             # The storm collector returns one source object, not the record list used by whea.
             now = time.time()
