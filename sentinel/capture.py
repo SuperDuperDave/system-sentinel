@@ -1,11 +1,11 @@
-"""Captures: every reading taken now, written to one ZIP on disk, and nothing sent anywhere.
+"""Captures: readings that can be taken without a selection, written to one ZIP on disk.
 
 A capture is what a person hands to someone who is not at the machine, or keeps for the day the
-machine will not start. It holds one envelope per reading — the heavy ones included, so it takes
+machine will not start. It holds one envelope per automatically selectable reading — the heavy ones included, so it takes
 as long as the slowest query on this machine — the stack as it stands, the composed handoff, and
 a manifest that lists exactly the members with each reading's outcome and size. A reading that
-could not be taken is written with its outcome, never omitted: a capture says what was not
-observed as plainly as what was.
+needs an exact event or file reference is listed as omitted in that manifest. A reading that was
+attempted but could not answer is written with its outcome, never hidden.
 
 The files are redacted like every other response unless the caller asked for ``unredacted`` by
 name. Nothing is ever deleted: the directory is the person's record.
@@ -25,7 +25,7 @@ from typing import Any
 from . import __version__
 from .bridge import OUTCOMES, Bridge
 from .paths import captures_dir
-from .reading import REGISTRY, Reading, ReadingCall, take
+from .reading import REGISTRY, Reading, ReadingCall, automatic_params, take
 from .redact import Redactor
 from .serialization import json_safe_integers
 from .stack import Prompts, Stack, compose
@@ -50,14 +50,17 @@ class Capture:
 
 
 async def create(bridge: Bridge, stack: Stack, prompts: Prompts, redactor: Redactor | None = None, *, reason: str | None = None, reader: ReadingCall | None = None) -> Capture:
-    """Take every reading in the catalog now and write the ZIP. Returns where it landed and its manifest."""
+    """Take every reading that needs no exact selection and write the ZIP."""
     started = datetime.now(UTC)
     path = _free_path(started)
     members: list[dict[str, Any]] = []
     removed: set[str] = set()
+    omitted = [{"reading": name, "reason": "requires an exact selection"} for name, spec in REGISTRY.items() if spec.requires_selection]
 
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
-        for name in list(REGISTRY):
+        for name, spec in list(REGISTRY.items()):
+            if spec.requires_selection:
+                continue
             reading = await _take(name, bridge, started, reader)
             body = reading.to_dict()
             if redactor is not None:
@@ -83,7 +86,8 @@ async def create(bridge: Bridge, stack: Stack, prompts: Prompts, redactor: Redac
             "created_at": _stamp(started),
             "unredacted": redactor is None,
             "redacted": sorted(removed),
-            "readings": len(REGISTRY),
+            "readings": len(REGISTRY) - len(omitted),
+            "omitted": omitted,
             "members": members,
         }
         if reason and redactor is None:
@@ -98,7 +102,7 @@ async def _take(name: str, bridge: Bridge, at: datetime, reader: ReadingCall | N
 
     Anything the catalog refuses becomes an envelope that says so, so one reading cannot end a capture.
     """
-    params = {"before": _stamp(at)} if name == "record" else {}
+    params = automatic_params(name, at)
     try:
         return await reader(name, params) if reader else await take(name, bridge, params)
     except Exception as exc:  # noqa: BLE001 - one reading's failure must not end the capture
@@ -163,12 +167,22 @@ def _manifest_summary(path: Path) -> dict[str, Any]:
         return {"status": "unreadable"}
     if any(row.get("outcome") not in OUTCOMES for row in rows):
         return {"status": "unreadable"}
+    omitted = manifest.get("omitted", [])
+    if not isinstance(omitted, list) or any(
+        not isinstance(entry, dict) or not isinstance(entry.get("reading"), str) or not isinstance(entry.get("reason"), str)
+        for entry in omitted
+    ):
+        return {"status": "unreadable"}
+    omitted_names = [entry["reading"] for entry in omitted]
+    if len(omitted_names) != len(set(omitted_names)) or set(omitted_names) & {row["reading"] for row in rows}:
+        return {"status": "unreadable"}
     counts = Counter(row["outcome"] for row in rows)
     return {
         "status": "read",
         "captured_at": captured_at,
         "unredacted": unredacted,
         "readings": readings,
+        "omitted": len(omitted_names),
         "outcomes": {outcome: counts[outcome] for outcome in OUTCOMES if counts[outcome]},
     }
 

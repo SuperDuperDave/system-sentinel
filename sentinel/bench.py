@@ -1,6 +1,6 @@
 """The bench: what a reading costs on this machine, measured rather than claimed.
 
-``system-sentinel bench`` takes every reading in the catalog N times through the real bridge and
+``system-sentinel bench`` takes every automatically selectable reading N times through the real bridge and
 reports the distribution of each envelope's own ``took_ms`` — the number the caller waited for,
 not a stopwatch held around a different piece of code. It only ever takes readings, so it reads
 the machine and never writes to it.
@@ -34,7 +34,7 @@ from typing import Any
 from . import __version__
 from . import bridge as bridge_module
 from .bridge import Bridge
-from .reading import REGISTRY, Reading, take
+from .reading import REGISTRY, Reading, automatic_params, take
 
 TRANSPORTS: tuple[str, ...] = ("session", "one-shot")
 DEFAULT_RUNS = 3
@@ -84,8 +84,8 @@ other one through. The transport a section names is the one that carried its que
 sets the pool's size before the first question and reads back what the bridge did with it, so a
 question that fell back to a launch is counted on the line rather than hidden in the numbers.
 
-A run takes the whole catalog, the heavy readings included, so it is as slow as the slowest query
-on the machine: `--readings a,b` narrows it when only some are in question, and `--runs N` buys a
+A default run takes each reading that needs no exact file or event selection, the heavy readings included, so it is as slow as the slowest query
+on the machine. `--readings a,b` narrows it when only some are in question; a selection-dependent reading named without a reference is marked not taken. `--runs N` buys a
 tail worth reading, since a p95 over three runs is only the slowest of the three.
 
 Nothing here names a machine, a person or a path, and `bench` refuses to write a document that
@@ -208,7 +208,7 @@ def percentile(times: Sequence[int], q: float) -> int:
 
 
 def select(wanted: str | Iterable[str] | None = None) -> list[str]:
-    """The readings to measure, in catalog order. Nothing named means every one of them.
+    """The readings to measure, in catalog order. Nothing named means every automatic reading.
 
     An unknown name is refused rather than skipped: a bench that quietly measured nothing would
     still print a table, and a table is read as evidence.
@@ -221,7 +221,7 @@ def select(wanted: str | Iterable[str] | None = None) -> list[str]:
     else:
         names = [str(n).strip() for n in wanted if str(n).strip()]
     if not names:
-        return catalog
+        return [name for name in catalog if not REGISTRY[name].requires_selection]
     unknown = sorted(set(names) - set(catalog))
     if unknown:
         raise ValueError(f"unknown reading(s) {unknown}; the catalog holds {catalog}")
@@ -275,6 +275,9 @@ async def measure(bridge: Bridge, *, names: Sequence[str], runs: int = DEFAULT_R
     rows: list[Row] = []
     machine: str | None = None
     for name in names:
+        if REGISTRY[name].requires_selection:
+            rows.append(Row(name, (), note="requires an exact selection; this bench has no reference to measure"))
+            continue
         attempts: list[Attempt] = []
         note: str | None = None
         for _ in range(runs):
@@ -306,7 +309,7 @@ async def _take(name: str, bridge: Bridge) -> Reading:
     ``record`` frames the log on a moment, so it is given now — the same rule a capture uses, and
     the same query shape the dashboard runs when a reader jumps to the newest record.
     """
-    params = {"before": _stamp()} if name == "record" else {}
+    params = automatic_params(name)
     return await take(name, bridge, params)
 
 
@@ -469,7 +472,3 @@ def as_json(report: Report) -> str:
     text = json.dumps(report.to_dict(), ensure_ascii=False, indent=1)
     check_clean(text)
     return text
-
-
-def _stamp() -> str:
-    return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")

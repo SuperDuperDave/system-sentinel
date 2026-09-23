@@ -341,13 +341,13 @@ function Handoff({ handoff }: { handoff: Composed | null }) {
   );
 }
 
-/** A capture is every reading at one moment, written to disk. It is the slowest thing here. */
+/** A capture is every automatically selectable reading at one moment, written to disk. */
 function Captures({ captures, onTaken, guard }: { captures: Capture[]; onTaken: () => void; guard: (work: () => Promise<void>) => Promise<void> }) {
   const [taking, setTaking] = useState(false);
   return (
     <>
       <p className={styles.what}>
-        Every reading in the catalog, taken now and written into the data directory as one ZIP: an envelope for each, the stack, and the handoff.
+        Readings that need no exact file or event selection, taken now and written into the data directory as one ZIP: an envelope for each, the stack, and the handoff. The manifest lists readings omitted because they need a selection.
         It takes as long as the slowest query on this machine. Nothing is sent anywhere. The list below reads each manifest; it does not verify the rest of the ZIP.
       </p>
       <p className={styles.handoffLine}>
@@ -367,7 +367,7 @@ function Captures({ captures, onTaken, guard }: { captures: Capture[]; onTaken: 
             })
           }
         >
-          {taking ? 'Taking every reading…' : 'Capture'}
+          {taking ? 'Taking readings…' : 'Capture'}
         </button>
       </p>
       {captures.length ? (

@@ -310,7 +310,7 @@ export function Errors() {
                 </>
               );
             }}
-            inspect={(r) => <RecordDetail record={r} identity={identityByRef.get(recordRef(r))} decoded={decoded.find((d) => recordRef(d) === recordRef(r))} envelope={whea.reading} count={count} />}
+            inspect={(r) => <RecordDetail record={r} identity={identityByRef.get(recordRef(r))} decoded={decoded.find((d) => recordRef(d) === recordRef(r))} envelope={whea.reading} />}
           />
         ) : null}
       </Section>
@@ -515,7 +515,7 @@ function SignatureDetail({ signature }: { signature: Signature }) {
 }
 
 /** One source record in full, with the decoded structure of its payload beside it. */
-function RecordDetail({ record, identity, decoded, envelope, count }: { record: EventRecord; identity?: WheaIdentity; decoded?: Decoded; envelope: Reading | null; count: number }) {
+function RecordDetail({ record, identity, decoded, envelope }: { record: EventRecord; identity?: WheaIdentity; decoded?: Decoded; envelope: Reading | null }) {
   const cper = identity?.cper;
   return (
     <>
@@ -555,7 +555,7 @@ function RecordDetail({ record, identity, decoded, envelope, count }: { record: 
           </div>
         </details>
       ) : null}
-      <RawReadout record={record} count={count} />
+      <RawReadout record={record} />
       <div className={styles.rowActions}>
         <MomentLink at={record.TimeCreated} />
         {envelope ? (
@@ -566,9 +566,10 @@ function RecordDetail({ record, identity, decoded, envelope, count }: { record: 
   );
 }
 
-function RawReadout({ record, count }: { record: EventRecord; count: number }) {
+function RawReadout({ record }: { record: EventRecord }) {
   const [requested, setRequested] = useState(false);
-  const exact = useReading('whea', { count, unredacted: true }, requested);
+  const source = record.Log === KERNEL_WHEA ? 'kernel_whea' : 'system';
+  const exact = useReading('whea_record', { source, record_id: record.RecordId, unredacted: true }, requested);
   const matching = part<EventRecord[]>(exact.reading, 'records')?.find((candidate) => recordRef(candidate) === recordRef(record) && candidate.TimeCreated === record.TimeCreated);
   return (
     <details className={styles.decoded}>
@@ -577,7 +578,7 @@ function RawReadout({ record, count }: { record: EventRecord; count: number }) {
       <button className={styles.exactRaw} type="button" onClick={() => requested ? exact.retake() : setRequested(true)} disabled={exact.state === 'taking'}>{requested ? 'Refresh exact readout' : 'Show exact returned fields and CPER bytes'}</button>
       {exact.state === 'taking' ? <p className={`${styles.notDecoded} readout`}>Reading exact fields from Windows…</p> : null}
       {exact.state === 'lost' || exact.reading && !observed(exact.reading) ? <p className={`${styles.notDecoded} readout`}>Exact readout unavailable: {exact.problem ?? exact.reading?.error?.detail ?? 'the source did not answer'}</p> : null}
-      {requested && exact.state === 'done' && observed(exact.reading) && !matching ? <p className={`${styles.notDecoded} readout`}>This record is no longer in the newest {count} returned rows. Take a wider reading and select it again.</p> : null}
+      {requested && exact.state === 'done' && observed(exact.reading) && !matching ? <p className={`${styles.notDecoded} readout`}>This exact log reference no longer matches the selected record. The log may have rotated or reused its RecordId; refresh the reading before relying on it.</p> : null}
       {matching ? <div className={styles.exactRawBody}><p className="label">Exact Windows fields and CPER bytes · unredacted</p><div className={styles.decodedBody}><Tree value={matching} /></div></div> : null}
     </details>
   );

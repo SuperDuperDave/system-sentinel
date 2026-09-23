@@ -187,7 +187,7 @@ async def _stack_prompt(state: State, arguments: dict[str, Any], redactor: Redac
 
 
 async def _capture_create(state: State, arguments: dict[str, Any], redactor: Redactor | None) -> Any:
-    """Take the whole catalog into one ZIP on this machine and say where it landed.
+    """Take readings that need no exact selection into one ZIP and say where it landed.
 
     The route hands back the file itself; a tool cannot, so it answers with the capture's name and
     its manifest — which already says whether it was written unredacted and what was removed — and
@@ -276,15 +276,16 @@ CAPTURE_TOOLS: dict[str, RouteTool] = {
     for tool in (
         RouteTool(
             "capture_create",
-            "Take every reading in the catalog now and write them, the stack, the composed handoff and a manifest into "
-            "one ZIP in the captures directory. Takes as long as the slowest query on this machine. Nothing is sent anywhere.",
+            "Take readings that need no exact selection and write them, the stack, the composed handoff and a manifest into "
+            "one ZIP in the captures directory. The manifest names readings omitted because they need a selection. "
+            "Takes as long as the slowest query on this machine. Nothing is sent anywhere.",
             _NO_ARGUMENTS,
             _capture_create,
             effect="changes",
         ),
         # Only bounded outcome counts and privacy state leave the manifest; there are no identity
         # fields to reveal through an unredacted variant of this tool.
-        RouteTool("capture_list", "The captures on disk, newest first, with each readable manifest's redaction state and reading outcomes. Captures are never deleted by the tool.", _NO_ARGUMENTS, _capture_list, carries_machine_data=False),
+        RouteTool("capture_list", "The captures on disk, newest first, with each readable manifest's redaction state, reading outcomes and omitted count. Captures are never deleted by the tool.", _NO_ARGUMENTS, _capture_list, carries_machine_data=False),
     )
 }
 

@@ -477,7 +477,7 @@ def create_app(state: State | None = None, mcp: bool = True) -> FastAPI:
 
     @app.post("/api/captures", tags=["captures"])
     async def captures_create(unredacted: bool = False) -> Response:
-        """Take every reading now, write the ZIP into the data directory and return it. Takes as
+        """Take readings that need no exact selection, write the ZIP into the data directory and return it. Takes as
         long as the slowest query on this machine; nothing is sent anywhere."""
         made = await capture.create(state.bridge, state.stack, state.prompts, None if unredacted else state.redactor, reader=state.readings.take)
         return FileResponse(made.path, media_type="application/zip", filename=made.name, headers={"X-Capture-Name": made.name})

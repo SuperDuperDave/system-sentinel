@@ -103,11 +103,13 @@ def test_a_reading_the_catalog_could_not_take_is_kept_apart_from_the_six_outcome
 # ---------------------------------------------------------------------------
 
 
-def test_nothing_named_measures_the_whole_catalog():
+def test_nothing_named_measures_each_reading_that_needs_no_selection():
     from sentinel.reading import REGISTRY
 
-    assert bench.select("") == list(REGISTRY)
-    assert bench.select(None) == list(REGISTRY)
+    automatic = [name for name, spec in REGISTRY.items() if not spec.requires_selection]
+    assert bench.select("") == automatic
+    assert bench.select(None) == automatic
+    assert bench.select("whea_record") == ["whea_record"]
 
 
 def test_the_narrowing_flag_selects_in_catalog_order():
@@ -185,6 +187,15 @@ def test_a_reading_that_raises_is_reported_and_does_not_end_the_bench(monkeypatc
 def test_the_moment_a_record_needs_is_supplied_so_the_reading_can_be_taken():
     report = asyncio.run(bench.measure(FakeBridge(), names=["record"], runs=1, transport="one-shot"))
     assert report.rows[0].outcome == "ok" and report.rows[0].note is None
+
+
+def test_an_explicit_selection_reading_has_no_synthetic_failure_or_measurement():
+    fake = FakeBridge()
+    report = asyncio.run(bench.measure(fake, names=["whea_record", "system"], runs=1, transport="one-shot"))
+    selected, automatic = report.rows
+    assert selected.outcome == "not taken" and selected.note == "requires an exact selection; this bench has no reference to measure"
+    assert automatic.observed == 1
+    assert not any("EventRecordID=" in script for script in fake.scripts)
 
 
 def test_the_json_carries_the_samples_beside_the_numbers_derived_from_them():

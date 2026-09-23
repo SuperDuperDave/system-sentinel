@@ -143,9 +143,9 @@ def test_spec_coerces_defaults_types_and_choices():
 def test_numeric_bounds_are_shared_by_the_catalog_and_all_callers():
     for spec in REGISTRY.values():
         for param in spec.params:
-            if param.minimum is not None:
+            if param.default is not None and param.minimum is not None:
                 assert param.default >= param.minimum, (spec.name, param.name)
-            if param.maximum is not None:
+            if param.default is not None and param.maximum is not None:
                 assert param.default <= param.maximum, (spec.name, param.name)
     for name in ("events", "record", "whea", "faults", "crash", "drivers"):
         spec = REGISTRY[name]
@@ -172,6 +172,20 @@ def test_required_param_is_refused_when_missing():
     with pytest.raises(ValueError, match="'before' is required"):
         spec.coerce({})
     assert spec.coerce({"before": "2026-09-20T18:04:11Z"})["before"] == "2026-09-20T18:04:11Z"
+
+
+def test_every_automatic_reading_has_parameters_bulk_callers_can_supply():
+    from datetime import UTC, datetime
+
+    from sentinel.reading import automatic_params
+
+    at = datetime(2026, 9, 20, tzinfo=UTC)
+    for name, spec in REGISTRY.items():
+        if spec.requires_selection:
+            with pytest.raises(ValueError, match="requires an exact selection"):
+                automatic_params(name, at)
+        else:
+            spec.coerce(automatic_params(name, at))
 
 
 def test_catalog_lists_every_registered_reading_once():

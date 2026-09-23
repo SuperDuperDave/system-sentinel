@@ -105,6 +105,8 @@ class Spec:
     """What this reading may carry that the default redaction removes."""
     heavy: bool = False
     """Takes seconds: the dashboard loads it on demand."""
+    requires_selection: bool = False
+    """Needs an exact user or agent reference; bulk capture and bench cannot choose one."""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -122,6 +124,7 @@ class Spec:
             ],
             "private": list(self.private),
             "heavy": self.heavy,
+            "requires_selection": self.requires_selection,
         }
 
     def coerce(self, raw: dict[str, Any]) -> dict[str, Any]:
@@ -180,6 +183,17 @@ def register(spec: Spec) -> Spec:
         raise ValueError(f"reading {spec.name!r} registered twice")
     REGISTRY[spec.name] = spec
     return spec
+
+
+def automatic_params(name: str, at: datetime | None = None) -> dict[str, Any]:
+    """Parameters bulk capture, bench and transport soak can choose without guessing a target."""
+    spec = REGISTRY[name]
+    if spec.requires_selection:
+        raise ValueError(f"reading {name!r} requires an exact selection")
+    if name == "record":
+        moment = at or datetime.now(UTC)
+        return {"before": moment.astimezone(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")}
+    return {}
 
 
 async def take(name: str, bridge: Bridge, raw_params: dict[str, Any] | None = None) -> Reading:

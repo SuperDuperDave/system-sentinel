@@ -27,6 +27,7 @@ from fastapi.testclient import TestClient
 from sentinel import readings  # noqa: F401
 from sentinel.app import State, create_app
 from sentinel.bridge import BridgeResult
+from sentinel.mcp_server import tools
 from sentinel.reading import take
 from sentinel.readings import whea
 from tests.conftest import FakeBridge, identity_result, real_bridge_or_skip
@@ -249,6 +250,93 @@ def test_authenticated_boundary_withholds_cper_by_default_and_serves_exact_bytes
     assert hidden["Properties"][0].startswith("<cper bytes withheld") and payload not in json.dumps(redacted)
     assert raw["RawData"] == raw["Properties"][0] == payload
     assert next(s["data"][0]["cper"]["severity"] for s in redacted["sections"] if s["name"] == "identity") == "fatal"
+
+
+def exact_record(answer: dict[str, Any], *, record_id: int = 77, source_name: str = "kernel_whea"):
+    bridge = FakeBridge(BridgeResult("ok", items=[{"source": answer}], took_ms=11))
+    return asyncio.run(take("whea_record", bridge, {"source": source_name, "record_id": record_id}))
+
+
+def test_exact_record_uses_log_and_record_id_and_preserves_the_raw_row(no_decoder_launch):
+    payload = cper(77)
+    event = row(whea.CHANNEL, 77, stamp(1), raw=payload)
+    reading = exact_record(source("kernel_whea", [event], limit=1))
+    assert reading.outcome == "ok" and reading.count == 1
+    assert sections(reading)["records"] == [event]
+    assert sections(reading)["identity"][0]["cper"]["previous_session"] is True
+    assert sections(reading)["decoded"][0]["error"] == whea.DEFERRED
+    assert sections(reading)["collection"]["source"]["outcome"] == "ok"
+    script = whea.whea_record_script(whea.WHEA_SOURCES[1], 77)
+    assert "EventRecordID=77" in script and "(EventID=20)" in script
+    assert "-MaxEvents ($limit + 1)" in script and f"1 {whea.MAX_EXACT_BINARY_BYTES}" in script
+
+
+@pytest.mark.parametrize("answer,expected", [
+    (source("kernel_whea", [], limit=1), "empty"),
+    (failed("kernel_whea"), "failed"),
+    (failed("kernel_whea", outcome="denied"), "denied"),
+    (source("kernel_whea", [row(whea.CHANNEL, 78, stamp(1))], limit=1), "failed"),
+    (source("kernel_whea", [row(whea.CHANNEL, 77, stamp(1))], limit=1, truncated=True), "failed"),
+    (source("kernel_whea", [row(whea.CHANNEL, 77, stamp(1))], limit=1, stopped={"kind": "failed", "detail": "stopped"}), "failed"),
+    (source("kernel_whea", [row(whea.CHANNEL, 77, stamp(1))], limit=1, stopped={"kind": "denied", "detail": "denied"}), "denied"),
+])
+def test_exact_record_distinguishes_missing_from_untrustworthy(answer, expected):
+    reading = exact_record(answer)
+    assert reading.outcome == expected
+    assert reading.count == (0 if expected == "empty" else None)
+    if expected == "empty":
+        assert sections(reading)["records"] == []
+    else:
+        assert "records" not in sections(reading) and "identity" not in sections(reading)
+    assert sections(reading)["collection"]["source"]["outcome"] == expected
+    if expected == "empty":
+        assert "no retained event" in " ".join(reading.warnings)
+    else:
+        assert reading.error and reading.error["kind"] == expected
+
+
+def test_exact_record_failure_reasons_are_distinct():
+    mismatched = exact_record(source("kernel_whea", [row(whea.CHANNEL, 78, stamp(1))], limit=1))
+    ambiguous = exact_record(source("kernel_whea", [row(whea.CHANNEL, 77, stamp(1))], limit=1, truncated=True))
+    stopped = exact_record(source("kernel_whea", [row(whea.CHANNEL, 77, stamp(1))], limit=1, stopped={"kind": "denied", "detail": "access denied"}))
+    assert "different RecordId" in mismatched.error["detail"]
+    assert "more than one" in ambiguous.error["detail"]
+    assert stopped.outcome == "denied" and "stopped" in stopped.error["detail"]
+
+
+def test_exact_record_parameter_and_auth_boundaries(no_decoder_launch):
+    payload = cper(77)
+    event = row(whea.CHANNEL, 77, stamp(1), raw=payload)
+    event["Properties"] = [payload]
+    bridge = FakeBridge(
+        BridgeResult("ok", items=[{"source": source("kernel_whea", [event], limit=1)}]),
+        by_marker={"$env:COMPUTERNAME": identity_result("SENTINEL-FIXTURE", "person")},
+    )
+    token = "synthetic-test-token-0123456789"
+    with TestClient(create_app(State(bridge=bridge, token=token))) as client:
+        headers = {"Authorization": f"Bearer {token}"}
+        assert client.get("/api/readings/whea_record?record_id=77").status_code == 401
+        for query in ("", "?record_id=77", "?source=kernel_whea", "?record_id=0&source=kernel_whea", "?record_id=not-a-number&source=kernel_whea", "?record_id=77&source=wrong"):
+            assert client.get("/api/readings/whea_record" + query, headers=headers).status_code == 422
+        default = client.get("/api/readings/whea_record?source=kernel_whea&record_id=77", headers=headers)
+        exact = client.get("/api/readings/whea_record?source=kernel_whea&record_id=77&unredacted=true", headers=headers)
+    assert default.status_code == exact.status_code == 200
+    redacted = default.json()
+    original = exact.json()
+    assert payload not in json.dumps(redacted) and "cper" in redacted["redacted"]
+    assert next(s["data"][0]["RawData"] for s in original["sections"] if s["name"] == "records") == payload
+
+
+def test_exact_record_agent_tool_requires_an_exact_log_reference():
+    tool = next(item for item in tools() if item.name == "whea_record")
+    schema = tool.input_schema
+    assert "record_id" in schema["required"]
+    assert "source" in schema["required"]
+    assert schema["properties"]["record_id"]["minimum"] == 1
+    assert schema["properties"]["record_id"]["maximum"] == whea.MAX_RECORD_ID
+    assert schema["properties"]["source"]["enum"] == ["system", "kernel_whea"]
+    assert schema["if"]["properties"]["unredacted"]["const"] is True
+    assert schema["then"]["required"] == ["reason"]
 
 
 def test_the_header_identity_is_read_locally_and_names_what_it_can_justify(no_decoder_launch):
@@ -944,6 +1032,50 @@ def test_whea_answers_from_both_logs_on_this_machine(monkeypatch: pytest.MonkeyP
 
 
 @pytest.mark.host
+def test_exact_whea_record_answers_from_its_own_log_on_this_machine(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(whea, "_run_decoder", lambda payload, timeout: ("{}", "", 0, None))
+    bridge = real_bridge_or_skip()
+    recent = _observed(asyncio.run(take("whea", bridge, {"count": 5})))
+    rows = recent.section("records").data
+    if not rows:
+        pytest.skip("this machine currently retains no WHEA record to select")
+    selected = rows[0]
+    source_name = next(spec.name for spec in whea.WHEA_SOURCES if spec.log == selected["Log"])
+    exact = _observed(asyncio.run(take("whea_record", bridge, {"source": source_name, "record_id": selected["RecordId"]})))
+    assert exact.count == 1 and exact.section("records").data[0]["RecordId"] == selected["RecordId"]
+    assert exact.section("records").data[0]["RawData"] == selected["RawData"]
+    assert exact.section("collection").data["source"]["outcome"] == "ok"
+
+
+@pytest.mark.host
+def test_exact_whea_record_refuses_binary_over_its_bound_before_projection(monkeypatch: pytest.MonkeyPatch):
+    import sentinel.bridge
+
+    monkeypatch.setattr(sentinel.bridge, "POOL_SIZE", 0)
+    bridge = real_bridge_or_skip()
+    fake = r"""
+function Get-WinEvent {
+    [CmdletBinding()]
+    param([xml]$FilterXml, [string]$ListLog, [string]$LogName, [switch]$Oldest, [int]$MaxEvents)
+    if ($ListLog) { [pscustomobject]@{ IsEnabled = $true; LogMode = 'Circular' }; return }
+    if ($Oldest) { [pscustomobject]@{ TimeCreated = [datetime]::UtcNow.AddDays(-2) }; return }
+    [pscustomobject]@{
+        RecordId = [int64]77; Id = 20; Level = 4; LevelDisplayName = 'Information'; Version = 0; ProviderId = $null
+        ProviderName = 'Microsoft-Windows-Kernel-WHEA'; LogName = 'Microsoft-Windows-Kernel-WHEA/Errors'
+        MachineName = 'SYNTHETIC'; TaskDisplayName = $null; TimeCreated = [datetime]::UtcNow
+        Message = 'Synthetic WHEA Event'; Properties = @([pscustomobject]@{ Value = [byte[]](0x43,0x50,0x45,0x52,0,0,0,0,0) })
+    }
+}
+"""
+    script = whea.whea_record_script(whea.WHEA_SOURCES[1], 77).replace(f"1 {whea.MAX_EXACT_BINARY_BYTES} }}", "1 8 }")
+    result = bridge.run(fake + script, depth=whea.WHEA_DEPTH)
+    assert result.outcome == "ok" and len(result.items) == 1, result
+    source_result = result.items[0]["source"]
+    assert source_result["outcome"] == "failed" and source_result["records"] == []
+    assert "8-byte exact-read limit" in source_result["error"]
+
+
+@pytest.mark.host
 def test_powershell_keeps_the_returned_records_when_a_whea_source_stops(monkeypatch: pytest.MonkeyPatch):
     import sentinel.bridge
 
@@ -1073,6 +1205,8 @@ def test_the_screenshot_fixture_never_feeds_a_truncated_cper_to_the_real_decoder
     assert whea.cper_header(channel[0]["RawData"])[0]["previous_session"] is True
     assert whea.cper_header(channel[0]["RawData"])[0]["severity"] == "fatal"
     assert whea.cper_header(channel[1]["RawData"])[1] is not None
+    exact = fixture["answer_whea_record"](whea.whea_record_script(whea.WHEA_SOURCES[1], channel[0]["RecordId"]))
+    assert exact.items[0]["source"]["records"][0]["RawData"] == channel[0]["RawData"]
 
 
 def test_the_screenshot_fixture_routes_memory_and_power_to_their_own_sources(monkeypatch):

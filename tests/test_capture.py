@@ -36,7 +36,11 @@ def members(body: bytes) -> dict[str, bytes]:
         return {name: archive.read(name) for name in archive.namelist()}
 
 
-def test_a_capture_holds_every_reading_the_stack_and_the_handoff(client: TestClient):
+AUTOMATIC = {name for name, spec in REGISTRY.items() if not spec.requires_selection}
+SELECTED = {name for name, spec in REGISTRY.items() if spec.requires_selection}
+
+
+def test_a_capture_holds_automatic_readings_the_stack_and_the_handoff(client: TestClient):
     client.post("/api/stack/items", headers=AUTH, json={"kind": "note", "note": "it froze while idle"})
     response = client.post("/api/captures", headers=AUTH)
     assert response.status_code == 200
@@ -45,11 +49,14 @@ def test_a_capture_holds_every_reading_the_stack_and_the_handoff(client: TestCli
 
     files = members(response.content)
     assert {"stack.json", "composed.md", "manifest.json"} <= set(files)
-    assert {f"readings/{name}.json" for name in REGISTRY} <= set(files)
+    assert {f"readings/{name}.json" for name in AUTOMATIC} <= set(files)
+    assert not {f"readings/{name}.json" for name in SELECTED} & set(files)
 
     manifest = json.loads(files["manifest.json"])
     assert manifest["tool"] == "system-sentinel" and manifest["unredacted"] is False
-    assert manifest["readings"] == len(REGISTRY) and manifest["created_at"].endswith("Z")
+    assert manifest["readings"] == len(AUTOMATIC) and manifest["created_at"].endswith("Z")
+    assert {entry["reading"] for entry in manifest["omitted"]} == SELECTED
+    assert all(entry["reason"] == "requires an exact selection" for entry in manifest["omitted"])
     listed = {m["path"]: m for m in manifest["members"]}
     assert set(listed) == set(files) - {"manifest.json"}
     for path, member in listed.items():
@@ -95,8 +102,9 @@ def test_captures_are_listed_and_fetched_and_nothing_wanders(client: TestClient)
     assert listed[0]["bytes"] == len(first.content) and (captures_dir() / name).is_file()
     summary = listed[0]["manifest"]
     assert summary["status"] == "read" and summary["unredacted"] is False
-    assert summary["readings"] == len(REGISTRY)
-    assert sum(summary["outcomes"].values()) == len(REGISTRY)
+    assert summary["readings"] == len(AUTOMATIC)
+    assert summary["omitted"] == len(SELECTED)
+    assert sum(summary["outcomes"].values()) == len(AUTOMATIC)
     assert summary["captured_at"] == json.loads(members(first.content)["manifest.json"])["created_at"]
 
     again = client.get(f"/api/captures/{name}", headers=AUTH)
@@ -130,6 +138,25 @@ def test_listing_keeps_missing_damaged_and_oversized_manifests_explicit():
     assert all("unredacted" not in summary and "outcomes" not in summary for summary in listed.values())
 
 
+def test_listing_counts_omissions_without_echoing_untrusted_manifest_strings():
+    base = {"tool": "system-sentinel", "created_at": "2026-09-20T00:00:00Z", "unredacted": False, "readings": 0, "members": []}
+    cases = {
+        "capture-20260920T000010Z.zip": ({**base}, "read", 0),
+        "capture-20260920T000011Z.zip": ({**base, "omitted": [{"reading": "PRIVATE-HOST", "reason": "future reason"}]}, "read", 1),
+        "capture-20260920T000012Z.zip": ({**base, "omitted": [{"reading": "whea_record"}]}, "unreadable", None),
+        "capture-20260920T000013Z.zip": ({**base, "readings": 1, "members": [{"reading": "whea_record", "outcome": "ok"}], "omitted": [{"reading": "whea_record", "reason": "requires an exact selection"}]}, "unreadable", None),
+    }
+    for name, (manifest, _, _) in cases.items():
+        with zipfile.ZipFile(captures_dir() / name, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("manifest.json", json.dumps(manifest))
+    listed = {capture["name"]: capture["manifest"] for capture in listing()}
+    for name, (_, status, omitted) in cases.items():
+        assert listed[name]["status"] == status
+        if omitted is not None:
+            assert listed[name]["omitted"] == omitted
+        assert "PRIVATE-HOST" not in json.dumps(listed[name])
+
+
 @pytest.mark.host
 def test_a_capture_of_this_machine():
     state = State(bridge=real_bridge_or_skip(), token=TOKEN)
@@ -141,7 +168,8 @@ def test_a_capture_of_this_machine():
         files = members(response.content)
         manifest = json.loads(files["manifest.json"])
         outcomes = {m["reading"]: m["outcome"] for m in manifest["members"] if "reading" in m}
-        assert set(outcomes) == set(REGISTRY)
+        assert set(outcomes) == AUTOMATIC
+        assert {entry["reading"] for entry in manifest["omitted"]} == SELECTED
         assert state.identity.host, "the tool learned this machine's name, so it can remove it"
         assert all(state.identity.host.encode() not in body for body in files.values())
         print(f"\ncapture took {took} ms, {len(response.content)} bytes; outcomes {outcomes}")

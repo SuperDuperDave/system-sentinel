@@ -52,6 +52,8 @@ from .health import DECODER
 
 PROVIDER = "Microsoft-Windows-WHEA-Logger"
 MAX_WHEA_RECORDS = 500
+MAX_EXACT_BINARY_BYTES = 1024 * 1024
+MAX_RECORD_ID = (1 << 53) - 1  # exact across JSON number clients
 LOG = "System"
 CHANNEL = "Microsoft-Windows-Kernel-WHEA/Errors"
 CHANNEL_PROVIDER = "Microsoft-Windows-Kernel-WHEA"
@@ -92,9 +94,10 @@ class WheaSource:
     event_ids: tuple[int, ...] | None  # None: every event the provider writes to this log
     decode: bool
 
-    def select(self) -> str:
+    def select(self, record_id: int | None = None) -> str:
         ids = f" and ({' or '.join(f'EventID={i}' for i in self.event_ids)})" if self.event_ids else ""
-        return f"*[System[Provider[@Name='{self.provider}']{ids}]]"
+        exact = f" and EventRecordID={record_id}" if record_id is not None else ""
+        return f"*[System[Provider[@Name='{self.provider}']{ids}{exact}]]"
 
 
 WHEA_SOURCES: tuple[WheaSource, ...] = (
@@ -118,7 +121,7 @@ RAW_DATA = "RawData = $( $b = $_.Properties | Where-Object { $_.Value -is [byte[
 # clean no-match is empty, and every other error is a failure, never an empty log. Log metadata is
 # read afterwards and only qualifies the answer: its own failure is reported beside the records.
 WHEA_SOURCE_SCRIPT = r"""
-function Read-WheaSource([string]$name, [string]$log, [string]$select, [int]$limit) {
+function Read-WheaSource([string]$name, [string]$log, [string]$select, [int]$limit, [int]$maxBinaryBytes = 0) {
     $xml = "<QueryList><Query Id='0' Path='$log'><Select Path='$log'>$select</Select></Query></QueryList>"
     $found = [System.Collections.Generic.List[object]]::new()
     $records = @(); $outcome = 'failed'; $errorText = $null; $truncated = $null; $stopped = $null
@@ -140,7 +143,16 @@ function Read-WheaSource([string]$name, [string]$log, [string]$select, [int]$lim
     }
     if ($null -eq $errorText) {
         try {
-            $records = @($found | Select-Object -First $limit | ForEach-Object { [pscustomobject]@{ {fields} } })
+            $records = @($found | Select-Object -First $limit | ForEach-Object {
+                if ($maxBinaryBytes -gt 0) {
+                    $binaryBytes = [long]0
+                    foreach ($property in $_.Properties) {
+                        if ($property.Value -is [byte[]]) { $binaryBytes += $property.Value.Length }
+                        if ($binaryBytes -gt $maxBinaryBytes) { throw "the $log record's binary properties exceed the $maxBinaryBytes-byte exact-read limit" }
+                    }
+                }
+                [pscustomobject]@{ {fields} }
+            })
             if ($records.Count -ne [Math]::Min($found.Count, $limit)) { throw "the $log record projection returned fewer records than the query" }
             $outcome = if ($records.Count) { 'ok' } else { 'empty' }
         } catch {
@@ -177,7 +189,15 @@ def whea_script(count: int) -> str:
     return LOG_METADATA_SCRIPT + WHEA_SOURCE_SCRIPT.replace("{fields}", WHEA_FIELDS) + f"[pscustomobject]@{{ sources = @({calls}) }}\n"
 
 
+def whea_record_script(spec: WheaSource, record_id: int) -> str:
+    """One log-local reference; probe for a second match rather than accepting ambiguity."""
+    select = spec.select(record_id)
+    return (LOG_METADATA_SCRIPT + WHEA_SOURCE_SCRIPT.replace("{fields}", WHEA_FIELDS)
+            + f"[pscustomobject]@{{ source = Read-WheaSource '{spec.name}' '{spec.log}' \"{select}\" 1 {MAX_EXACT_BINARY_BYTES} }}\n")
+
+
 COLLECTION_BASIS = "each source's own answer: outcome, the records it returned against its limit of count + 1 asked, whether it was truncated or stopped part way, and its log's metadata"
+EXACT_COLLECTION_BASIS = "one selected log and EventRecordID, with its provider and event-ID filter; the collector asks for two matches to detect ambiguity, enforces a binary-byte bound before projection, and reports that log's outcome and retention metadata"
 WHEA_COVERAGE_BASIS = (
     "records holds the newest `limit` records across both logs, newest first; ties are ordered by source "
     "(System first) and then by descending RecordId. complete means every record both logs still retain "
@@ -267,6 +287,63 @@ def take_whea(bridge: Bridge, params: dict[str, Any]) -> Reading:
     decoded, warnings = decode_all(kept)
     reading.sections.append(Section("decoded", "derived", decoded, basis=DEFERRED_BASIS))
     reading.warnings.extend(warnings)
+    reading.took_ms = _ms(started)
+    return reading
+
+
+def take_whea_record(bridge: Bridge, params: dict[str, Any]) -> Reading:
+    """Read one exact log row even when the newest-record reading no longer reaches it."""
+    started = time.perf_counter()
+    spec = next(source for source in WHEA_SOURCES if source.name == params["source"])
+    record_id = params["record_id"]
+    script = whea_record_script(spec, record_id)
+    result = bridge.run(script, depth=WHEA_DEPTH)
+    collection: dict[str, Any] = {}
+    records: list[dict[str, Any]] = []
+
+    def build(payload: dict[str, Any]) -> list[Section]:
+        source, rows = whea_source(spec, payload.get("source"), 1)
+        if source["outcome"] == "ok" and source["truncated"]:
+            source = {**source, "outcome": "failed", "error": "more than one matching event was returned for this log-local RecordId", "returned": 0}
+            rows = []
+        elif source["outcome"] == "ok" and source["stopped"] is not None:
+            stopped = source["stopped"]
+            source = {**source, "outcome": stopped["kind"], "error": f"the exact query stopped before uniqueness could be established: {stopped['detail']}", "returned": 0}
+            rows = []
+        elif source["outcome"] == "ok" and rows[0]["RecordId"] != record_id:
+            source = {**source, "outcome": "failed", "error": "the exact query returned a different RecordId", "returned": 0}
+            rows = []
+        collection.update(source)
+        records.extend(rows)
+        sections = [
+            Section("collection", "raw", {"record_id": record_id, "source": source}, basis=EXACT_COLLECTION_BASIS),
+        ]
+        if source["outcome"] in ("failed", "denied"):
+            return sections
+        return sections + [
+            Section("records", "raw", rows),
+            Section("identity", "derived", [record_identity(row) for row in rows], basis=IDENTITY_BASIS),
+        ]
+
+    reading = from_object("whea_record", params, script, result, build)
+    if not reading.observed:
+        return reading
+    if collection["outcome"] in ("failed", "denied"):
+        reading.outcome = collection["outcome"]
+        reading.count = None
+        reading.error = {"kind": reading.outcome, "detail": collection["error"]}
+    elif records:
+        reading.outcome, reading.count = "ok", 1
+        decoded, warnings = decode_all(records)
+        reading.sections.append(Section("decoded", "derived", decoded, basis=DEFERRED_BASIS))
+        reading.warnings.extend(warnings)
+    else:
+        reading.outcome, reading.count = "empty", 0
+        reading.warnings.append("no retained event in this log matches the requested RecordId, provider and event ID; this does not mean it never existed")
+    if collection.get("log_enabled") is False:
+        reading.warnings.append(f"{spec.log} is disabled: Windows is not recording new events there")
+    if collection.get("log_state") != "ok" or collection.get("oldest_state") not in ("ok", "empty"):
+        reading.warnings.append(f"how far back {spec.log} reaches could not be read; its query outcome still stands")
     reading.took_ms = _ms(started)
     return reading
 
@@ -1109,6 +1186,28 @@ register(
         take=take_whea,
         params=(Param("count", "int", 30, "How many of the most recent records across both logs.", minimum=1, maximum=MAX_WHEA_RECORDS),),
         private=("MachineName", "user names inside Message", "CPER bytes in RawData and Properties", "serial and UUID fields inside the decoded structure"),
+    )
+)
+
+register(
+    Spec(
+        name="whea_record",
+        description=(
+            "One exact hardware-error event by its required log source and RecordId, including its raw CPER payload "
+            "when explicitly unredacted. Works for a retained report older than whea's newest 500 rows. "
+            "Use source=system for Log=System or source=kernel_whea for Log=Microsoft-Windows-Kernel-WHEA/Errors; "
+            "compare the returned TimeCreated with the original reference because log-local IDs can be reused. "
+            "A missing row is empty; an interrupted, failed or ambiguous query cannot establish absence. "
+            "This is a report reference, not a diagnosis or a claim about when a previous-session error occurred."
+        ),
+        classes=("raw", "derived"),
+        take=take_whea_record,
+        params=(
+            Param("source", "str", None, "The log that owns this RecordId: system for System, kernel_whea for Microsoft-Windows-Kernel-WHEA/Errors.", choices=tuple(s.name for s in WHEA_SOURCES)),
+            Param("record_id", "int", None, "EventRecordID in that log, as shown in whea or whea_reports.", minimum=1, maximum=MAX_RECORD_ID),
+        ),
+        private=("MachineName", "user names inside Message", "CPER bytes in RawData and Properties", "serial and UUID fields inside the decoded structure"),
+        requires_selection=True,
     )
 )
 

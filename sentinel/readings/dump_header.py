@@ -504,4 +504,5 @@ register(Spec(
         Param("ref", "str", "", "Reference from dumps.inspection_targets, usable with redacted paths. Selects the current file at that location; refresh after Sentinel restarts. Provide ref or path."),
     ),
     heavy=True,
+    requires_selection=True,
 ))

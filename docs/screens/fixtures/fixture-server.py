@@ -5,7 +5,7 @@ that renders the real thing, over records that were never on this machine.
 
 Answers:
   - the identity probe (``$env:COMPUTERNAME``): a placeholder host and user
-  - WHEA (``whea``, ``storms``, ``whea_reports``): tests/fixtures/whea-records.json for System rows, with each
+  - WHEA (``whea``, ``whea_record``, ``storms``, ``whea_reports``): tests/fixtures/whea-records.json for System rows, with each
     binary System record given a decodable CPER payload; two synthetic Kernel-WHEA channel rows
     exercise fatal previous-session and unavailable-header presentation
   - the System log (``events``, ``record``): docs/screens/fixtures/system-log.json, filtered
@@ -53,6 +53,7 @@ from sentinel.bridge import BridgeResult  # noqa: E402
 
 WHEA_FIXTURE = REPO / "tests" / "fixtures" / "whea-records.json"
 SYSTEM_LOG_FIXTURE = HERE / "system-log.json"
+WHEA_ANCHOR = time.time()  # exact re-reads must name the same synthetic event timestamp
 
 FIXTURE_HOST = "WORKSTATION"
 FIXTURE_USER = "person"
@@ -209,7 +210,7 @@ def answer_whea(script: str) -> BridgeResult:
     match = re.search(r"Read-WheaSource 'system' 'System' .*? (\d+)\)", script)
     assert match, "the WHEA fixture must follow the collector's explicit per-source limit"
     limit = int(match.group(1))
-    now = time.time()
+    now = WHEA_ANCHOR
     system = whea_records(now)
     returned = system[:limit]
     source = {
@@ -227,6 +228,24 @@ def answer_whea(script: str) -> BridgeResult:
         "log_oldest": channel_rows[-1]["TimeCreated"], "oldest_state": "ok", "oldest_error": None,
     }
     return BridgeResult("ok", items=[{"sources": [source, channel]}], took_ms=412)
+
+
+def answer_whea_record(script: str) -> BridgeResult:
+    """One exact synthetic source row, as the new on-demand reading asks Windows for it."""
+    match = re.search(r"Read-WheaSource '(system|kernel_whea)' '[^']+' \"[^\"]*EventRecordID=(\d+)[^\"]*\" 1 \d+", script)
+    assert match, "the exact WHEA fixture must carry a source and EventRecordID"
+    name, record_id = match.group(1), int(match.group(2))
+    rows = whea_records(WHEA_ANCHOR) if name == "system" else kernel_whea_records(WHEA_ANCHOR)
+    selected = [row for row in rows if row["RecordId"] == record_id]
+    source = {
+        "name": name, "log": "System" if name == "system" else "Microsoft-Windows-Kernel-WHEA/Errors",
+        "outcome": "ok" if selected else "empty", "error": None,
+        "returned": len(selected), "limit": 1, "truncated": False, "stopped": None, "records": selected,
+        "log_enabled": True, "log_mode": "Circular", "log_state": "ok", "log_error": None,
+        "log_oldest": rows[-1]["TimeCreated"] if rows else None,
+        "oldest_state": "ok" if rows else "empty", "oldest_error": None,
+    }
+    return BridgeResult("ok", items=[{"source": source}], took_ms=22)
 
 
 def answer_whea_reports(script: str) -> BridgeResult:
@@ -273,6 +292,8 @@ class FixtureBridge:
             return BridgeResult("ok", items=[{"log": "System", "record": top}, {"log": "Application", "record": 1}], took_ms=6)
         if "Read-WheaSource" in script and "sources = @(" in script:
             return answer_whea(script)
+        if "Read-WheaSource" in script and "source = Read-WheaSource" in script:
+            return answer_whea_record(script)
         if "window_start = $startIso" in script and "Provider[@Name='Microsoft-Windows-Kernel-WHEA']" in script:
             return answer_whea_reports(script)
         if "window_start = $startIso" in script and "WHEA-Logger" in script:

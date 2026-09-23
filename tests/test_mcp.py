@@ -353,7 +353,9 @@ def test_a_capture_is_a_tool_as_well_as_a_route(surface: Surface):
 
     made = payload(call(surface, "capture_create"))
     name, manifest = made["capture"], made["manifest"]
-    assert manifest["readings"] == len(REGISTRY) and manifest["unredacted"] is False
+    selected = {name for name, spec in REGISTRY.items() if spec.requires_selection}
+    assert manifest["readings"] == len(REGISTRY) - len(selected) and manifest["unredacted"] is False
+    assert {entry["reading"] for entry in manifest["omitted"]} == selected
     assert {m["path"] for m in manifest["members"]} >= {"readings/health.json", "stack.json", "composed.md"}
 
     on_disk = captures_dir() / name
@@ -365,6 +367,7 @@ def test_a_capture_is_a_tool_as_well_as_a_route(surface: Surface):
     assert [c["name"] for c in listed] == [name]
     assert listed[0]["manifest"]["unredacted"] is False
     assert listed[0]["manifest"]["readings"] == manifest["readings"]
+    assert listed[0]["manifest"]["omitted"] == len(selected)
     assert sum(listed[0]["manifest"]["outcomes"].values()) == manifest["readings"]
 
 

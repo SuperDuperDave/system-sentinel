@@ -19,7 +19,7 @@ import sentinel.bridge
 import sentinel.readings.diagnostics as diagnostics
 from sentinel import readings  # noqa: F401
 from sentinel.bridge import OUTCOMES, Bridge, Session, sessions_report
-from sentinel.reading import REGISTRY, Section, from_bridge, from_object, take
+from sentinel.reading import REGISTRY, Section, automatic_params, from_bridge, from_object, take
 from sentinel.readings.diagnostics import MEMORY_SCRIPT, memory_derived, power_derived, power_script
 from sentinel.readings.health import learn_identity
 from tests.conftest import real_bridge_or_skip
@@ -507,20 +507,18 @@ def test_a_question_in_a_live_session_cannot_see_the_one_before_it(monkeypatch):
     assert report["alive"] == 1 and report["answered"] == 2, report  # and it was one session that answered both
 
 
-def test_the_pool_survives_the_whole_catalog_taken_twice(monkeypatch):
-    """The whole catalog, twice, through one pool: no session dies, none has to be replaced, and
-    nothing falls back to a launch. This is the run that would show a leak or a wedged frame."""
+def test_the_pool_survives_the_automatic_catalog_taken_twice(monkeypatch):
+    """Every automatically selectable reading twice through one pool, without lost sessions."""
     bridge = real_bridge_or_skip()
     monkeypatch.setattr(sentinel.bridge, "POOL_SIZE", 4)
-    moment = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-    # A selected-file reading needs a path; a clean runner may have no dump, and `empty` is still
-    # a real answer from the same bridge session for this transport soak.
-    params = {"record": {"before": moment}, "dump_header": {"path": r"C:\Windows\MEMORY.DMP"}}
+    at = datetime.now(UTC)
 
     seen: dict[str, list[str]] = {}
     for _ in range(2):
-        for name in list(REGISTRY):
-            reading = asyncio.run(take(name, bridge, params.get(name, {})))
+        for name, spec in list(REGISTRY.items()):
+            if spec.requires_selection:
+                continue
+            reading = asyncio.run(take(name, bridge, automatic_params(name, at)))
             assert reading.outcome in OUTCOMES, (name, reading.outcome)
             assert reading.outcome != "unavailable", (name, reading.error)  # the bridge itself never stopped answering
             seen.setdefault(name, []).append(reading.outcome)
@@ -528,11 +526,12 @@ def test_the_pool_survives_the_whole_catalog_taken_twice(monkeypatch):
     report = sessions_report(bridge)
     assert report["transport"] == "session"
     # performance_history reads the local store rather than crossing the bridge.
-    assert report["answered"] >= 2 * (len(REGISTRY) - 1)
+    automatic = {name for name, spec in REGISTRY.items() if not spec.requires_selection}
+    assert report["answered"] >= 2 * (len(automatic) - 1)
     assert report["alive"] <= report["size"]
     assert report["discarded"].get("died", 0) == 0, report
     assert report["fell_back"] == 0 and report["start_failures"] == 0, f"pool: {report!r}"
-    assert len(seen) == len(REGISTRY)
+    assert set(seen) == automatic
 
 
 def test_aggregate_performance_snapshot_answers_with_numbers_on_windows():

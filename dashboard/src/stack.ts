@@ -131,8 +131,8 @@ export const removePrompt = (id: string): Promise<Prompt[]> =>
 export const getCaptures = (): Promise<Capture[]> => send<{ captures: Capture[] }>('/api/captures').then((b) => b.captures);
 
 /**
- * Take every reading now and hand back the ZIP. This is the slowest thing the tool does — it is
- * every reading on the machine, heavy ones included — so the caller shows that it is running.
+ * Take readings that need no exact selection and hand back the ZIP. Heavy readings are included,
+ * so the caller shows that it is running.
  * The file is returned, not saved: nothing leaves the machine unless the person sends it.
  */
 export async function createCapture(): Promise<{ name: string; blob: Blob }> {

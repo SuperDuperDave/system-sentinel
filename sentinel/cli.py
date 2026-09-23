@@ -6,7 +6,7 @@ terminal: it opens the dashboard already signed in and sits in the tray.
 ``token`` prints the token for an agent to read. ``check`` takes the health
 reading without starting the server and exits non-zero unless the bridge
 answered, so a deploy prompt can prove the install before anyone opens a page.
-``bench`` takes every reading against the real bridge and writes what each one
+``bench`` takes every automatically selectable reading against the real bridge and writes what each one
 costs, so a claim about speed points at the command that produces it.
 """
 
@@ -43,9 +43,9 @@ def main(argv: list[str] | None = None) -> int:
     updater = sub.add_parser("update", help="check the latest published release; --install downloads, verifies and starts it on Windows")
     updater.add_argument("--install", action="store_true", help="download, verify and start a newer release")
 
-    bench = sub.add_parser("bench", help="take every reading against the real bridge and report what each one costs")
+    bench = sub.add_parser("bench", help="take readings that need no exact selection and report what each one costs")
     bench.add_argument("--runs", type=int, default=DEFAULT_RUNS, help=f"how many times to take each reading (default {DEFAULT_RUNS})")
-    bench.add_argument("--readings", default="", help="comma-separated reading names to narrow to (default: every reading in the catalog)")
+    bench.add_argument("--readings", default="", help="comma-separated reading names to narrow to (default: readings that need no exact selection)")
     bench.add_argument("--transport", choices=TRANSPORTS, default=TRANSPORTS[0], help=f"which bridge transport to measure (default {TRANSPORTS[0]})")
     bench.add_argument("--json", dest="as_json", action="store_true", help="print the run as JSON, samples included, for a machine")
     bench.add_argument("--out", default=None, help=f"write the result to this file instead of standard output (the document is {DOC_PATH})")
