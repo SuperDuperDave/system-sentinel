@@ -192,8 +192,8 @@ def _fill_template(text: str, moment: float) -> str:
     shutdown = datetime.fromtimestamp(moment - 6.2 * 60, UTC)
     return text.format(
         boot_iso=boot.strftime("%Y-%m-%dT%H:%M:%S.000000000Z"),
-        shutdown_time=shutdown.strftime("%-I:%M:%S %p"),
-        shutdown_date=shutdown.strftime("%-m/%-d/%Y"),
+        shutdown_time=f"{shutdown.hour % 12 or 12}:{shutdown.minute:02d}:{shutdown.second:02d} {'AM' if shutdown.hour < 12 else 'PM'}",
+        shutdown_date=f"{shutdown.month}/{shutdown.day}/{shutdown.year}",
     )
 
 
