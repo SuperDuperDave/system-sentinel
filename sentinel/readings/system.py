@@ -75,7 +75,7 @@ if ($null -ne $value) { $secure_boot = ($value -eq 1) }
 
 $fast_startup = $null
 $value = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Power' -Name HiberbootEnabled -ErrorAction SilentlyContinue).HiberbootEnabled
-if ($null -ne $value) { $fast_startup = ($value -eq 1) }
+if ($null -ne $value -and $value -in @(0, 1)) { $fast_startup = ($value -eq 1) }
 
 $free_percent = $null
 $drive = Get-PSDrive -Name C -ErrorAction SilentlyContinue
@@ -480,7 +480,8 @@ def take_system(bridge: Bridge, params: dict[str, Any]) -> Reading:
 # ---------------------------------------------------------------------------
 
 RISK_BASIS = (
-    "Four rules over the config section: Secure Boot reported disabled; Fast Startup reported enabled; "
+    "Four rules over the config section: Secure Boot reported disabled; the Fast Startup preference "
+    "reported on (which does not establish the last boot mode); "
     "the system drive below 10 percent free; uptime above seven days. Each is an observation about the "
     "configuration, not a cause and not a recommendation."
 )
@@ -494,7 +495,7 @@ def hardware_risks(config: dict[str, Any]) -> list[dict[str, Any]]:
     if config.get("secure_boot") is False:
         out.append({"id": "secure-boot-off", "observation": "Secure Boot is disabled", "domain": "firmware"})
     if config.get("fast_startup") is True:
-        out.append({"id": "fast-startup-on", "observation": "Fast Startup is enabled", "domain": "power"})
+        out.append({"id": "fast-startup-on", "observation": "Fast Startup preference is on; last boot mode is unknown", "domain": "power"})
     free = _number(config.get("system_drive_free_percent"))
     if free is not None and free < 10:
         out.append({"id": "system-drive-low", "observation": "System drive below 10% free", "domain": "storage"})

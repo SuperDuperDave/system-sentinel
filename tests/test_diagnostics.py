@@ -330,6 +330,11 @@ def test_power_counts_the_ledger_and_reports_the_window_it_covers():
     assert derived["uptime_seconds"] > 0
 
 
+def test_a_nonbinary_fast_startup_setting_cannot_become_enabled():
+    payload = dict(POWER_PAYLOAD, hiberboot_enabled=2)
+    assert power_derived(payload)["fast_startup"] is None
+
+
 def test_power_lifts_a_sub_query_failure_into_the_envelope():
     reading = asyncio.run(take("power", payload_bridge(), {}))
     assert reading.outcome == "ok"
@@ -706,6 +711,15 @@ def test_every_class_can_fire_and_each_signal_names_the_readings_it_drew_on():
     assert all(s["readings"] and s["id"] and s["title"] and s["summary"] and isinstance(s["evidence"], dict) for s in signals)
     assert "Observed: hardware, pcie, power, constraints, events, crash, reliability." in basis
     assert "Not observed" not in basis
+
+
+def test_fast_startup_preference_does_not_claim_the_last_boot_mode():
+    signals, _ = take_signals_sync(_inputs())
+    configured = next(s for s in signals if s["id"] == "suppression:fast-startup")
+    assert configured["title"] == "Fast Startup preference is on"
+    assert configured["evidence"]["last_boot_mode"] == "unknown"
+    assert "does not establish" in configured["summary"]
+    assert not any(s["id"] == "transition:no-cold-start" for s in signals)
 
 
 def test_a_missing_input_is_named_in_the_basis_and_the_rest_still_answer():

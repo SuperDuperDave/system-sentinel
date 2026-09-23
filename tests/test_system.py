@@ -122,6 +122,7 @@ def test_hardware_risks_are_observations_and_never_advice():
     assert ids == ["secure-boot-off", "fast-startup-on", "system-drive-low", "uptime-long"]
     text = " ".join(x["observation"] for x in risks).lower()
     assert "recommend" not in text and "should" not in text
+    assert "last boot mode is unknown" in text
     assert all(set(x) == {"id", "observation", "domain"} for x in risks)
 
 

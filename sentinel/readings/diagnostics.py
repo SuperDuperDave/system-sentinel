@@ -158,8 +158,8 @@ try {
 
 $hiberboot = $null
 $entry = Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Power' -Name HiberbootEnabled -ErrorAction SilentlyContinue
-if ($null -ne $entry) { $hiberboot = [int]$entry.HiberbootEnabled; $sources.hiberboot = @{ outcome = 'ok' } }
-else { $sources.hiberboot = @{ outcome = 'failed' }; $warnings += 'HiberbootEnabled was not readable: the fast startup setting was not observed.' }
+if ($null -ne $entry -and $entry.HiberbootEnabled -in @(0, 1)) { $hiberboot = [int]$entry.HiberbootEnabled; $sources.hiberboot = @{ outcome = 'ok' } }
+else { $sources.hiberboot = @{ outcome = 'failed' }; $warnings += 'HiberbootEnabled was not a readable 0 or 1: the fast startup setting was not observed.' }
 
 $batteries = $null
 try {
@@ -450,7 +450,8 @@ def take_pcie(bridge: Bridge, params: dict[str, Any]) -> Reading:
 POWER_BASIS = (
     "The sleep model is read from the states powercfg lists as available; the link state power "
     "management setting is the documented index (0 off, 1 L0s, 2 L1, 3 L0s and L1); the fast startup "
-    "setting is HiberbootEnabled. The power source is inferred from a returned battery query: "
+    "preference is HiberbootEnabled (0 or 1), which alone does not prove hibernation availability "
+    "or the last boot mode. The power source is inferred from a returned battery query: "
     "discharge or AC when status identifies it, or external power when no battery was reported. "
     "Each ledger record is named by its provider and event "
     "id together. Counts cover only the returned records; limit_reached means older matches may "
@@ -559,7 +560,7 @@ def _valid_source_field(payload: dict[str, Any], field: str, outcome: str | None
     if outcome == "ok" and field in ("boot_time", "log_begins"):
         return isinstance(value, str) and bool(value)
     if outcome == "ok" and field == "hiberboot_enabled":
-        return value is not None
+        return type(value) is int and value in (0, 1)
     return True
 
 
@@ -846,7 +847,6 @@ TALKATIVE = 0.10
 LOUD = 0.25
 TOP_TALKERS = 3
 STALE_DRIVER_DAYS = 730
-LONG_UPTIME_DAYS = 7
 # Two stops with the same bug check are a pattern; one is a stop. Five of them are as many as an
 # evidence line can carry and still be read.
 REPEATED_STOPS = 2
@@ -906,9 +906,9 @@ def _suppressions(observed: dict[str, Reading]) -> list[dict[str, Any]]:
             _signal(
                 "suppressions",
                 "suppression:fast-startup",
-                "Fast startup is on",
-                "A shutdown hibernates the kernel instead of ending it, so the next start does not re-initialize the hardware and a fault that a cold start would show can persist unseen.",
-                {"fast_startup": True},
+                "Fast Startup preference is on",
+                "Windows is configured to allow hybrid shutdown when hibernation is available. This setting does not establish whether a particular shutdown used it or how the machine last booted; Restart takes a full boot path.",
+                {"hiberboot_enabled": True, "last_boot_mode": "unknown"},
                 [source],
             )
         )
@@ -1047,18 +1047,6 @@ def _transitions(observed: dict[str, Reading]) -> list[dict[str, Any]]:
                 "A display driver reset and a wake are in the same ledger",
                 "Both appear in the transition window. Whether they are related is for the record around each moment to say.",
                 {"display driver resets": counts.get("display driver reset"), "wakes": counts.get("wake"), "resumes": counts.get("resume"), "window": window},
-                ["power"],
-            )
-        )
-    uptime = derived.get("uptime_seconds")
-    if uptime and derived.get("fast_startup") and uptime > LONG_UPTIME_DAYS * 86400:
-        out.append(
-            _signal(
-                "transitions",
-                "transition:no-cold-start",
-                f"The machine has not cold started in {uptime // 86400} days",
-                "With fast startup on, the hardware has not been fully re-initialized in that time, so a fault cleared only by a cold start would still be here.",
-                {"uptime_days": uptime // 86400, "fast_startup": True},
                 ["power"],
             )
         )
