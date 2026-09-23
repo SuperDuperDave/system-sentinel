@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 import time
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 from typing import Any
 
 from ..bridge import Bridge
@@ -17,7 +17,7 @@ from ..reading import Param, Reading, Section, Spec, from_object, register
 from .event_coverage import COVERAGE_BASIS, LOG_METADATA_SCRIPT, stamp_key
 from .event_coverage import coverage as log_coverage
 from .event_coverage import metadata as log_metadata
-from .whea import CHANNEL, CHANNEL_PROVIDER, MAX_HOURS, RECORD_CAP, Window, _host_window, _stamp, window_for
+from .whea import CHANNEL, CHANNEL_PROVIDER, MAX_HOURS, RECORD_CAP, Window, _host_window, _stamp, before_stamp, window_for
 
 SCRIPT = r"""
 $queried = (Get-Date).ToUniversalTime()
@@ -107,21 +107,8 @@ REPORT_COVERAGE_BASIS = (
 )
 
 
-def _before_stamp(before: str) -> str:
-    try:
-        parsed = datetime.fromisoformat(before.strip().replace("Z", "+00:00"))
-        if parsed.tzinfo is None or parsed.utcoffset() is None:
-            raise ValueError("a time zone is required")
-        utc = parsed.astimezone(UTC)
-        if utc <= datetime(1970, 1, 1, tzinfo=UTC):
-            raise ValueError("must be after the Unix epoch")
-        return utc.isoformat(timespec="milliseconds").replace("+00:00", "Z")
-    except (ValueError, OverflowError) as exc:
-        raise ValueError(f"parameter 'before': not an ISO timestamp with Z or an offset ({exc})") from exc
-
-
 def reports_script(window: Window, before: str = "") -> str:
-    stamp = _before_stamp(before) if before.strip() else None
+    stamp = before_stamp(before) if before.strip() else None
     assignment = f"[datetimeoffset]::Parse('{stamp}').UtcDateTime" if stamp else "$queried"
     return LOG_METADATA_SCRIPT + SCRIPT.format(
         bucket_seconds=window.bucket_seconds, count=window.count, channel=CHANNEL,
@@ -134,7 +121,7 @@ def take_reports(bridge: Bridge, params: dict[str, Any]) -> Reading:
     started = time.perf_counter()
     requested = window_for(params["hours"], params["bucket_seconds"], now=0)
     before = str(params.get("before") or "").strip()
-    requested_end = _before_stamp(before) if before else None
+    requested_end = before_stamp(before) if before else None
     requested_key = stamp_key(requested_end) if requested_end is not None else None
     requested_start_key = (requested_key[0] - timedelta(hours=params["hours"]), requested_key[1]) if requested_key else None
     script = reports_script(requested, before)

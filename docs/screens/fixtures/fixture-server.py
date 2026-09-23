@@ -335,14 +335,16 @@ class FixtureBridge:
             bucket_seconds = int(re.search(r"\$bucketTicks = \[long\](\d+)", script).group(1))
             count = int(re.search(r"\(\[long\]\((\d+) - 1\)", script).group(1))
             queried = int(now * 1000) / 1000
-            last = int((queried - 0.000001) // bucket_seconds) * bucket_seconds
+            requested = re.search(r"\$requestedUntil = \[datetimeoffset\]::Parse\('([^']+)'\)", script)
+            until_time = min(_parse_stamp(requested.group(1)), queried) if requested else queried
+            last = int((until_time - 0.000001) // bucket_seconds) * bucket_seconds
             start = _powershell_stamp(last - (count - 1) * bucket_seconds)
-            end = _powershell_stamp(queried)
+            end = _powershell_stamp(until_time)
             cap = max(int(value) for value in _MAXEVENTS_RE.findall(script)) - 1
             first, until = _parse_stamp(start), _parse_stamp(end)
             records = [
                 {"RecordId": row["RecordId"], "Id": row["Id"], "ProviderName": "Microsoft-Windows-WHEA-Logger", "LogName": "System", "LevelDisplayName": row.get("LevelDisplayName"), "TimeCreated": row["TimeCreated"], "Message": row.get("Message")}
-                for row in whea_records(now) if first <= _parse_stamp(row["TimeCreated"]) < until
+                for row in whea_records(WHEA_ANCHOR) if first <= _parse_stamp(row["TimeCreated"]) < until
             ]
             source = {
                 "log": "System", "outcome": "ok" if records else "empty", "error": None,
@@ -350,7 +352,7 @@ class FixtureBridge:
                 "log_enabled": True, "log_mode": "Circular", "log_state": "ok", "log_error": None,
                 "log_oldest": _powershell_stamp(_parse_stamp(start) - 86400), "oldest_state": "ok", "oldest_error": None,
             }
-            return BridgeResult("ok", items=[{"window_start": start, "window_end": end, "source": source}], took_ms=412)
+            return BridgeResult("ok", items=[{"window_start": start, "window_end": end, "queried_at": _powershell_stamp(queried), "source": source}], took_ms=412)
         if "Win32_PhysicalMemory -ErrorAction Stop" in script:
             failed = os.environ.get("SENTINEL_FIXTURE_DIAGNOSTIC_FAILURES") == "1"
             modules = None if failed else [{"BankLabel": "CHANNEL A", "DeviceLocator": "DIMM 1", "Manufacturer": "Example", "PartNumber": "EXAMPLE-16",

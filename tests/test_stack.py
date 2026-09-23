@@ -246,6 +246,7 @@ def test_a_week_of_storm_buckets_has_a_bounded_default_handoff_with_full_evidenc
     assert '"other_active_buckets":' in compact and '"highlighted_active":' in compact and '"unknown_runs": 0' in compact
     assert '"top_signatures":' in compact and '"mci_status":' in compact
     assert '"sample"' not in compact and '"sample"' in full
+    assert compact.count('"sample_ref":') == 3 and '"record_id":' in compact
 
     gap = storms([], outcome="empty", oldest=_powershell_stamp(moment - 12 * 3600), host_now=moment, hours=168).to_dict()
     unknown = "\n".join(_item_lines(1, {**item, "reading": gap}))
@@ -261,6 +262,23 @@ def test_a_week_of_storm_buckets_has_a_bounded_default_handoff_with_full_evidenc
     bounded = "\n".join(_item_lines(1, {**item, "reading": warned}))
     assert "(+2 more in the stored reading)" in bounded and "…" in bounded
     assert len(bounded) < 10_000
+
+
+def test_historical_storm_handoff_preserves_anchor_and_coverage_without_live_urgency():
+    from tests.test_whea import _powershell_stamp, load, storms
+
+    query_time = time.time()
+    anchor_time = query_time - 3 * 86400
+    reading = storms(load(now=anchor_time), host_now=query_time, before=_powershell_stamp(anchor_time),
+                     oldest=_powershell_stamp(anchor_time - 2 * 86400)).to_dict()
+    compact = "\n".join(_item_lines(1, {"kind": "reading", "title": "Historical System reports",
+                                         "reading": reading, "verbosity": "summary"}))
+    assert len(compact) < 10_000
+    assert 'before=' in compact and '"covered_until":' in compact
+    assert '"queried_at":' in compact and '"highlighted_active":' in compact
+    assert '"state": "burst"' not in compact and '"name": "status"' not in compact
+    assert "No live burst, acceleration or quiet status is inferred by design" in compact
+    assert '"sample_ref":' in compact
 
 
 def test_a_kernel_report_timeline_has_a_bounded_default_handoff(client: TestClient):

@@ -30,6 +30,9 @@ def test_screen_fixture_answers_current_record_and_nearby_source_contracts():
     reports = asyncio.run(take("whea_reports", bridge, {
         "before": stamp(moment + timedelta(hours=1)), "hours": 2, "bucket_seconds": 60,
     }))
+    storms = asyncio.run(take("storms", bridge, {
+        "before": stamp(datetime.fromtimestamp(fixture.WHEA_ANCHOR - 1, UTC)), "hours": 24, "bucket_seconds": 60,
+    }))
 
     assert recent.outcome == "ok" and recent.section("records").data
     assert before.outcome == "ok" and before.section("coverage").data["reaches_before"] is True
@@ -38,3 +41,7 @@ def test_screen_fixture_answers_current_record_and_nearby_source_contracts():
     assert all(row["Log"] == "Application" for row in faults.section("records").data)
     assert reports.outcome == "ok" and [row["record_id"] for row in reports.section("reports").data] == [75]
     assert reports.section("coverage").data["kernel_whea"]["complete"] is True
+    assert storms.outcome == "ok" and storms.count > 0
+    assert storms.section("buckets").data["total"] == storms.count
+    assert storms.section("status") is None
+    assert storms.section("coverage").data["system"]["covered_until"] == storms.section("collection").data["window_end"]

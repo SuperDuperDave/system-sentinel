@@ -55,7 +55,7 @@ def _powershell_stamp(epoch: float) -> str:
     return moment.strftime("%Y-%m-%dT%H:%M:%S.") + f"{moment.microsecond:06d}0Z"
 
 
-def storms(records: list[dict[str, Any]], outcome: str = "ok", *, oldest: str | None = None, truncated: bool = False, stopped: dict[str, str] | None = None, raw_rows: bool = False, log_state: str = "ok", query_outcome: str | None = None, host_now: float | None = None, start_shift: int = 0, **params: Any):
+def storms(records: list[dict[str, Any]], outcome: str = "ok", *, oldest: str | None = None, truncated: bool = False, stopped: dict[str, str] | None = None, raw_rows: bool = False, log_state: str = "ok", query_outcome: str | None = None, host_now: float | None = None, start_shift: int = 0, omit_queried_at: bool = False, **params: Any):
     class StormBridge:
         def run(self, script: str, *, depth: int = 6):
             if outcome not in ("ok", "empty"):
@@ -64,7 +64,9 @@ def storms(records: list[dict[str, Any]], outcome: str = "ok", *, oldest: str | 
             count = int(re.search(r"\(\[long\]\((\d+) - 1\)", script).group(1))
             machine_now = host_now if host_now is not None else time.time()
             rounded_end = datetime.fromtimestamp(int(machine_now * 1000) / 1000, UTC)
-            last = int((rounded_end - timedelta(microseconds=1)).timestamp() // bucket_seconds) * bucket_seconds
+            requested = re.search(r"\$requestedUntil = \[datetimeoffset\]::Parse\('([^']+)'\)", script)
+            end = min(rounded_end, datetime.fromisoformat(requested.group(1).replace("Z", "+00:00"))) if requested else rounded_end
+            last = int((end - timedelta(microseconds=1)).timestamp() // bucket_seconds) * bucket_seconds
             start = whea._stamp(last - (count - 1) * bucket_seconds + start_shift)
             before = datetime.fromisoformat(start.replace("Z", "+00:00")) - timedelta(seconds=1)
             rows = [
@@ -77,7 +79,10 @@ def storms(records: list[dict[str, Any]], outcome: str = "ok", *, oldest: str | 
                 "truncated": None if stopped else truncated, "stopped": stopped, "records": rows, "log_enabled": True, "log_mode": "Circular", "log_state": log_state,
                 "log_error": None, "log_oldest": oldest or before.isoformat().replace("+00:00", "Z"), "oldest_state": "ok", "oldest_error": None,
             }
-            return BridgeResult("ok", items=[{"window_start": start, "window_end": _powershell_stamp(int(machine_now * 1000) / 1000), "source": source}], took_ms=9)
+            payload = {"window_start": start, "window_end": _powershell_stamp(end.timestamp()), "source": source}
+            if not omit_queried_at:
+                payload["queried_at"] = _powershell_stamp(rounded_end.timestamp())
+            return BridgeResult("ok", items=[payload], took_ms=9)
 
     bridge = StormBridge()
     return asyncio.run(take("storms", bridge, params))
@@ -818,6 +823,111 @@ def test_an_exact_end_boundary_uses_the_preceding_bucket_without_a_collector_fai
     assert reading.section("status").data["state"] == "unknown"  # no baseline for a trend
 
 
+def test_historical_storm_window_keeps_evidence_without_a_live_status():
+    query_time = datetime(2026, 9, 23, 18, 30, tzinfo=UTC).timestamp()
+    anchor_time = query_time - 3 * 86400
+    reading = storms(load(now=anchor_time), host_now=query_time, before=_powershell_stamp(anchor_time),
+                     oldest=_powershell_stamp(anchor_time - 2 * 86400))
+    data = sections(reading)
+    assert reading.outcome == "ok" and reading.count == 40
+    assert "status" not in data
+    assert data["buckets"]["total"] == 40 and sum(signature["count"] for signature in data["signatures"]) == 40
+    assert data["collection"]["window_end"] == _powershell_stamp(anchor_time)
+    assert data["collection"]["queried_at"] == _powershell_stamp(query_time)
+    assert data["coverage"]["system"]["covered_until"] == _powershell_stamp(anchor_time)
+    assert data["coverage"]["system"]["complete"] is True
+
+
+def test_historical_storm_end_on_bucket_boundary_uses_preceding_bucket():
+    query_time = datetime(2026, 9, 23, 18, 30, tzinfo=UTC).timestamp()
+    anchor_time = query_time - 3 * 86400 - 1800
+    reading = storms([], outcome="empty", host_now=query_time, hours=1, bucket_seconds=3600,
+                     before=_powershell_stamp(anchor_time), oldest=_powershell_stamp(anchor_time - 86400))
+    assert reading.outcome == "empty"
+    assert reading.section("buckets").data["from"] == whea._stamp(anchor_time - 3600)
+    assert reading.section("buckets").data["to"] == whea._stamp(anchor_time)
+    assert reading.section("status") is None
+
+
+def test_historical_storm_partial_final_bucket_ends_at_the_anchor():
+    query_time = datetime(2026, 9, 23, 18, 30, tzinfo=UTC).timestamp()
+    anchor_time = query_time - 3 * 86400 + 30
+    reading = storms([], outcome="empty", host_now=query_time, hours=1, bucket_seconds=60,
+                     before=_powershell_stamp(anchor_time), oldest=_powershell_stamp(anchor_time - 86400))
+    buckets = reading.section("buckets").data
+    assert reading.outcome == "empty" and buckets["to"] == whea._stamp(anchor_time + 30)
+    assert reading.section("collection").data["window_end"] == _powershell_stamp(anchor_time)
+    assert reading.section("coverage").data["system"]["covered_until"] == _powershell_stamp(anchor_time)
+    assert buckets["totals"][-1] == 0 and reading.section("status") is None
+
+
+def test_historical_storm_excludes_rows_at_or_just_after_its_exclusive_end():
+    query_time = datetime(2026, 9, 23, 18, 30, tzinfo=UTC).timestamp()
+    anchor_time = query_time - 3 * 86400
+    base = load(now=anchor_time)[0]
+    rows = [{**base, "TimeCreated": _powershell_stamp(anchor_time + offset), "Message": "PRIVATE_OUTSIDE_MARKER"}
+            for offset in (0, 0.0005)]
+    reading = storms(rows, host_now=query_time, before=_powershell_stamp(anchor_time),
+                     oldest=_powershell_stamp(anchor_time - 2 * 86400))
+    assert reading.outcome == "empty" and reading.count == 0
+    assert reading.section("collection").data["system"]["row_issues"]["outside_window"] == 2
+    assert reading.section("buckets").data["total"] == 0
+    assert "PRIVATE_OUTSIDE_MARKER" not in json.dumps(reading.to_dict())
+
+
+def test_future_storm_anchor_reports_only_observed_reach_and_incomplete_coverage():
+    query_time = datetime(2026, 9, 23, 18, 30, tzinfo=UTC).timestamp()
+    reading = storms([], outcome="empty", host_now=query_time, before=_powershell_stamp(query_time + 3600),
+                     oldest=_powershell_stamp(query_time - 2 * 86400))
+    assert reading.outcome == "empty" and reading.section("status") is None
+    assert reading.section("collection").data["window_end"] == _powershell_stamp(query_time)
+    reach = reading.section("coverage").data["system"]
+    assert reach["covered_until"] == _powershell_stamp(query_time) and reach["complete"] is False
+    assert any("requested end is after" in warning for warning in reading.warnings)
+
+
+def test_storm_window_before_retained_history_has_one_clear_retention_warning():
+    query_time = datetime(2026, 9, 23, 18, 30, tzinfo=UTC).timestamp()
+    anchor_time = query_time - 3 * 86400
+    reading = storms([], outcome="empty", host_now=query_time, before=_powershell_stamp(anchor_time),
+                     oldest=_powershell_stamp(anchor_time + 3600))
+    assert reading.outcome == "empty" and reading.section("status") is None
+    assert all(total is None for total in reading.section("buckets").data["totals"])
+    reach = reading.section("coverage").data["system"]
+    assert reach["complete"] is False and reach["covered_from"] is None and reach["covered_until"] is None
+    assert len(reading.warnings) == 1 and "retained history begins at or after" in reading.warnings[0]
+
+
+def test_entirely_future_storm_window_fails_instead_of_looking_quiet():
+    query_time = datetime(2026, 9, 23, 18, 30, tzinfo=UTC).timestamp()
+    reading = storms([], outcome="empty", host_now=query_time, hours=1,
+                     before=_powershell_stamp(query_time + 7200))
+    assert reading.outcome == "failed" and "begins at or after" in reading.error["detail"]
+    assert reading.section("buckets") is None
+
+
+def test_storm_collector_requires_host_query_time():
+    reading = storms([], outcome="empty", omit_queried_at=True)
+    assert reading.outcome == "failed" and "query time" in reading.error["detail"]
+    assert reading.section("buckets") is None
+
+
+@pytest.mark.parametrize("before", ["2026-09-23T18:30:00", "not-a-time", "1969-12-31T23:00:00Z"])
+def test_storm_anchor_requires_a_zoned_post_epoch_time(before):
+    with pytest.raises(ValueError, match="parameter 'before'"):
+        storms([], before=before)
+
+
+def test_storm_http_boundary_rejects_an_unzoned_anchor_before_querying():
+    bridge = FakeBridge(BridgeResult("failed", error="the bridge must not be asked"),
+                        by_marker={"$env:COMPUTERNAME": identity_result("SENTINEL-FIXTURE", "person")})
+    token = "synthetic-test-token-0123456789"
+    with TestClient(create_app(State(bridge=bridge, token=token))) as client:
+        response = client.get("/api/readings/storms", params={"before": "2026-09-23T18:30:00"},
+                              headers={"Authorization": f"Bearer {token}"})
+    assert response.status_code == 422 and "parameter 'before'" in response.json()["detail"]
+
+
 def test_a_misaligned_host_window_fails_with_its_own_reason():
     reading = storms([], outcome="empty", start_shift=1)
     assert reading.outcome == "failed" and reading.count is None
@@ -990,7 +1100,7 @@ def test_the_catalog_carries_both_readings_with_what_redaction_removes():
 
     assert REGISTRY["whea"].classes == ("raw", "derived") and REGISTRY["storms"].classes == ("raw", "derived", "inferred")
     assert REGISTRY["whea"].private and REGISTRY["storms"].private
-    assert [p.name for p in REGISTRY["storms"].params] == ["hours", "bucket_seconds", "burst_threshold", "accel_threshold"]
+    assert [p.name for p in REGISTRY["storms"].params] == ["hours", "bucket_seconds", "burst_threshold", "accel_threshold", "before"]
 
 
 # ---------------------------------------------------------------- on this machine
@@ -1153,6 +1263,17 @@ def test_wider_storm_buckets_align_on_this_machine():
     buckets = reading.section("buckets").data
     assert buckets["bucket_seconds"] == 900 and buckets["bucket_count"] == 96
     assert whea.stamp_key(buckets["from"]) == whea.stamp_key(reading.section("collection").data["window_start"])
+
+
+@pytest.mark.host
+def test_historical_storm_query_answers_on_this_machine_without_live_status():
+    before = (datetime.now(UTC) - timedelta(hours=2)).isoformat()
+    reading = _observed(asyncio.run(take("storms", real_bridge_or_skip(), {"hours": 1, "before": before})))
+    collection = reading.section("collection").data
+    assert whea.stamp_key(collection["window_end"]) == whea.stamp_key(whea.before_stamp(before))
+    assert whea.stamp_key(collection["queried_at"]) > whea.stamp_key(collection["window_end"])
+    assert reading.section("buckets") is not None and reading.section("status") is None
+    assert reading.section("coverage").data["system"]["covered_until"] in (collection["window_end"], None)
 
 
 def minimal_cper() -> str:

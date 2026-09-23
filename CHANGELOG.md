@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.9] - 2026-09-23
+
+### Added
+- `storms` now accepts an exclusive, time-zoned `before` anchor to inspect an older System WHEA-Logger filing-time window without spending its bounded query on newer traffic. The host query time, actual bucket-aligned bounds and observed upper reach travel with the answer. An end beyond the host clock cannot be complete, and an entirely future interval fails.
+- Historical storm answers keep bounded bucket, signature and coverage evidence for API, MCP and Stack handoffs, but omit the live burst, acceleration and quiet status. Windows filing time is not necessarily the hardware occurrence time; the System storm projection does not yet distinguish CPER PreviousError backlog after a restart.
+- Compact Stack handoffs explain the missing historical status and include up to three exact System sample references so an agent can re-read retained events. The sanitized screen fixture uses one clock for storm samples and exact records.
+
 ## [1.3.8] - 2026-09-23
 
 ### Added

@@ -653,10 +653,15 @@ def _run_decoder(payload: str, timeout: float) -> tuple[str, str, int | None, st
 
 # ---------------------------------------------------------------- storms
 
+STORM_COVERAGE_BASIS = (
+    COVERAGE_BASIS + " Complete uses actual bucket bounds; covered_until is the observed exclusive end. "
+    "Future requested ends are incomplete."
+)
+
 
 @dataclass(frozen=True)
 class Window:
-    """The wall-clock window the buckets cover, aligned to bucket boundaries and ending now."""
+    """The wall-clock window the buckets cover, aligned to bucket boundaries."""
 
     start: int
     bucket_seconds: int
@@ -687,9 +692,25 @@ def window_for(hours: int, bucket_seconds: int, now: float | None = None) -> Win
     return Window(start=last - (count - 1) * bucket_seconds, bucket_seconds=bucket_seconds, count=count)
 
 
+def before_stamp(before: str) -> str:
+    """A millisecond UTC end for a historical WHEA window, never an offset-free guess."""
+    try:
+        parsed = datetime.fromisoformat(before.strip().replace("Z", "+00:00"))
+        if parsed.tzinfo is None or parsed.utcoffset() is None:
+            raise ValueError("a time zone is required")
+        utc = parsed.astimezone(UTC)
+        if utc <= datetime(1970, 1, 1, tzinfo=UTC):
+            raise ValueError("must be after the Unix epoch")
+        return utc.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    except (ValueError, OverflowError) as exc:
+        raise ValueError(f"parameter 'before': not an ISO timestamp with Z or an offset ({exc})") from exc
+
+
 STORMS_SCRIPT_TEMPLATE = r"""
-$until = (Get-Date).ToUniversalTime()
-$until = $until.AddTicks(-($until.Ticks % 10000))
+$queried = (Get-Date).ToUniversalTime()
+$queried = $queried.AddTicks(-($queried.Ticks % 10000))
+$requestedUntil = {before_assignment}
+$until = if ($requestedUntil -gt $queried) { $queried } else { $requestedUntil }
 $untilIso = $until.ToString('o')
 $queryUntilIso = $until.AddMilliseconds(1).ToString('o')
 $epoch = [datetime]::SpecifyKind([datetime]'1970-01-01T00:00:00', [System.DateTimeKind]::Utc)
@@ -733,7 +754,7 @@ if ($null -eq $errorText) {
 }
 $meta = Read-LogMetadata 'System'
 [pscustomobject]@{
-    window_start = $startIso; window_end = $untilIso
+    window_start = $startIso; window_end = $untilIso; queried_at = $queried.ToString('o')
     source = [pscustomobject]@{
         log = 'System'; outcome = $outcome; error = $errorText
         returned = $records.Count; limit = {cap}; truncated = $truncated; stopped = $stopped; records = $records
@@ -744,10 +765,13 @@ $meta = Read-LogMetadata 'System'
 """
 
 
-def storms_script(window: Window) -> str:
-    """Ask the Windows clock for both the query bounds and the bucket alignment."""
+def storms_script(window: Window, before: str = "") -> str:
+    """Ask the Windows clock for the observed end and bucket-aligned System window."""
+    stamp = before_stamp(before) if before.strip() else None
+    assignment = f"[datetimeoffset]::Parse('{stamp}').UtcDateTime" if stamp else "$queried"
     return (LOG_METADATA_SCRIPT + STORMS_SCRIPT_TEMPLATE.replace("{bucket_seconds}", str(window.bucket_seconds))
-            .replace("{count}", str(window.count)).replace("{cap}", str(RECORD_CAP)).replace("{extra}", str(RECORD_CAP + 1)))
+            .replace("{count}", str(window.count)).replace("{cap}", str(RECORD_CAP)).replace("{extra}", str(RECORD_CAP + 1))
+            .replace("{before_assignment}", assignment))
 
 
 def take_storms(bridge: Bridge, params: dict[str, Any]) -> Reading:
@@ -758,7 +782,11 @@ def take_storms(bridge: Bridge, params: dict[str, Any]) -> Reading:
         raise ValueError("parameter 'accel_threshold': must be greater than zero")
     # This validates the requested shape; the Windows collector supplies the actual clock.
     requested = window_for(params["hours"], params["bucket_seconds"], now=0)
-    script = storms_script(requested)
+    before = str(params.get("before") or "").strip()
+    requested_end = before_stamp(before) if before else None
+    requested_key = stamp_key(requested_end) if requested_end else None
+    requested_start_key = (requested_key[0] - timedelta(hours=params["hours"]), requested_key[1]) if requested_key else None
+    script = storms_script(requested, before)
     result = bridge.run(script)
 
     collection: dict[str, Any] = {}
@@ -768,18 +796,30 @@ def take_storms(bridge: Bridge, params: dict[str, Any]) -> Reading:
     def build(payload: dict[str, Any]) -> list[Section]:
         start_text, end_text = payload.get("window_start"), payload.get("window_end")
         host_window = _host_window(start_text, end_text, requested)
+        queried_at = payload.get("queried_at")
+        query_key, end_key = stamp_key(queried_at), stamp_key(end_text)
+        problem = "the collector's window bounds or query time failed validation"
+        if requested_start_key is not None and query_key is not None and requested_start_key >= query_key:
+            problem = "the requested storm window begins at or after the machine's query time"
+            host_window = None
+        if query_key is None or end_key is None or end_key != min(query_key, requested_key or query_key):
+            host_window = None
         source, returned = _storm_source(
             payload.get("source") if host_window else None, start_text, end_text,
-            problem="the collector's window bounds did not match the requested bucket shape" if host_window is None else "the storm source result or record projection failed validation",
+            problem=problem if host_window is None else "the storm source result or record projection failed validation",
         )
-        collection.update(window_start=start_text, window_end=end_text, system=source)
+        collection.update(window_start=start_text, window_end=end_text, queried_at=queried_at, system=source)
         records.extend(returned)
         reach.update(system=log_coverage(source, returned, start_text, end_text))
-        sections = compose(returned, host_window, params, reach["system"], stopped=source.get("stopped")) if host_window and source["outcome"] in ("ok", "empty") else []
+        future_end = requested_key is not None and query_key is not None and requested_key > query_key
+        reach["system"]["covered_until"] = end_text if reach["system"]["covered_from"] is not None else None
+        if future_end and reach["system"]["complete"] is not None:
+            reach["system"]["complete"] = False
+        sections = compose(returned, host_window, params, reach["system"], stopped=source.get("stopped"), anchored=bool(before)) if host_window and source["outcome"] in ("ok", "empty") else []
         return [
             *sections,
             Section("collection", "raw", collection),
-            Section("coverage", "derived", reach, basis=COVERAGE_BASIS),
+            Section("coverage", "derived", reach, basis=STORM_COVERAGE_BASIS),
         ]
 
     reading = from_object("storms", params, script, result, build)
@@ -793,6 +833,9 @@ def take_storms(bridge: Bridge, params: dict[str, Any]) -> Reading:
     else:
         reading.outcome = "ok" if records else "empty"
         reading.count = len(records)
+        query_key = stamp_key(collection.get("queried_at"))
+        if requested_key is not None and query_key is not None and requested_key > query_key:
+            reading.warnings.append("the requested end is after the machine's query time; the observed storm window ends there and its start moves earlier too")
         if source["truncated"]:
             reading.warnings.append(f"the System query reached its {RECORD_CAP}-record limit; older matching records were not returned")
         if isinstance(source.get("stopped"), dict):
@@ -804,7 +847,10 @@ def take_storms(bridge: Bridge, params: dict[str, Any]) -> Reading:
             reading.warnings.append(f"{issues['outside_window']} returned records fell just outside the requested window and were not counted")
         oldest = stamp_key(source.get("log_oldest"))
         start = stamp_key(collection.get("window_start"))
-        if reach["system"]["complete"] is False and reach["system"]["covered_from"] is None:
+        end = stamp_key(collection.get("window_end"))
+        if oldest is not None and end is not None and oldest >= end:
+            reading.warnings.append("the System log's retained history begins at or after this storm window; no earlier absence can be established")
+        elif reach["system"]["complete"] is False and reach["system"]["covered_from"] is None:
             reading.warnings.append("System log coverage could not be established")
         elif oldest is not None and start is not None and oldest >= start:
             reading.warnings.append("System log retention does not cover the whole requested storm window")
@@ -909,7 +955,7 @@ def _storm_row_location(row: Any, first: tuple[datetime, int], until: tuple[date
     return "outside_window" if 0 <= delta <= 0.001 else None
 
 
-def compose(records: list[dict[str, Any]], window: Window, params: dict[str, Any], reach: dict[str, Any], *, stopped: Any = None) -> list[Section]:
+def compose(records: list[dict[str, Any]], window: Window, params: dict[str, Any], reach: dict[str, Any], *, stopped: Any = None, anchored: bool = False) -> list[Section]:
     """Returned events remain visible; a bucket is zero only when retention covers all of it."""
     returned_totals = [0] * window.count
     per_bucket: list[dict[str, int]] = [{} for _ in range(window.count)]
@@ -959,17 +1005,19 @@ def compose(records: list[dict[str, Any]], window: Window, params: dict[str, Any
                 f"placed in-window WHEA-Logger records counted into wall-clock buckets of {window.bucket_seconds} seconds: "
                 "'totals' has null where retained history, an early stop, the record cap or an event with unreadable time cannot establish a whole bucket, "
                 "zero only for an observed quiet bucket, and a count otherwise. 'active' keeps returned "
-                "records even in an incomplete bucket; the current bucket is observed only through collection.window_end"
+                "records even in an incomplete bucket; the final bucket is observed only through collection.window_end. "
+                "An anchored window has no inferred burst, acceleration or quiet status; its thresholds are not applied."
             ),
         ),
         Section(
             "signatures",
             "derived",
             [s.to_dict() for s in ranked],
-            basis="Counts and first/last times describe placed in-window returned records only. SHA-256 over the error type, bank, APIC id, MCI status, PCI vendor and device ids and the normalized message text; the first characters of the digest identify the signature",
+            basis="Counts and first/last System-log filing times describe placed in-window returned records only, not hardware occurrence times. SHA-256 over the error type, bank, APIC id, MCI status, PCI vendor and device ids and the normalized message text; the first characters of the digest identify the signature",
         ),
-        Section("status", "inferred", status(totals, returned_totals, per_bucket, params, unplaced, reach=reach, stopped=stopped), basis=_status_basis(params)),
     ]
+    if not anchored:
+        sections.append(Section("status", "inferred", status(totals, returned_totals, per_bucket, params, unplaced, reach=reach, stopped=stopped), basis=_status_basis(params)))
     return sections
 
 
@@ -1037,11 +1085,11 @@ def status(totals: list[int | None], returned_totals: list[int], per_bucket: lis
 
 def _status_basis(params: dict[str, Any]) -> str:
     return (
-        "System WHEA-Logger only. Quiet does not clear Kernel-WHEA/Errors. "
+        "System WHEA-Logger filing times only, in a live window ending at the query time. Quiet does not clear Kernel-WHEA/Errors. "
         f"the last {RECENT_BUCKETS} buckets against the {BASELINE_BUCKETS} before them, averaged over covered wall-clock buckets including observed idle ones: "
         f"a burst is reportable when at least {params['burst_threshold']} returned records share a recent bucket (critical above twice that); "
         f"acceleration needs the whole recent and baseline windows, a ratio of at least {params['accel_threshold']} and the noise floor. "
-        "Quiet requires coverage of the whole requested window; a gap yields unknown. The current bucket is only observed through the query time. A lead, not a diagnosis."
+        "Quiet requires coverage of the whole requested window; a gap yields unknown. The current bucket is only observed through the query time. A cluster may include reports filed after a restart; this rule does not locate the hardware occurrence. A lead, not a diagnosis."
     )
 
 
@@ -1252,14 +1300,15 @@ register(
 register(
     Spec(
         name="storms",
-        description="WHEA-Logger records in the System log over a window in wall-clock buckets, grouped by signature, with the burst and acceleration rules applied. Computed from the log on each take; nothing is stored between takes. The Microsoft-Windows-Kernel-WHEA/Errors channel is not counted here yet: a quiet window does not clear it, and the whea reading lists its records.",
+        description="WHEA-Logger records in the System log over a wall-clock window, grouped by signature. A live window has inferred burst and acceleration status; a historical before window keeps its buckets and signatures without that status. Computed from the log on each take; nothing is stored between takes. The separate Kernel-WHEA/Errors channel is not counted here.",
         classes=("raw", "derived", "inferred"),
         take=take_storms,
         params=(
-            Param("hours", "int", 24, "How far back the window reaches.", minimum=1, maximum=MAX_HOURS),
+            Param("hours", "int", 24, "Hours preceding before, or the query time when before is empty; the actual start is bucket-aligned.", minimum=1, maximum=MAX_HOURS),
             Param("bucket_seconds", "int", 60, "The width of one wall-clock bucket.", minimum=1),
-            Param("burst_threshold", "int", 5, "Records in one bucket that count as a burst; twice this is critical.", minimum=1),
-            Param("accel_threshold", "float", 2.0, "How many times the baseline rate the recent rate must reach to count as accelerating."),
+            Param("burst_threshold", "int", 5, "Live window only: records in one bucket that count as a burst; twice this is critical.", minimum=1),
+            Param("accel_threshold", "float", 2.0, "Live window only: how many times the baseline rate the recent rate must reach to count as accelerating."),
+            Param("before", "str", "", "Exclusive historical end with Z or an offset; empty uses the query time and includes live status."),
         ),
         private=("user names and profile paths inside the signature samples' message text",),
     )

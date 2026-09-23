@@ -37,6 +37,7 @@ KINDS = ("reading", "selection", "note")
 VERBOSITIES = ("summary", "full")
 RANKS = (1, 2, 3, 4, 5)
 SUMMARY_MESSAGE = 80
+SUMMARY_WARNING_TEXT = 200
 """How much of a record's message a summary table carries."""
 SUMMARY_LOG_LIMIT = 100
 SUMMARY_LOG_EDGE = 5
@@ -491,7 +492,7 @@ def _item_lines(position: int, item: dict[str, Any]) -> list[str]:
     if isinstance(warnings, list) and warnings:
         if item.get("verbosity") == "summary":
             warning_texts = [str(warning) for warning in warnings[:10]]
-            shown = [warning[:250] + ("…" if len(warning) > 250 else "") for warning in warning_texts]
+            shown = [warning[:SUMMARY_WARNING_TEXT] + ("…" if len(warning) > SUMMARY_WARNING_TEXT else "") for warning in warning_texts]
             more = len(warnings) - len(shown)
             lines.append(f"- warnings: {json.dumps(shown, ensure_ascii=False)}" + (f" (+{more} more in the stored reading)" if more else ""))
         else:
@@ -547,6 +548,9 @@ def _item_lines(position: int, item: dict[str, Any]) -> list[str]:
         lines += _log_handoff(envelope, records, selected=item.get("ids") is not None, compact=item.get("verbosity") == "summary")
     elif envelope.get("reading") == "storms" and item.get("verbosity") == "summary":
         lines += ["Bounded storm summary. Set this item to full for its stored buckets and signature samples; take `storms` again for a fresh observation.", ""]
+        params = envelope.get("params")
+        if isinstance(params, dict) and isinstance(params.get("before"), str) and params["before"].strip():
+            lines += ["Historical System WHEA-Logger filing-time window; `collection.window_end` is its actual exclusive end. No live burst, acceleration or quiet status is inferred by design. Reports filed after a restart may describe earlier errors.", ""]
         lines += _json_block(_storm_handoff_sections(envelope))
     elif envelope.get("reading") == "whea_reports" and item.get("verbosity") == "summary":
         lines += ["Bounded Kernel-WHEA report-time summary. These are report times, not error occurrence times; PreviousError marks an earlier Windows session. Set this item to full for every stored report and bucket, or take `whea_reports` again for a fresh observation.", ""]
@@ -1048,8 +1052,16 @@ def _storm_handoff_sections(envelope: dict[str, Any]) -> list[dict[str, Any]]:
                 shown_rows.append(matching)
                 shown_ids.add(signature_id)
         fields = ("id", "count", "description", "mci_status", "event_ids", "first_seen", "last_seen")
-        shown = [{key: row.get(key) for key in fields} for row in shown_rows]
-        output.append({**signatures, "data": {"distinct": len(rows), "shown": shown, "other_signatures": len(rows) - len(shown)}, "projection": "bounded summary"})
+        shown = []
+        for index, row in enumerate(shown_rows):
+            entry = {key: row.get(key) for key in fields}
+            sample = row.get("sample")
+            if index < 3 and isinstance(sample, dict) and type(sample.get("RecordId")) is int and sample["RecordId"] > 0 and isinstance(sample.get("TimeCreated"), str):
+                entry["sample_ref"] = {"record_id": sample["RecordId"], "time_created": sample["TimeCreated"]}
+            shown.append(entry)
+        output.append({**signatures, "data": {"distinct": len(rows), "shown": shown, "other_signatures": len(rows) - len(shown)},
+                       "basis": "Counts cover returned records only. First/last are System filing times, not error occurrence. Up to three sample_ref values identify System records for whea_record.",
+                       "projection": "bounded summary"})
     return output
 
 
