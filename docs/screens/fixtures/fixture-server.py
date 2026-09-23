@@ -6,7 +6,7 @@ that renders the real thing, over records that were never on this machine.
 Answers:
   - the identity probe (``$env:COMPUTERNAME``): a placeholder host and user
   - WHEA (``whea``, ``whea_record``, ``storms``, ``whea_reports``): tests/fixtures/whea-records.json for System rows, with each
-    binary System record given a decodable CPER payload; two synthetic Kernel-WHEA channel rows
+    binary System record given a decodable CPER payload; three synthetic Kernel-WHEA channel rows
     exercise fatal previous-session and unavailable-header presentation
   - the System log (``events``, ``record``): docs/screens/fixtures/system-log.json, filtered
     and paged the way Get-WinEvent would be
@@ -156,6 +156,7 @@ def kernel_whea_records(now: float) -> list[dict[str, Any]]:
     return [
         {**common, "RecordId": 77, "TimeCreated": _powershell_stamp(now - 2 * 60), "RawData": CHANNEL_CPER_HEX},
         {**common, "RecordId": 76, "TimeCreated": _powershell_stamp(now - 5 * 60), "RawData": "43504552"},
+        {**common, "RecordId": 75, "TimeCreated": _powershell_stamp(now - 2893 * 60), "RawData": CHANNEL_CPER_HEX},
     ]
 
 
@@ -275,12 +276,16 @@ def answer_whea_record(script: str) -> BridgeResult:
 
 
 def answer_whea_reports(script: str) -> BridgeResult:
-    """The bounded report-time projection; the two channel rows are both synthetic."""
+    """The bounded report-time projection, including a report near the older restart frame."""
     now = time.time()
     bucket_seconds = int(re.search(r"\$bucketTicks = \[long\](\d+)", script).group(1))
     count = int(re.search(r"\(\[long\]\((\d+) - 1\)", script).group(1))
-    start = _powershell_stamp((int(now // bucket_seconds) - count + 1) * bucket_seconds)
-    end = _powershell_stamp(int(now * 1000) / 1000)
+    requested = re.search(r"\$requestedUntil = \[datetimeoffset\]::Parse\('([^']+)'\)", script)
+    queried = int(now * 1000) / 1000
+    until_time = min(_parse_stamp(requested.group(1)), queried) if requested else queried
+    last = int((until_time - 0.000001) // bucket_seconds) * bucket_seconds
+    start = _powershell_stamp(last - (count - 1) * bucket_seconds)
+    end = _powershell_stamp(until_time)
     cap = max(int(value) for value in _MAXEVENTS_RE.findall(script)) - 1
     first, until = _parse_stamp(start), _parse_stamp(end)
     rows = []
@@ -300,7 +305,7 @@ def answer_whea_reports(script: str) -> BridgeResult:
         "log_enabled": True, "log_mode": "Circular", "log_state": "ok", "log_error": None,
         "log_oldest": _powershell_stamp(_parse_stamp(start) - 86400), "oldest_state": "ok", "oldest_error": None,
     }
-    return BridgeResult("ok", items=[{"window_start": start, "window_end": end, "source": source}], took_ms=24)
+    return BridgeResult("ok", items=[{"window_start": start, "window_end": end, "queried_at": _powershell_stamp(queried), "source": source}], took_ms=24)
 
 
 class FixtureBridge:
@@ -329,8 +334,10 @@ class FixtureBridge:
             now = time.time()
             bucket_seconds = int(re.search(r"\$bucketTicks = \[long\](\d+)", script).group(1))
             count = int(re.search(r"\(\[long\]\((\d+) - 1\)", script).group(1))
-            start = _powershell_stamp((int(now // bucket_seconds) - count + 1) * bucket_seconds)
-            end = _powershell_stamp(int(now * 1000) / 1000)
+            queried = int(now * 1000) / 1000
+            last = int((queried - 0.000001) // bucket_seconds) * bucket_seconds
+            start = _powershell_stamp(last - (count - 1) * bucket_seconds)
+            end = _powershell_stamp(queried)
             cap = max(int(value) for value in _MAXEVENTS_RE.findall(script)) - 1
             first, until = _parse_stamp(start), _parse_stamp(end)
             records = [

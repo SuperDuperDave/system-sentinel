@@ -11,7 +11,7 @@ from sentinel import readings  # noqa: F401
 from sentinel.reading import take
 
 
-def test_screen_fixture_answers_current_record_and_fault_window_contract():
+def test_screen_fixture_answers_current_record_and_nearby_source_contracts():
     path = Path(__file__).parents[1] / "docs" / "screens" / "fixtures" / "fixture-server.py"
     spec = importlib.util.spec_from_file_location("sentinel_screen_fixture", path)
     assert spec and spec.loader
@@ -27,9 +27,14 @@ def test_screen_fixture_answers_current_record_and_fault_window_contract():
     faults = asyncio.run(take("faults", bridge, {
         "since": stamp(moment - timedelta(hours=1)), "before": stamp(moment + timedelta(hours=1)), "count": 100,
     }))
+    reports = asyncio.run(take("whea_reports", bridge, {
+        "before": stamp(moment + timedelta(hours=1)), "hours": 2, "bucket_seconds": 60,
+    }))
 
     assert recent.outcome == "ok" and recent.section("records").data
     assert before.outcome == "ok" and before.section("coverage").data["reaches_before"] is True
     assert faults.outcome == "ok" and faults.section("decoded").data
     assert faults.section("coverage").data["complete"] is True
     assert all(row["Log"] == "Application" for row in faults.section("records").data)
+    assert reports.outcome == "ok" and [row["record_id"] for row in reports.section("reports").data] == [75]
+    assert reports.section("coverage").data["kernel_whea"]["complete"] is True

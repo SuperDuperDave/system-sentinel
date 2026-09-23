@@ -63,7 +63,8 @@ def storms(records: list[dict[str, Any]], outcome: str = "ok", *, oldest: str | 
             bucket_seconds = int(re.search(r"\$bucketTicks = \[long\](\d+)", script).group(1))
             count = int(re.search(r"\(\[long\]\((\d+) - 1\)", script).group(1))
             machine_now = host_now if host_now is not None else time.time()
-            last = int(machine_now // bucket_seconds) * bucket_seconds
+            rounded_end = datetime.fromtimestamp(int(machine_now * 1000) / 1000, UTC)
+            last = int((rounded_end - timedelta(microseconds=1)).timestamp() // bucket_seconds) * bucket_seconds
             start = whea._stamp(last - (count - 1) * bucket_seconds + start_shift)
             before = datetime.fromisoformat(start.replace("Z", "+00:00")) - timedelta(seconds=1)
             rows = [
@@ -784,11 +785,13 @@ def test_host_clock_aligns_the_query_and_buckets_even_when_python_time_differs(s
     assert reading.section("status").data["state"] == "burst"
 
 
-def test_a_single_bucket_at_its_exact_start_is_an_empty_interval_not_a_collector_failure():
+def test_an_exact_end_boundary_uses_the_preceding_bucket_without_a_collector_failure():
     instant = whea.window_for(1, 3600, now=time.time()).end
     reading = storms([], outcome="empty", host_now=instant, hours=1, bucket_seconds=3600)
     assert reading.outcome == "empty" and reading.count == 0
     assert reading.section("buckets").data["bucket_count"] == 1
+    assert reading.section("buckets").data["to"] == whea._stamp(instant)
+    assert reading.section("buckets").data["from"] == whea._stamp(instant - 3600)
     assert reading.section("status").data["state"] == "unknown"  # no baseline for a trend
 
 
@@ -1201,7 +1204,7 @@ def test_the_screenshot_fixture_never_feeds_a_truncated_cper_to_the_real_decoder
     assert records
     assert all(whea.checked_cper(record["RawData"])[1] is None for record in records if record.get("RawData"))
     channel = fixture["kernel_whea_records"](time.time())
-    assert len(channel) == 2 and all(record["Log"] == whea.CHANNEL for record in channel)
+    assert len(channel) == 3 and all(record["Log"] == whea.CHANNEL for record in channel)
     assert whea.cper_header(channel[0]["RawData"])[0]["previous_session"] is True
     assert whea.cper_header(channel[0]["RawData"])[0]["severity"] == "fatal"
     assert whea.cper_header(channel[1]["RawData"])[1] is not None

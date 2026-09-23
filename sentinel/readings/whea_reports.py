@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 import time
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from ..bridge import Bridge
@@ -19,13 +20,15 @@ from .event_coverage import metadata as log_metadata
 from .whea import CHANNEL, CHANNEL_PROVIDER, MAX_HOURS, RECORD_CAP, Window, _host_window, _stamp, window_for
 
 SCRIPT = r"""
-$until = (Get-Date).ToUniversalTime()
-$until = $until.AddTicks(-($until.Ticks % 10000))
+$queried = (Get-Date).ToUniversalTime()
+$queried = $queried.AddTicks(-($queried.Ticks % 10000))
+$requestedUntil = {before_assignment}
+$until = if ($requestedUntil -gt $queried) {{ $queried }} else {{ $requestedUntil }}
 $untilIso = $until.ToString('o')
 $queryUntilIso = $until.AddMilliseconds(1).ToString('o')
 $epoch = [datetime]::SpecifyKind([datetime]'1970-01-01T00:00:00', [System.DateTimeKind]::Utc)
 $bucketTicks = [long]{bucket_seconds} * [long]10000000
-$elapsedTicks = $until.Ticks - $epoch.Ticks
+$elapsedTicks = $until.AddTicks(-1).Ticks - $epoch.Ticks
 $currentBucketTicks = $elapsedTicks - ($elapsedTicks % $bucketTicks)
 $startIso = $epoch.AddTicks($currentBucketTicks - ([long]({count} - 1) * $bucketTicks)).ToString('o')
 $xml = @"
@@ -73,7 +76,7 @@ if ($null -eq $errorText) {{
 }}
 $meta = Read-LogMetadata '{channel}'
 [pscustomobject]@{{
-    window_start = $startIso; window_end = $untilIso
+    window_start = $startIso; window_end = $untilIso; queried_at = $queried.ToString('o')
     source = [pscustomobject]@{{
         log = '{channel}'; outcome = $outcome; error = $errorText
         returned = $records.Count; limit = {cap}; truncated = $truncated; stopped = $stopped; records = $records
@@ -93,21 +96,48 @@ BASIS = (
     "record. Top-level PreviousError and unreadable-header counts include returned reports whose "
     "time could not be placed; active bucket counts require a readable time. The separate "
     "whea_record reading retrieves one retained event by this channel's log-local RecordId, "
-    "with CPER bytes only on explicit unredacted request."
+    "with CPER bytes only on explicit unredacted request. The final bucket is observed only "
+    "through collection.window_end, even when buckets.to reaches the next bucket boundary."
+)
+REPORT_COVERAGE_BASIS = (
+    COVERAGE_BASIS + " Complete describes the actual bucket-aligned window_start through "
+    "window_end, not an earlier start implied by hours. The start can fall up to one bucket "
+    "after before minus hours. covered_until is the observed exclusive end and never passes "
+    "queried_at; a requested end after queried_at keeps complete false."
 )
 
 
-def reports_script(window: Window) -> str:
+def _before_stamp(before: str) -> str:
+    try:
+        parsed = datetime.fromisoformat(before.strip().replace("Z", "+00:00"))
+        if parsed.tzinfo is None or parsed.utcoffset() is None:
+            raise ValueError("a time zone is required")
+        utc = parsed.astimezone(UTC)
+        if utc <= datetime(1970, 1, 1, tzinfo=UTC):
+            raise ValueError("must be after the Unix epoch")
+        return utc.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    except (ValueError, OverflowError) as exc:
+        raise ValueError(f"parameter 'before': not an ISO timestamp with Z or an offset ({exc})") from exc
+
+
+def reports_script(window: Window, before: str = "") -> str:
+    stamp = _before_stamp(before) if before.strip() else None
+    assignment = f"[datetimeoffset]::Parse('{stamp}').UtcDateTime" if stamp else "$queried"
     return LOG_METADATA_SCRIPT + SCRIPT.format(
         bucket_seconds=window.bucket_seconds, count=window.count, channel=CHANNEL,
         provider=CHANNEL_PROVIDER, cap=RECORD_CAP, extra=RECORD_CAP + 1,
+        before_assignment=assignment,
     )
 
 
 def take_reports(bridge: Bridge, params: dict[str, Any]) -> Reading:
     started = time.perf_counter()
     requested = window_for(params["hours"], params["bucket_seconds"], now=0)
-    script = reports_script(requested)
+    before = str(params.get("before") or "").strip()
+    requested_end = _before_stamp(before) if before else None
+    requested_key = stamp_key(requested_end) if requested_end is not None else None
+    requested_start_key = (requested_key[0] - timedelta(hours=params["hours"]), requested_key[1]) if requested_key else None
+    script = reports_script(requested, before)
     result = bridge.run(script)
     source: dict[str, Any] = {}
     reach: dict[str, Any] = {}
@@ -116,17 +146,30 @@ def take_reports(bridge: Bridge, params: dict[str, Any]) -> Reading:
     def build(payload: dict[str, Any]) -> list[Section]:
         start, end = payload.get("window_start"), payload.get("window_end")
         host_window = _host_window(start, end, requested)
-        source_data, rows = _source(payload.get("source") if host_window else None, start, end)
+        queried_at = payload.get("queried_at")
+        query_key = stamp_key(queried_at)
+        end_key = stamp_key(end)
+        problem = "the report collector's window or query time failed validation"
+        if requested_start_key is not None and query_key is not None and requested_start_key >= query_key:
+            problem = "the requested report-time window begins at or after the machine's query time"
+            host_window = None
+        if query_key is None or end_key is None or end_key != min(query_key, requested_key or query_key):
+            host_window = None
+        source_data, rows = _source(payload.get("source") if host_window else None, start, end, problem=problem)
         source.update(source_data)
         reach.update(log_coverage(source, rows, start, end))
+        future_end = requested_key is not None and query_key is not None and requested_key > query_key
+        reach["covered_until"] = end if reach["covered_from"] is not None else None
+        if future_end and reach["complete"] is not None:
+            reach["complete"] = False
         if host_window and source["outcome"] in ("ok", "empty"):
             reports.extend(_reports(rows))
             buckets = _buckets(reports, host_window, reach)
             sections = [Section("reports", "derived", reports, basis=BASIS), Section("buckets", "derived", buckets, basis=BASIS)]
         else:
             sections = []
-        return [*sections, Section("collection", "raw", {"window_start": start, "window_end": end, "kernel_whea": source}),
-                Section("coverage", "derived", {"kernel_whea": reach}, basis=COVERAGE_BASIS)]
+        return [*sections, Section("collection", "raw", {"window_start": start, "window_end": end, "queried_at": queried_at, "kernel_whea": source}),
+                Section("coverage", "derived", {"kernel_whea": reach}, basis=REPORT_COVERAGE_BASIS)]
 
     reading = from_object("whea_reports", params, script, result, build)
     if not reading.observed:
@@ -136,6 +179,10 @@ def take_reports(bridge: Bridge, params: dict[str, Any]) -> Reading:
         reading.error = {"kind": reading.outcome, "detail": source["error"] or "The Kernel-WHEA query did not answer."}
     else:
         reading.outcome, reading.count = ("ok" if reports else "empty"), len(reports)
+        collection_section = reading.section("collection")
+        query_key = stamp_key(collection_section.data.get("queried_at")) if collection_section else None
+        if requested_key is not None and query_key is not None and requested_key > query_key:
+            reading.warnings.append("the requested end is after the machine's query time; the observed report window ends there and its start moves earlier too")
         if source["truncated"]:
             reading.warnings.append(f"the Kernel-WHEA query reached its {RECORD_CAP}-record limit; older reports were not returned")
         if isinstance(source.get("stopped"), dict):
@@ -155,8 +202,8 @@ def take_reports(bridge: Bridge, params: dict[str, Any]) -> Reading:
     return reading
 
 
-def _source(value: Any, start: Any, end: Any) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    fallback = {**log_metadata({}), "log": CHANNEL, "outcome": "failed", "error": "the report source or window failed validation",
+def _source(value: Any, start: Any, end: Any, *, problem: str = "the report source or window failed validation") -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    fallback = {**log_metadata({}), "log": CHANNEL, "outcome": "failed", "error": problem,
                 "returned": 0, "limit": RECORD_CAP, "truncated": None, "stopped": None,
                 "row_issues": {"unplaced": 0, "outside_window": 0}}
     first, until = stamp_key(start), stamp_key(end)
@@ -271,6 +318,7 @@ register(Spec(
     name="whea_reports",
     description="Kernel-WHEA event-20 reports in wall-clock buckets by report time, with independent channel coverage and fixed CPER header flags. PreviousError marks a condition from an earlier Windows session; no hardware-error burst or acceleration is inferred from report clustering.",
     classes=("raw", "derived"), take=take_reports,
-    params=(Param("hours", "int", 24, "How far back report times are queried.", minimum=1, maximum=MAX_HOURS),
-            Param("bucket_seconds", "int", 60, "The width of one report-time bucket.", minimum=1)),
+    params=(Param("hours", "int", 24, "Hours preceding before, or the query time when before is empty; the actual start is bucket-aligned.", minimum=1, maximum=MAX_HOURS),
+            Param("bucket_seconds", "int", 60, "The width of one report-time bucket.", minimum=1),
+            Param("before", "str", "", "Exclusive report-time end with Z or an offset; empty uses the query time.")),
 ))

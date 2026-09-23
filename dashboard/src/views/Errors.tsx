@@ -591,7 +591,7 @@ function SignatureDetail({ signature }: { signature: Signature }) {
 }
 
 /** One report reference can open its own exact, redacted reading without leaving the timeline. */
-function ReportDetail({ report }: { report: KernelReport }) {
+export function ReportDetail({ report, showMomentLink = true }: { report: KernelReport; showMomentLink?: boolean }) {
   const taken = useReading('whea_record', { source: 'kernel_whea', record_id: report.record_id });
   const record = part<EventRecord[]>(taken.reading, 'records')?.[0];
   const matches = observed(taken.reading) && taken.reading?.outcome === 'ok'
@@ -609,13 +609,13 @@ function ReportDetail({ report }: { report: KernelReport }) {
     {taken.reading?.outcome === 'empty' ? <p className={`${styles.notDecoded} readout`}>The channel may have rotated since this timeline was taken; this does not mean the report never existed.</p> : null}
     {taken.reading && !observed(taken.reading) ? <p className={`${styles.notDecoded} readout`}>This report could not be read. The query outcome does not establish that the report is absent.</p> : null}
     {taken.reading?.outcome === 'ok' && !matches ? <p className={`${styles.notDecoded} readout`}>This RecordId now names a different report. Take the timeline again before relying on it.</p> : null}
-    {matches && record ? <RecordDetail record={record} identity={identity} decoded={decoded} envelope={taken.reading}
+    {matches && record ? <RecordDetail record={record} identity={identity} decoded={decoded} envelope={taken.reading} showMomentLink={showMomentLink}
       stackTitle={`Kernel-WHEA report #${report.record_id} · reported ${record.TimeCreated}${identity?.cper?.previous_session ? ' · earlier-session error' : ''}`} /> : null}
   </>;
 }
 
 /** One source record in full, with the decoded structure of its payload beside it. */
-function RecordDetail({ record, identity, decoded, envelope, stackTitle }: { record: EventRecord; identity?: WheaIdentity; decoded?: Decoded; envelope: Reading | null; stackTitle?: string }) {
+function RecordDetail({ record, identity, decoded, envelope, stackTitle, showMomentLink = true }: { record: EventRecord; identity?: WheaIdentity; decoded?: Decoded; envelope: Reading | null; stackTitle?: string; showMomentLink?: boolean }) {
   const cper = identity?.cper;
   return (
     <>
@@ -658,7 +658,7 @@ function RecordDetail({ record, identity, decoded, envelope, stackTitle }: { rec
       ) : null}
       <RawReadout record={record} />
       <div className={styles.rowActions}>
-        <MomentLink at={record.TimeCreated} label={record.Log === KERNEL_WHEA ? 'System log before this report' : undefined} />
+        {showMomentLink ? <MomentLink at={record.TimeCreated} label={record.Log === KERNEL_WHEA ? 'System log before this report' : undefined} /> : null}
         {envelope ? (
           <AddToStack item={{ kind: 'selection', envelope, ids: [recordRef(record)], title: stackTitle ?? `${record.Log === KERNEL_WHEA ? 'Kernel-WHEA' : 'System WHEA-Logger'} record ${record.RecordId}` }} label="Add this record to the stack" />
         ) : null}

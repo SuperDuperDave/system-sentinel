@@ -6,6 +6,8 @@ import { Segmented, byDay, day, part } from '../Sections';
 import { useApp } from '../store';
 import { Taken, useReading } from '../useReading';
 import { FaultDetail, type Fault } from './Crashes';
+import { ReportDetail } from './Errors';
+import { KernelReports, type KernelReport, type ReportReach, type ReportSource } from './KernelReports';
 import styles from './Record.module.css';
 
 type Levels = 'errors' | 'all';
@@ -17,6 +19,24 @@ const BOOT_COUNT = 500;
 const PAGE = 25;
 const FRAME_LIMIT = 2000;
 const WINDOW_STAMP = new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+interface NearbyReach { complete: boolean | null; covered_from: string | null; covered_until: string | null }
+interface NearbySource { log_oldest?: string | null; oldest_state?: string | null; log_enabled?: boolean | null }
+
+/** Retention failure, an old rotated window, and a partly observed window need different words. */
+function nearbyReachText(reach: NearbyReach | null, source: NearbySource | null, end: string, label: string): string {
+  if (reach?.complete === true) return 'Queried window covered';
+  if (source?.oldest_state === 'empty') return `${label} holds no retained records; this does not establish earlier absence`;
+  const oldest = source?.log_oldest ? Date.parse(source.log_oldest) : NaN;
+  if (source?.oldest_state === 'ok' && Number.isFinite(oldest) && oldest >= Date.parse(end)) {
+    return `${label} begins at ${WINDOW_STAMP.format(oldest)}; this queried window is older than its retained history`;
+  }
+  if (source?.log_enabled === false) return `${label} is disabled; absence of new records cannot be established`;
+  if (reach?.covered_from && reach.covered_until) {
+    return `Partly covered · ${WINDOW_STAMP.format(new Date(reach.covered_from))} to ${WINDOW_STAMP.format(new Date(reach.covered_until))}`;
+  }
+  return 'Window coverage could not be established';
+}
 
 /**
  * The record: the System log, most recent first, each row inspectable in place, and for any row the
@@ -132,6 +152,7 @@ function Frame({ moment }: { moment: string }) {
         </>
       ) : null}
       <FaultWindow moment={moment} />
+      <KernelReportWindow moment={moment} />
     </section>
   );
 }
@@ -146,13 +167,10 @@ function FaultWindow({ moment }: { moment: string }) {
   const taken = useReading('faults', { since, before, count: 100 }, open);
   const raw = part<EventRecord[]>(taken.reading, 'records') ?? [];
   const decoded = part<Fault[]>(taken.reading, 'decoded') ?? [];
-  const reach = part<{ complete: boolean | null; covered_from: string | null; covered_until: string | null }>(taken.reading, 'coverage');
+  const reach = part<NearbyReach>(taken.reading, 'coverage');
+  const source = part<NearbySource>(taken.reading, 'collection');
   const times = new Map(raw.map((row) => [String(row.RecordId), row.TimeCreated]));
-  const reachText = reach?.complete === true && reach.covered_from && reach.covered_until ? `Requested window covered · ${WINDOW_STAMP.format(new Date(reach.covered_from))} to ${WINDOW_STAMP.format(new Date(reach.covered_until))}`
-    : !reach?.covered_from || !reach.covered_until ? 'Window coverage could not be established'
-      : Date.parse(reach.covered_until) < Date.parse(before)
-        ? `Observed from ${WINDOW_STAMP.format(new Date(reach.covered_from))} to ${WINDOW_STAMP.format(new Date(reach.covered_until))}; the requested end is after the machine's query time`
-        : `Partly covered · ${WINDOW_STAMP.format(new Date(reach.covered_from))} to ${WINDOW_STAMP.format(new Date(reach.covered_until))}`;
+  const reachText = nearbyReachText(reach, source, before, 'Application log');
 
   return <section className={styles.nearby} aria-labelledby="nearby-faults-title">
     <div className={styles.nearbyHead}>
@@ -167,7 +185,7 @@ function FaultWindow({ moment }: { moment: string }) {
     <p className={styles.nearbyIntro}>Looks for application crashes, hangs and live kernel reports filed from one hour before to one hour after this moment. A nearby report is a lead, not proof of a cause. Reports may be filed after the fault occurred.</p>
     <div id="nearby-faults-body" hidden={!open}>
       <OutcomeLine taken={taken} noun="Application-log records" singular="Application-log record" emptyText="No matching fault report returned from the queried Application-log window" />
-      {reach ? <p className={`${styles.nearbyReach} readout`}>{reachText}</p> : null}
+      {reach ? <p className={`${styles.nearbyReach} readout`}>{reachText}{reach.covered_until && Date.parse(reach.covered_until) < Date.parse(before) ? ` · observed through ${WINDOW_STAMP.format(new Date(reach.covered_until))}; requested end is after the machine's query time` : ''}</p> : null}
       {taken.reading && observed(taken.reading) ? <AddToStack item={{ kind: 'reading', envelope: taken.reading, title: `Fault reports near ${moment}` }} label="Stack this reading" /> : null}
       {decoded.length ? <>
         <p className={`${styles.nearbyCount} readout`}>{decoded.length} interpreted {decoded.length === 1 ? 'fault' : 'faults'} from {raw.length} returned {raw.length === 1 ? 'record' : 'records'}. A live kernel report can span several records.</p>
@@ -183,6 +201,43 @@ function FaultWindow({ moment }: { moment: string }) {
         })}</ol>
         {decoded.length > shown ? <button className={styles.action} onClick={() => setShown((value) => value + 10)}>Show 10 more interpreted faults</button> : null}
       </> : null}
+    </div>
+  </section>;
+}
+
+/** The report channel can retain evidence after the System log has rotated away. */
+function KernelReportWindow({ moment }: { moment: string }) {
+  const [open, setOpen] = useState(false);
+  const before = new Date(Date.parse(moment) + 60 * 60 * 1000).toISOString();
+  const taken = useReading('whea_reports', { before, hours: 2, bucket_seconds: 60 }, open);
+  const reports = part<KernelReport[]>(taken.reading, 'reports') ?? [];
+  const collection = part<{ window_start: string; window_end: string; queried_at: string; kernel_whea: ReportSource }>(taken.reading, 'collection');
+  const reach = part<{ kernel_whea: ReportReach }>(taken.reading, 'coverage')?.kernel_whea ?? null;
+  const bounds = collection?.window_start && collection.window_end
+    ? `${WINDOW_STAMP.format(new Date(collection.window_start))} to ${WINDOW_STAMP.format(new Date(collection.window_end))}` : null;
+  const futureEnd = collection?.queried_at ? Date.parse(before) > Date.parse(collection.queried_at) : false;
+  const reachText = nearbyReachText(reach ? { ...reach, covered_until: reach.covered_until ?? null } : null, collection?.kernel_whea ?? null, collection?.window_end ?? before, 'Kernel-WHEA channel');
+  const answered = taken.reading?.outcome === 'ok' || taken.reading?.outcome === 'empty';
+
+  return <section className={styles.nearby} aria-labelledby="nearby-kernel-reports-title">
+    <div className={styles.nearbyHead}>
+      <div>
+        <p className="label">Kernel-WHEA channel · separate source</p>
+        <h2 id="nearby-kernel-reports-title" className="display">Hardware error reports near this moment</h2>
+      </div>
+      <button className={styles.action} onClick={() => setOpen((value) => !value)} aria-expanded={open} aria-controls="nearby-kernel-reports-body">
+        {open ? 'Hide hardware reports' : 'Read nearby hardware reports'}
+      </button>
+    </div>
+    <p className={styles.nearbyIntro}>Report times say when Windows filed each report, not necessarily when the error occurred. Opened from a restart, this window can include reports filed as Windows started again; a later restart can fall outside it. A nearby report is a lead to inspect.</p>
+    <div id="nearby-kernel-reports-body" hidden={!open}>
+      <OutcomeLine taken={taken} noun="Kernel-WHEA reports" singular="Kernel-WHEA report" emptyText="No Kernel-WHEA report returned from the queried channel window" />
+      {answered && bounds ? <p className={`${styles.nearbyReach} readout`}>{reachText} · queried {bounds}{futureEnd ? ' · requested end is after the machine’s query time' : ''}</p> : null}
+      {taken.reading && observed(taken.reading) ? <AddToStack item={{ kind: 'reading', envelope: taken.reading, title: `Kernel-WHEA reports near ${moment}` }} label="Stack this reading" /> : null}
+      {taken.reading && observed(taken.reading) && reports.length ? <KernelReports
+        reading={taken.reading} reports={reports} range={null} source={collection?.kernel_whea ?? null} reach={reach}
+        inspect={(report) => <ReportDetail report={report} showMomentLink={false} />}
+      /> : null}
     </div>
   </section>;
 }

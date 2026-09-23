@@ -19,10 +19,15 @@ export interface ReportSource {
   truncated: boolean | null;
   stopped: { kind: string; detail: string } | null;
   log_enabled: boolean | null;
+  log_mode?: string | null;
+  log_state?: string | null;
+  log_oldest?: string | null;
+  oldest_state?: string | null;
 }
 
 export interface ReportReach {
   covered_from: string | null;
+  covered_until?: string | null;
   complete: boolean | null;
 }
 
@@ -109,7 +114,7 @@ export function KernelReports({ reading, reports, range, source, reach, inspect 
       {source?.truncated ? <p className={`${styles.reportListStatus} readout`}>The query reached its {source.limit.toLocaleString()}-report limit. Older reports in this window were not returned.</p> : null}
       {source?.stopped ? <p className={`${styles.reportListStatus} readout`}>The query stopped after {source.returned.toLocaleString()} returned reports: {source.stopped.detail}</p> : null}
       {source?.log_enabled === false ? <p className={`${styles.reportListStatus} readout`}>This Windows channel is disabled; new reports are not being recorded there.</p> : null}
-      {reach?.complete !== true ? <p className={`${styles.reportListStatus} readout`}>The requested window is not known to be fully covered by this channel{reach?.covered_from ? `; its oldest retained report is ${new Date(reach.covered_from).toLocaleString()}` : ''}.</p> : null}
+      {reach?.complete !== true ? <p className={`${styles.reportListStatus} readout`}>The requested time span is not fully established{reach?.covered_from ? `; observed channel reach begins at ${new Date(reach.covered_from).toLocaleString()}` : ''}{reach?.covered_until ? ` and ends at ${new Date(reach.covered_until).toLocaleString()}` : ''}.</p> : null}
     </div>
   );
 }

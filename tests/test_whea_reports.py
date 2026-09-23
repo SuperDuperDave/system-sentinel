@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -40,12 +41,15 @@ def row(record_id: int, at: datetime | None, *, previous: bool = False, valid_he
 
 def reports(rows: list[dict[str, Any]], *, outcome: str | None = None, oldest: datetime | None = None,
             stopped: dict[str, str] | None = None, truncated: bool = False, hours: int = 1,
-            bucket_seconds: int = 60) -> Any:
+            bucket_seconds: int = 60, before: str = "", payload_hook: Callable[[dict[str, Any]], None] | None = None) -> Any:
     class Bridge:
         def run(self, script: str, *, depth: int = 6) -> BridgeResult:
             width = int(re.search(r"\$bucketTicks = \[long\](\d+)", script).group(1))
             count = int(re.search(r"\(\[long\]\((\d+) - 1\)", script).group(1))
-            last = int(NOW.timestamp() // width) * width
+            assigned = re.search(r"\$requestedUntil = \[datetimeoffset\]::Parse\('([^']+)'\)", script)
+            requested_end = datetime.fromisoformat(assigned.group(1).replace("Z", "+00:00")) if assigned else NOW
+            end = min(requested_end, NOW)
+            last = int((end - timedelta(microseconds=1)).timestamp() // width) * width
             start = datetime.fromtimestamp(last - (count - 1) * width, UTC)
             source = {
                 "log": whea.CHANNEL, "outcome": outcome or ("ok" if rows else "empty"), "error": "synthetic source failure" if outcome in ("failed", "denied") else None,
@@ -54,9 +58,12 @@ def reports(rows: list[dict[str, Any]], *, outcome: str | None = None, oldest: d
                 "log_error": None, "log_oldest": stamp(oldest or start - timedelta(seconds=1)),
                 "oldest_state": "ok", "oldest_error": None,
             }
-            return BridgeResult("ok", items=[{"window_start": stamp(start), "window_end": stamp(NOW), "source": source}])
+            payload = {"window_start": stamp(start), "window_end": stamp(end), "queried_at": stamp(NOW), "source": source}
+            if payload_hook:
+                payload_hook(payload)
+            return BridgeResult("ok", items=[payload])
 
-    return asyncio.run(take("whea_reports", Bridge(), {"hours": hours, "bucket_seconds": bucket_seconds}))
+    return asyncio.run(take("whea_reports", Bridge(), {"hours": hours, "bucket_seconds": bucket_seconds, "before": before}))
 
 
 def sections(reading: Any) -> dict[str, Any]:
@@ -125,6 +132,66 @@ def test_report_query_is_bounded_and_projects_only_the_fixed_header():
     assert whea.CHANNEL in script and whea.CHANNEL_PROVIDER in script
 
 
+def test_anchored_report_window_ends_before_a_bucket_boundary():
+    before = "2026-09-23T06:00:00Z"
+    reading = reports([row(10, datetime(2026, 9, 23, 5, 59, tzinfo=UTC), previous=True)], before=before)
+    data = sections(reading)
+    assert reading.outcome == "ok" and reading.count == 1
+    assert data["collection"]["window_end"] == "2026-09-23T06:00:00.0000000Z"
+    assert data["buckets"]["from"] == "2026-09-23T05:00:00.000Z"
+    assert data["buckets"]["to"] == "2026-09-23T06:00:00.000Z"
+    assert data["coverage"]["kernel_whea"]["complete"] is True
+    assert "[datetimeoffset]::Parse('2026-09-23T06:00:00.000Z')" in whea_reports.reports_script(whea.window_for(1, 60, now=0), before)
+
+
+def test_future_report_anchor_preserves_the_requested_gap():
+    reading = reports([], before="2026-09-23T07:00:00+00:00")
+    data = sections(reading)
+    assert data["collection"]["window_end"] == stamp(NOW)
+    assert data["coverage"]["kernel_whea"]["complete"] is False
+    assert data["coverage"]["kernel_whea"]["covered_until"] == stamp(NOW)
+    assert any("after the machine's query time" in warning for warning in reading.warnings)
+
+
+def test_report_window_entirely_after_the_host_clock_fails_instead_of_shifting_to_unrelated_rows():
+    reading = reports([], before="2026-09-23T08:00:00Z")
+    assert reading.outcome == "failed" and reading.count is None
+    assert "begins at or after" in reading.error["detail"]
+    assert "reports" not in sections(reading)
+
+
+@pytest.mark.parametrize("hook", [
+    lambda payload: payload.pop("queried_at"),
+    lambda payload: payload.update(window_end=stamp(NOW + timedelta(seconds=1))),
+])
+def test_report_collector_cannot_claim_a_window_beyond_its_query_clock(hook):
+    reading = reports([], payload_hook=hook)
+    assert reading.outcome == "failed" and reading.count is None
+    assert "reports" not in sections(reading)
+
+
+def test_anchor_boundary_rows_stay_out_of_the_counts_with_the_narrow_xpath_tolerance():
+    end = datetime(2026, 9, 23, 6, 0, tzinfo=UTC)
+    reading = reports([row(10, end), row(11, end + timedelta(microseconds=500))], before="2026-09-23T06:00:00Z")
+    data = sections(reading)
+    assert reading.outcome == "empty" and reading.count == 0
+    assert data["collection"]["kernel_whea"]["row_issues"]["outside_window"] == 2
+    assert data["coverage"]["kernel_whea"]["complete"] is True
+
+
+def test_unaligned_report_anchor_discloses_its_actual_partial_bucket():
+    reading = reports([], before="2026-09-23T06:12:37.500999Z")
+    data = sections(reading)
+    assert data["collection"]["window_start"] == "2026-09-23T05:13:00.0000000Z"
+    assert data["collection"]["window_end"] == "2026-09-23T06:12:37.5000000Z"
+    assert data["buckets"]["to"] == "2026-09-23T06:13:00.000Z"
+
+
+def test_report_anchor_requires_an_explicit_time_zone():
+    with pytest.raises(ValueError, match="parameter 'before'"):
+        whea_reports.reports_script(whea.window_for(1, 60, now=0), "2026-09-23T06:00:00")
+
+
 @pytest.mark.host
 def test_kernel_report_query_answers_from_the_windows_channel():
     reading = asyncio.run(take("whea_reports", real_bridge_or_skip(), {"hours": 24, "bucket_seconds": 60}))
@@ -138,6 +205,22 @@ def test_kernel_report_query_answers_from_the_windows_channel():
     assert len(buckets["totals"]) == buckets["bucket_count"] == 1440
     assert buckets["total"] + buckets["unplaced"] == reading.count
     assert buckets["previous_session"] + buckets["header_unreadable"] <= reading.count
+
+
+@pytest.mark.host
+@pytest.mark.parametrize("seconds", [0, 17])
+def test_windows_report_query_can_end_at_an_old_bucket_boundary_or_inside_a_bucket(seconds: int):
+    before = ((datetime.now(UTC) - timedelta(hours=1)).replace(second=0, microsecond=0) + timedelta(seconds=seconds)).isoformat().replace("+00:00", "Z")
+    reading = asyncio.run(take("whea_reports", real_bridge_or_skip(), {"hours": 2, "bucket_seconds": 60, "before": before}))
+    if reading.outcome == "unavailable" and "WSL could not start" in str((reading.error or {}).get("detail", "")):
+        pytest.skip("WSL's interop layer did not start PowerShell")
+    assert reading.outcome in ("ok", "empty"), reading.error
+    data = sections(reading)
+    assert whea.stamp_key(data["collection"]["window_end"]) == whea.stamp_key(before)
+    if seconds == 0:
+        assert whea.stamp_key(data["buckets"]["to"]) == whea.stamp_key(before)
+    else:
+        assert whea.stamp_key(data["buckets"]["to"]) > whea.stamp_key(before)
 
 
 @pytest.mark.host

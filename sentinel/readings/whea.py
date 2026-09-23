@@ -39,7 +39,7 @@ import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from ..bridge import WSL_INTEROP_ERRORS, Bridge
@@ -659,7 +659,7 @@ $untilIso = $until.ToString('o')
 $queryUntilIso = $until.AddMilliseconds(1).ToString('o')
 $epoch = [datetime]::SpecifyKind([datetime]'1970-01-01T00:00:00', [System.DateTimeKind]::Utc)
 $bucketTicks = [long]{bucket_seconds} * [long]10000000
-$elapsedTicks = $until.Ticks - $epoch.Ticks
+$elapsedTicks = $until.AddTicks(-1).Ticks - $epoch.Ticks
 $currentBucketTicks = $elapsedTicks - ($elapsedTicks % $bucketTicks)
 $startIso = $epoch.AddTicks($currentBucketTicks - ([long]({count} - 1) * $bucketTicks)).ToString('o')
 $xml = @"
@@ -786,7 +786,10 @@ def _host_window(start: Any, end: Any, requested: Window) -> Window | None:
     if end_key is None:
         return None
     try:
-        current = int(end_key[0].timestamp() // requested.bucket_seconds) * requested.bucket_seconds
+        # The query end is exclusive. On an exact bucket boundary the last observed
+        # bucket is the preceding one, not an unobserved bucket starting at the end.
+        last = end_key[0] if end_key[1] else end_key[0] - timedelta(microseconds=1)
+        current = int(last.timestamp() // requested.bucket_seconds) * requested.bucket_seconds
         aligned = Window(current - (requested.count - 1) * requested.bucket_seconds, requested.bucket_seconds, requested.count)
         aligned_start = stamp_key(_stamp(aligned.start))
     except (ValueError, OverflowError, OSError):
