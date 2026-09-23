@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.3.0] - 2026-09-23
+
+### Added
+- Kernel-WHEA reports now have their own report-time timeline, separate from the System WHEA-Logger storm lead. The channel's event-query outcome, retained reach, 20,000-report limit, unreadable times and fixed CPER-header facts travel with it. PreviousError reports are marked as earlier-session conditions; a cluster of reports after restart is never called a burst of new hardware errors. The dashboard shows the separate trace and its coverage. Stack shares a bounded summary by default and keeps the full stored reading available on demand.
+
+### Changed
+- Power and Signals now describe HiberbootEnabled as a Fast Startup preference, not proof that hibernation is available or that a particular boot used it. A nonbinary value is unknown. The former “no cold start” lead, which could not be supported by the registry value and uptime, is removed; the observed uptime remains available in Power and Hardware.
+
+### Limits
+- The report timeline carries only fixed-header facts and event references. Exact CPER bytes are available on explicit unredacted request through the separate `whea` reading within its own newest-500-record limit; older timeline reports might not be in that reading. The channel's external detail decoder remains deferred. This release does not infer a hardware cause from either WHEA source.
+
 ## [1.2.0] - 2026-09-23
 
 ### Added
