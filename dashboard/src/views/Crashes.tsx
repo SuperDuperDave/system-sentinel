@@ -521,7 +521,7 @@ function StopDetail({ stop, envelope }: { stop: Stop; envelope: Reading | null }
   } else {
     rows.push([
       'Bug check',
-      stop.no_bugcheck_recorded === null ? <span className={styles.quiet}>Unknown: the log queries were incomplete; code 0 in Kernel-Power alone cannot establish absence.</span>
+      stop.no_bugcheck_recorded === null ? <span className={styles.quiet}>Unknown: incomplete queries or Application log retention cannot establish absence from code 0 in Kernel-Power.</span>
         : stop.no_bugcheck_recorded ? <span className={styles.quiet}>none recorded: the Kernel-Power 41 carried bug check code 0</span> : <Value value={null} />,
     ]);
   }

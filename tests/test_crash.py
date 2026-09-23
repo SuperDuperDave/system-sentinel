@@ -89,9 +89,17 @@ def crash(body: dict[str, Any] | None = None, outcome: str = "ok", **params: Any
 def collection_for(body: dict[str, Any], count: int = 5, moment: str | None = None) -> dict[str, Any]:
     """Successful synthetic queries, including explicit bounds rather than inferred absence."""
     result: dict[str, Any] = {}
-    for name, limit in (("system", module.record_cap(count, moment)), ("reports", 3 * count + 6)):
+    for name, limit, log, oldest in (
+        ("system", module.record_cap(count, moment), "System", "2026-09-02T07:00:05.1230000Z"),
+        ("reports", 3 * count + 6, "Application", "2026-06-01T00:00:00.0000000Z"),
+    ):
         returned = len(body.get(name, []))
-        result[name] = {"outcome": "ok" if returned else "empty", "returned": returned, "limit": limit, "bound_reached": returned == limit, "error": None}
+        result[name] = {
+            "outcome": "ok" if returned else "empty", "returned": returned, "limit": limit,
+            "bound_reached": returned == limit, "error": None, "log": log,
+            "log_enabled": True, "log_mode": "Circular", "log_state": "ok", "log_error": None,
+            "log_oldest": oldest, "oldest_state": "ok", "oldest_error": None,
+        }
     result["before"] = [{"anchor": row["Anchor"], "at": None, "outcome": "ok", "returned": 1, "error": None} for row in body.get("before", [])]
     return result
 
@@ -138,7 +146,8 @@ def test_one_launch_asks_both_logs_the_inventory_and_the_record_before_each_star
     assert "EventData[Data[@Name='EventName']='BlueScreen']" in script
     assert "-MaxEvents 84" in script and "-MaxEvents 21" in script  # 12*5+24 records, 3*5+6 report records
     assert "Anchor = $anchor" in script and "-MaxEvents 1" in script
-    assert "-Oldest" not in script
+    assert "-MaxEvents 84 -Oldest" not in script and "-MaxEvents 21 -Oldest" not in script
+    assert "Read-LogMetadata 'System'" in script and "Read-LogMetadata 'Application'" in script
     # The dump inventory is the dumps reading's own query, embedded once and not written again.
     assert script.count("Get-ChildItem") == module.DUMPS_SCRIPT.count("Get-ChildItem")
     assert "Join-Path $env:SystemRoot 'Minidump'" in script
@@ -266,11 +275,15 @@ def test_a_stop_with_every_record_in_its_session():
 
 
 def test_a_stop_whose_start_is_beyond_the_logs_retention():
-    stop = next(s for s in crash(payload(), count=5).section("stops").data if s["records"]["power_41"] == 900)
+    reading = crash(payload(), count=5)
+    stop = next(s for s in reading.section("stops").data if s["records"]["power_41"] == 900)
     assert stop["started_at"] is None and stop["announced_at"] == "2026-09-02T07:00:05.123Z"
     assert stop["no_bugcheck_recorded"] is True and stop["bugcheck"] is None
     assert stop["dump"] is None and stop["down_seconds"] is None
-    assert stop["last_record_before"]["RecordId"] == 895  # taken before the announcement, there being no start
+    assert stop["last_record_before"] is None and stop["quiet_seconds"] is None
+    assert stop["last_record_collection"]["outcome"] == "not_requested"
+    assert "next start was not returned" in stop["last_record_collection"]["error"]
+    assert not any(source["anchor"] == 900 for source in reading.section("collection").data["before"])
 
 
 def test_a_report_older_than_the_system_log_is_a_stop_of_its_own():
@@ -465,10 +478,106 @@ def test_a_moment_with_no_start_after_it_is_empty_and_says_so():
     assert reading.warnings == ["no start follows 2026-09-20T00:00:00Z; nothing after it announced a stop"]
 
 
+@pytest.mark.parametrize("moment", ["2026-09-06T00:00:00+00:00", "2026-09-06"])
+def test_a_local_or_offset_moment_uses_the_same_utc_boundary_as_its_query(moment):
+    reading = crash(from_moment("2026-09-06T00:00:00.0000000Z"), count=5, moment=moment)
+    coverage = reading.section("coverage").data
+    assert coverage["system"]["reaches_moment"] is True
+    assert coverage["reports"]["reaches_moment"] is True
+    assert coverage["first_start"]["established"] is True
+
+
+def test_a_moment_before_system_retention_keeps_report_only_and_startless_stops():
+    moment = "2026-07-01T00:00:00Z"
+    reading = crash(from_moment("2026-07-01T00:00:00.0000000Z"), count=5, moment=moment)
+    assert reading.outcome == "ok" and reading.count == 5
+    stops = reading.section("stops").data
+    assert stops[0]["records"]["report"] == [2100] and stops[0]["started_at"] is None
+    assert stops[1]["records"]["power_41"] == 900 and stops[1]["started_at"] is None
+    assert [stop["records"]["power_41"] for stop in stops[2:]] == [1001, 1201, 1301]
+    coverage = reading.section("coverage").data
+    assert coverage["system"]["reaches_moment"] is False
+    assert coverage["reports"]["reaches_moment"] is True
+    assert coverage["first_start"]["record_id"] == 1000 and coverage["first_start"]["established"] is False
+    assert any("first start cannot be established" in warning for warning in reading.warnings)
+
+
+def test_proven_system_retention_excludes_the_session_before_a_moment():
+    moment = "2026-07-01T00:00:00Z"
+    body = from_moment("2026-07-01T00:00:00.0000000Z")
+    body["collection"] = collection_for(body, moment=moment)
+    body["collection"]["system"]["log_oldest"] = "2026-06-30T23:59:59.9999999Z"
+    reading = crash(body, count=5, moment=moment)
+    assert reading.outcome == "ok" and reading.count == 3 and reading.warnings == []
+    first_start = reading.section("coverage").data["first_start"]
+    assert first_start["established"] is True
+    assert first_start["at"] == "2026-09-05T18:30:00.000Z"
+    assert first_start["started_at"] == "2026-09-05T18:29:58.500Z"
+    assert all(stop["records"]["power_41"] != 900 for stop in reading.section("stops").data)
+    body["collection"]["system"]["log_oldest"] = moment
+    at_boundary = crash(body, count=5, moment=moment)
+    assert at_boundary.section("coverage").data["system"]["reaches_moment"] is False
+    assert at_boundary.section("stops").data[0]["records"]["report"] == [2100]
+
+
+def test_submillisecond_moment_uses_the_same_floor_as_the_event_query():
+    moment = "2026-07-01T00:00:00.0000009Z"
+    body = from_moment("2026-07-01T00:00:00.0000000Z")
+    body["collection"] = collection_for(body, moment=moment)
+    body["collection"]["system"]["log_oldest"] = "2026-07-01T00:00:00.0000000Z"
+    reading = crash(body, moment=moment)
+    assert reading.section("coverage").data["system"]["reaches_moment"] is False
+    assert reading.section("coverage").data["first_start"]["established"] is False
+
+
+def test_unavailable_retention_never_discards_returned_stops_or_claims_a_first_start():
+    moment = "2026-07-01T00:00:00Z"
+    body = from_moment("2026-07-01T00:00:00.0000000Z")
+    body["collection"] = collection_for(body, moment=moment)
+    body["collection"]["system"].update(log_state="denied", oldest_state="denied", log_oldest=None)
+    reading = crash(body, moment=moment)
+    assert reading.outcome == "ok" and reading.count == 5
+    assert reading.section("coverage").data["system"]["reaches_moment"] is None
+    assert reading.section("coverage").data["first_start"]["established"] is False
+    assert any("could not be established" in warning for warning in reading.warnings)
+
+
+def test_metadata_from_another_log_cannot_certify_retention_or_erase_reports():
+    moment = "2026-07-01T00:00:00Z"
+    body = from_moment("2026-07-01T00:00:00.0000000Z")
+    body["collection"] = collection_for(body, moment=moment)
+    body["collection"]["reports"]["log"] = "System"
+    reading = crash(body, moment=moment)
+    assert reading.outcome == "ok" and reading.section("stops").data[0]["records"]["report"] == [2100]
+    assert reading.section("coverage").data["reports"] == {"retained_from": None, "reaches_moment": None}
+    assert reading.section("collection").data["reports"]["log_state"] == "failed"
+
+
+def test_application_retention_must_reach_a_clean_start_before_it_is_called_clean():
+    moment = "2026-09-06T00:00:00Z"
+    body = from_moment("2026-09-06T00:00:00.0000000Z")
+    body["collection"] = collection_for(body, moment=moment)
+    body["collection"]["reports"]["log_oldest"] = "2026-09-08T00:00:00.0000000Z"
+    reading = crash(body, moment=moment)
+    assert reading.outcome == "ok" and reading.count == 2
+    assert reading.section("coverage").data["first_start"]["established"] is True
+    assert any("could not be classified" in warning for warning in reading.warnings)
+    assert not any("announced no unplanned stop" in warning for warning in reading.warnings)
+
+
+def test_a_zero_bugcheck_code_does_not_certify_absence_before_application_retention():
+    body = payload()
+    body["collection"] = collection_for(body)
+    body["collection"]["reports"]["log_oldest"] = "2026-09-03T00:00:00.0000000Z"
+    reading = crash(body, count=5)
+    stop = next(stop for stop in reading.section("stops").data if stop["records"]["power_41"] == 900)
+    assert stop["bugcheck"] is None and stop["no_bugcheck_recorded"] is None
+
+
 def test_a_log_that_held_nothing_at_all_is_empty_not_failed():
     reading = crash(payload(system=[], reports=[], before=[]), count=5)
     assert reading.outcome == "empty" and reading.count == 0 and reading.error is None
-    assert [s.name for s in reading.sections] == ["records", "decoded", "stops", "collection"]
+    assert [s.name for s in reading.sections] == ["records", "decoded", "stops", "collection", "coverage"]
 
 
 def test_an_empty_bridge_payload_cannot_certify_that_both_logs_answered():
@@ -573,19 +682,24 @@ def test_missing_lookup_metadata_does_not_certify_that_no_lookup_was_needed():
     reading = crash(body)
     stops = [s for s in reading.section("stops").data if s["records"]["power_41"]]
     assert stops
-    assert all(s["last_record_before"] is None and s["last_record_collection"]["outcome"] == "not_returned" for s in stops)
+    assert all(s["last_record_before"] is None for s in stops)
+    assert all(s["last_record_collection"]["outcome"] == ("not_returned" if s["records"]["start"] else "not_requested") for s in stops)
 
 
 def test_reports_beyond_a_capped_moment_window_keep_unknown_session_association():
     moment = "2026-08-01T00:00:00Z"
     body = payload(system=list(reversed(clean_sessions(24))), reports=[record(2000)], before=[])
     assert len(body["system"]) == module.record_cap(5, moment)
+    body["collection"] = collection_for(body, moment=moment)
+    body["collection"]["system"]["log_oldest"] = "2026-07-31T23:59:59.0000000Z"
     reading = crash(body, moment=moment)
     assert reading.outcome == "ok" and reading.count == 1
+    assert reading.section("coverage").data["first_start"]["established"] is True
     stop = reading.section("stops").data[0]
     assert stop["reported_at"] and stop["started_at"] is None
     assert stop["records"]["start"] is None and stop["records"]["report"] == [2000]
     assert any("session association is unknown" in warning for warning in reading.warnings)
+    assert any("record bound was reached" in warning for warning in reading.warnings)
 
 
 # ---------------------------------------------------------------- faults
@@ -722,7 +836,7 @@ STOP_KEYS = {
 def test_crash_answers_on_this_machine():
     reading = asyncio.run(take("crash", real_bridge_or_skip(), {"count": 3}))
     assert reading.outcome in ("ok", "empty"), reading.error
-    assert [s.name for s in reading.sections] == ["records", "decoded", "stops", "collection"]
+    assert [s.name for s in reading.sections] == ["records", "decoded", "stops", "collection", "coverage"]
     for stop in reading.section("stops").data:
         assert set(stop) == STOP_KEYS
         assert set(stop["records"]) == {"start", "power_41", "eventlog_6008", "wer_1001", "report"}
@@ -741,6 +855,9 @@ def test_a_moment_answers_on_this_machine():
     assert reading.outcome in ("ok", "empty"), reading.error
     assert reading.count == len(reading.section("stops").data)
     assert reading.outcome == "ok" or reading.warnings
+    coverage = reading.section("coverage").data
+    if coverage["system"]["reaches_moment"] is not True:
+        assert coverage["first_start"]["established"] is False
 
 
 @pytest.mark.host

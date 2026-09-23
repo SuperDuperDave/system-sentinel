@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.3.4] - 2026-09-23
+
+### Changed
+- `crash?moment=` now carries independent System and Application retention evidence and says whether the first returned start is established as the first after the requested moment. If System retention begins later, returned report-only stops and a startless Kernel-Power 41 stay in the derived stop list instead of disappearing behind a false first-start claim. A report-only stop is ordered by when Windows filed the report; the stop itself may have happened before the requested moment.
+- A clean-start claim and `no_bugcheck_recorded` now require Application report retention to reach the relevant start as well as completed source queries. The dashboard explains this uncertainty. A 41 without a returned start no longer asks for or presents the record before its announcement as the record before restart; that preceding record may already belong to the new boot.
+
+### Limits
+- Retention reach does not prove Windows emitted every event. The oldest-first moment query has explicit record bounds, and a report's filing time does not establish its stop time. If log metadata is unavailable, returned evidence remains visible and the first-start conclusion stays unknown.
+
 ## [1.3.3] - 2026-09-23
 
 ### Changed

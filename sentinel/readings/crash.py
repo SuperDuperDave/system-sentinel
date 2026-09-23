@@ -6,8 +6,8 @@ name one stop are spread over four records in two logs and a file on disk. ``cra
 in one launch and composes one stop per session: when the machine stopped as Windows estimated it,
 when it started again, the bug check if one was written, the dump that belongs to it, and the last
 System record before the next start. That record can be later than Windows' stop estimate. Given a
-moment instead, it reports what the first start after that moment announced, which is the only
-thing that can answer for a freeze.
+moment instead, it reports what the first start after that moment announced when retained System
+records can establish it; otherwise it keeps returned stops and names the gap.
 
 ``faults`` is the other half of the same question: the programs that crashed or hung, and the
 kernel's own live reports, which are failures the machine survived and so never become a stop.
@@ -30,6 +30,8 @@ from typing import Any
 from ..bridge import Bridge
 from ..reading import Param, Reading, Section, Spec, from_bridge, from_object, register
 from .dumps import DUMPS_SCRIPT, inventory, missing_file
+from .event_coverage import LOG_METADATA_SCRIPT, stamp_key
+from .event_coverage import metadata as log_metadata
 from .events import _utc_stamp, bounded_log_records, record_projection, since_clause, winevent
 from .fault_process import APPLICATION_ERROR, APPLICATION_ERROR_1000, APPLICATION_HANG, APPLICATION_HANG_1002, process_identity
 
@@ -232,14 +234,31 @@ STOPS_BASIS = (
     "start, unless the query's record bound is what cut the start off, in which case that session is left for a "
     "larger count. started_at is the start's StartTime, stopped_at is Windows' own estimate from the 6008's binary "
     "value, reported_at is when the report was filed, and last_record_before is the last System record before the "
-    "start of a stop the 41 announced. The dump is the file the 1001 names, else a .dmp the report attached, else "
+    "returned start of a stop the 41 announced; without a returned start, no pre-start lookup is "
+    "made because a record before the 41 may already be from the new boot. The dump is the file "
+    "the 1001 names, else a .dmp the report attached, else "
     "the newest returned dump written between the stop and half an hour past the start or the report, because the file is "
     "written while the machine comes back; matched_by says which. Collection names each event-log query's "
-    "outcome and bound. Missing queries preserve surviving evidence; no_bugcheck_recorded is null when "
-    "incomplete queries cannot establish absence, and last_record_collection distinguishes a failed lookup "
+    "outcome, bound and retained reach. Missing queries preserve surviving evidence; no_bugcheck_recorded is null when "
+    "incomplete queries or missing Application retention cannot establish absence, and last_record_collection distinguishes a failed lookup "
     "from an observed empty one. Dump locations carry their own coverage; an unmatched reported path "
     "keeps its inventory outcome, without treating an unread location as an absent file. Each stop's "
-    "dump_inventory_complete qualifies a missing or time-matched dump when any location was unreadable."
+    "dump_inventory_complete qualifies a missing or time-matched dump when any location was unreadable. "
+    "A report-only stop is ordered by when Windows filed the report; the stop itself came earlier "
+    "and may precede a requested moment."
+)
+
+CRASH_COVERAGE_BASIS = (
+    "Each log's retained_from is its oldest observed record after the primary query. Reaches_moment "
+    "requires an answered query and an enabled circular log with a retained record strictly before "
+    "the query's UTC millisecond boundary, which may be less than a millisecond earlier than the "
+    "supplied moment; a record at the boundary is insufficient. First_start.established means "
+    "the oldest-first System query can identify the first returned start record as the first after "
+    "the moment, or prove no start record was returned within an uncapped query. First_start.at "
+    "is the record's TimeCreated; first_start.started_at is its reported StartTime and may precede "
+    "the record by seconds. A metadata failure cannot "
+    "erase returned records. Windows may have omitted events, and a report's filing time does not "
+    "establish when its stop occurred."
 )
 
 FAULTS_BASIS = (
@@ -497,6 +516,7 @@ def faults_query(clause: str) -> str:
 
 
 CRASH_SCRIPT_TEMPLATE = r"""
+{metadata_script}
 $warnings = @()
 function Get-CrashQueryFailure($failure) {
     if ($failure.FullyQualifiedErrorId -like 'NoMatchingEventsFound*') { return 'empty' }
@@ -537,21 +557,23 @@ try {
     $reports_outcome = Get-CrashQueryFailure $_
     if ($reports_outcome -ne 'empty') { $reports_error = $_.Exception.Message }
 }
+$system_meta = Read-LogMetadata 'System'
+$reports_meta = Read-LogMetadata 'Application'
 
 $dump_inventory = $null
 try { $dump_inventory = & { {dumps} } }
 catch { $warnings += "The dump inventory did not read: $($_.Exception.Message)" }
 
-# The last System record before each next start: the last record before the start that announced it, or
-# before the announcement itself where the log's retention begins after that start. The starts are
-# already in hand, so this costs one indexed query each and no second launch.
+# The last System record before each returned next start. A 41 without that start cannot anchor
+# a pre-start lookup: the record before its announcement may already be from the new boot.
 $before = @()
 $before_collection = @()
 $queried_anchors = @{}
 $announced = @($system | Where-Object { $_.Id -eq 41 -and $_.ProviderName -eq '{kernel_power}' } | Sort-Object TimeCreated {anchor_sort} | Select-Object -First {anchors})
 foreach ($stop in $announced) {
     $opened = @($system | Where-Object { $_.Id -eq 12 -and $_.ProviderName -eq '{kernel_general}' -and $_.TimeCreated -le $stop.TimeCreated } | Sort-Object TimeCreated -Descending | Select-Object -First 1)
-    $at = if ($opened.Count -gt 0) { $opened[0] } else { $stop }
+    if ($opened.Count -eq 0) { continue }
+    $at = $opened[0]
     $anchor = $at.RecordId
     if ($queried_anchors.ContainsKey($anchor)) { continue }
     $queried_anchors[$anchor] = $true
@@ -588,10 +610,16 @@ foreach ($stop in $announced) {
         system = [pscustomobject]@{
             outcome = $system_outcome; returned = $system.Count; limit = {system_max}; error = $system_error
             bound_reached = $(if ($system_outcome -in @('ok', 'empty')) { $system.Count -eq {system_max} } else { $null })
+            log = $system_meta.log; log_enabled = $system_meta.log_enabled; log_mode = $system_meta.log_mode
+            log_state = $system_meta.log_state; log_error = $system_meta.log_error
+            log_oldest = $system_meta.log_oldest; oldest_state = $system_meta.oldest_state; oldest_error = $system_meta.oldest_error
         }
         reports = [pscustomobject]@{
             outcome = $reports_outcome; returned = $reports.Count; limit = {reports_max}; error = $reports_error
             bound_reached = $(if ($reports_outcome -in @('ok', 'empty')) { $reports.Count -eq {reports_max} } else { $null })
+            log = $reports_meta.log; log_enabled = $reports_meta.log_enabled; log_mode = $reports_meta.log_mode
+            log_state = $reports_meta.log_state; log_error = $reports_meta.log_error
+            log_oldest = $reports_meta.log_oldest; oldest_state = $reports_meta.oldest_state; oldest_error = $reports_meta.oldest_error
         }
         before = $before_collection
     }
@@ -606,7 +634,8 @@ def crash_script(count: int, moment: str | None) -> str:
     read forward from it; the clause is the same one every windowed reading uses."""
     clause = since_clause(moment)[1] if moment else ""
     return (
-        CRASH_SCRIPT_TEMPLATE.replace("{system_query}", system_query(clause))
+        CRASH_SCRIPT_TEMPLATE.replace("{metadata_script}", LOG_METADATA_SCRIPT)
+        .replace("{system_query}", system_query(clause))
         .replace("{reports_query}", reports_query(clause))
         .replace("{system_max}", str(record_cap(count, moment)))
         .replace("{reports_max}", str(3 * count + 6))
@@ -695,11 +724,20 @@ def report_groups(reports: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def compose(payload: dict[str, Any], count: int, moment: str | None) -> dict[str, Any]:
     """The records as fetched, each one decoded, and the stops the rule composes from them."""
+    boundary = _utc_stamp(moment) if moment else None
     coverage = payload.get("collection")
     coverage = coverage if isinstance(coverage, dict) else {}
     collection: dict[str, Any] = {}
     collection["system"], system = _query_result(coverage.get("system"), payload.get("system"), record_cap(count, moment))
     collection["reports"], reports = _query_result(coverage.get("reports"), payload.get("reports"), 3 * count + 6)
+    for name, expected in (("system", "System"), ("reports", "Application")):
+        supplied = coverage.get(name)
+        source = supplied if isinstance(supplied, dict) and supplied.get("log") == expected else {}
+        collection[name].update(log_metadata(source))
+        collection[name]["log"] = expected
+        if not source:
+            problem = "the log metadata did not identify the expected source"
+            collection[name].update(log_state="failed", oldest_state="failed", log_error=problem, oldest_error=problem)
     dumps, collection["dumps"], dump_warnings = inventory(payload.get("dump_inventory"))
     before: dict[Any, dict[str, Any]] = {}
     before_collection: dict[Any, dict[str, Any]] = {}
@@ -751,17 +789,33 @@ def compose(payload: dict[str, Any], count: int, moment: str | None) -> dict[str
     if capped and not moment:
         unplaced = []
     complete = all(_observed(collection[name]) and not collection[name]["bound_reached"] for name in ("system", "reports"))
-    in_session = [dict(_stop(session, dumps, before, before_collection, complete), _session=index) for index, session in enumerate(found) if _is_stop(session)]
+    in_session = [
+        dict(_stop(session, dumps, before, before_collection,
+                   complete and _reaches(collection["reports"], _iso(session["begins_at"])) is True), _session=index)
+        for index, session in enumerate(found) if _is_stop(session)
+    ]
     orphans = [_orphan_stop(group, dumps) for group in unplaced]
     if moment and capped and orphans:
         warnings.append("Some bug check reports fall outside the returned System window; their session association is unknown.")
 
+    moment_coverage: dict[str, Any] = {
+        name: {
+            "retained_from": collection[name].get("log_oldest") if collection[name].get("oldest_state") == "ok" and stamp_key(collection[name].get("log_oldest")) else None,
+            "reaches_moment": _reaches(collection[name], boundary) if moment else None,
+        }
+        for name in ("system", "reports")
+    }
+    moment_coverage["first_start"] = None
     if moment:
-        stops, moment_warnings = _from_moment(found, in_session, orphans, count, moment, collection)
+        stops, moment_warnings, moment_coverage["first_start"] = _from_moment(found, in_session, orphans, count, moment, boundary, collection)
         warnings.extend(moment_warnings)
+        if moment_coverage["reports"]["reaches_moment"] is False:
+            warnings.append("Application bug check reports begin after the requested moment; earlier reports may be outside retention.")
+        elif moment_coverage["reports"]["reaches_moment"] is None and _observed(collection["reports"]):
+            warnings.append("Application bug check report retention could not be established for the requested moment.")
     else:
         stops = sorted(in_session + orphans, key=lambda s: _sort_key(s["_at"]), reverse=True)[:count]
-    if capped and len(stops) < count and not (moment and warnings):
+    if capped and len(stops) < count:
         warnings.append(f"the query's record bound was reached after {len(stops)} stops; ask for fewer, or take `events` over the window")
     if collection["reports"].get("bound_reached"):
         warnings.append("the bug check report bound was reached; older or later reports may be outside this reading")
@@ -777,11 +831,24 @@ def compose(payload: dict[str, Any], count: int, moment: str | None) -> dict[str
             dump["inventory"] = {"outcome": outcome, "detail": detail}
         stop.pop("_at", None)
         stop.pop("_session", None)
-    return {"records": records, "decoded": [decode(r) for r in records], "stops": stops, "warnings": warnings, "collection": collection}
+    return {"records": records, "decoded": [decode(r) for r in records], "stops": stops, "warnings": warnings,
+            "collection": collection, "coverage": moment_coverage}
 
 
 def _observed(source: dict[str, Any]) -> bool:
     return source["outcome"] in ("ok", "empty")
+
+
+def _reaches(source: dict[str, Any], at: str | None) -> bool | None:
+    """A strict retained boundary proves reach only for an observed, enabled circular log."""
+    oldest, target = stamp_key(source.get("log_oldest")), stamp_key(at)
+    if not _observed(source) or source.get("oldest_state") != "ok" or oldest is None or target is None:
+        return None
+    if oldest >= target:
+        return False
+    if source.get("log_state") == "ok" and source.get("log_enabled") is True and source.get("log_mode") == "Circular":
+        return True
+    return None
 
 
 def _query_result(value: Any, rows: Any, limit: int | None = None) -> tuple[dict[str, Any], list[dict[str, Any]]]:
@@ -812,27 +879,40 @@ def _is_stop(session: dict[str, Any]) -> bool:
     return _find(session["records"], KERNEL_POWER, 41) is not None or bool(session.get("reports"))
 
 
-def _from_moment(found: list[dict[str, Any]], stops: list[dict[str, Any]], orphans: list[dict[str, Any]], count: int, moment: str, collection: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
-    """A moment asks one question: what did the first start after it announce? A clean start and no
-    start at all are different answers, and neither is a stop. From that session the count runs
-    forward, because the moment is where the person's question begins, not where the log does."""
+def _start_time(session: dict[str, Any]) -> str | None:
+    start = session.get("start")
+    return _iso(_field(start, KERNEL_GENERAL_12, "StartTime") or start.get("TimeCreated")) if start else None
+
+
+def _from_moment(found: list[dict[str, Any]], stops: list[dict[str, Any]], orphans: list[dict[str, Any]], count: int, moment: str, boundary: str | None, collection: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str], dict[str, Any]]:
+    """Only a retained System window can name the first start after a requested moment."""
     opened = next((index for index, session in enumerate(found) if session["start"] is not None), None)
+    reach = _reaches(collection["system"], boundary)
+    first = reach is True and (opened is not None or not collection["system"]["bound_reached"])
+    start = found[opened] if opened is not None else None
+    first_start = {"at": _iso(start["begins_at"]) if start else None,
+                   "started_at": _start_time(start) if start else None,
+                   "record_id": start["start"].get("RecordId") if start else None, "established": first}
+    if not first:
+        available = sorted(stops + orphans, key=lambda stop: _sort_key(stop["_at"]))[:count]
+        if reach is False:
+            warning = f"System log retention begins after {moment}; the first start cannot be established, and returned stops retain only their available evidence"
+        else:
+            warning = f"the first start after {moment} could not be established from the returned System records; returned stops retain only their available evidence"
+        return available, [warning], first_start
     if opened is None:
-        partial = sorted(stops + orphans, key=lambda stop: _sort_key(stop["_at"]))[:count]
-        if any(not _observed(collection[name]) for name in ("system", "reports")) or collection["system"]["bound_reached"] or partial:
-            return partial, [f"the first start after {moment} could not be established from the returned System records; any returned stops retain only their available evidence"]
-        return [], [f"no start follows {moment}; nothing after it announced a stop"]
+        return [], [f"no start follows {moment}; nothing after it announced a stop"], first_start
     available = sorted(
         [stop for stop in stops if stop["_session"] >= opened]
         + [stop for stop in orphans if _sort_key(stop["_at"]) >= found[opened]["begins_at"]],
         key=lambda stop: _sort_key(stop["_at"]),
     )[:count]
     if not _is_stop(found[opened]):
-        started = _iso(found[opened]["begins_at"])
-        if any(not _observed(collection[name]) or collection[name]["bound_reached"] for name in ("system", "reports")):
-            return available, [f"the first start after {moment}, at {started}, could not be classified because the stop queries are incomplete; later returned stops remain available"]
-        return [], [f"the first start after {moment}, at {started}, announced no unplanned stop: no Kernel-Power 41 and no bug check report in that session"]
-    return available, []
+        started = first_start["at"]
+        if any(not _observed(collection[name]) or collection[name]["bound_reached"] for name in ("system", "reports")) or _reaches(collection["reports"], first_start["started_at"] or started) is not True:
+            return available, [f"the first start after {moment}, at {started}, could not be classified because the stop queries or Application retention are incomplete; later returned stops remain available"], first_start
+        return [], [f"the first start after {moment}, at {started}, announced no unplanned stop: no Kernel-Power 41 and no bug check report in that session"], first_start
+    return available, [], first_start
 
 
 def _stop(session: dict[str, Any], dumps: list[dict[str, Any]], before: dict[Any, dict[str, Any]], before_collection: dict[Any, dict[str, Any]], complete: bool) -> dict[str, Any]:
@@ -844,14 +924,13 @@ def _stop(session: dict[str, Any], dumps: list[dict[str, Any]], before: dict[Any
     groups = session.get("reports") or []
     latest = groups[-1] if groups else None
 
-    started_at = _iso(_field(start, KERNEL_GENERAL_12, "StartTime") or (start or {}).get("TimeCreated")) if start else None
+    started_at = _start_time(session)
     announced_at = _iso((power or {}).get("TimeCreated")) if power else None
     stopped = stop_times(list((shutdown or {}).get("Properties") or [])) if shutdown else None
     stopped_at = stopped[0] if stopped else None
 
     bugcheck = _bugcheck(power, wer, latest)
-    anchor = start or power
-    last_record = before.get((anchor or {}).get("RecordId")) if anchor else None
+    last_record = before.get(start.get("RecordId")) if start else None
     at = started_at or announced_at
     reported_at = _iso(groups[0]["at"]) if groups else None
     no_bugcheck = bool(power) and not bugcheck and _number(_field(power, KERNEL_POWER_41, "BugcheckCode")) == 0
@@ -868,9 +947,9 @@ def _stop(session: dict[str, Any], dumps: list[dict[str, Any]], before: dict[Any
         "power": _power_facts(power),
         "dump": _dump(wer, latest, dumps, stopped_at, started_at, reported_at),
         "last_record_before": _last_record(last_record),
-        "last_record_collection": before_collection.get((anchor or {}).get("RecordId"), {
-            "outcome": "not_returned" if power else "not_requested", "returned": 0,
-            "error": "No lookup result was returned for this stop." if power else None,
+        "last_record_collection": before_collection.get(start.get("RecordId") if start else None, {
+            "outcome": "not_returned" if start else "not_requested", "returned": 0,
+            "error": "No lookup result was returned for this stop." if start else "The next start was not returned, so no pre-start record was requested.",
         }),
         "quiet_seconds": _seconds((last_record or {}).get("TimeCreated"), at) if last_record else None,
         "records": {
@@ -1119,6 +1198,7 @@ def take_crash(bridge: Bridge, params: dict[str, Any]) -> Reading:
             Section("decoded", "derived", composed["decoded"], basis=DECODED_BASIS),
             Section("stops", "derived", composed["stops"], basis=STOPS_BASIS),
             Section("collection", "raw", composed["collection"]),
+            Section("coverage", "derived", composed["coverage"], basis=CRASH_COVERAGE_BASIS),
         ]
 
     reading = from_object("crash", params, script, result, build)
@@ -1307,15 +1387,15 @@ register(
             "The stops this machine did not plan, newest first, each one named: when it stopped as Windows "
             "estimated it, when it started again, the bug check if one was recorded, the dump that belongs to it, "
             "and the last System record before the next start, which may be later than the stop estimate. "
-            "Give it a moment and it reports what the first start "
-            "at or after that moment announced, which is how a freeze is answered: the log does not announce one, "
-            "the next start does."
+            "Give it a moment and it reports what the first start at or after that moment announced "
+            "when System retention establishes that start. Otherwise it keeps returned stop and report "
+            "evidence with a warning: the log does not announce a freeze, the next start does."
         ),
         classes=("raw", "derived"),
         take=take_crash,
         params=(
             Param("count", "int", 5, f"How many stops, newest first; 1 to {MAX_STOPS}.", minimum=1, maximum=MAX_STOPS),
-            Param("moment", "str", "", "ISO timestamp of a freeze someone remembers; the first start at or after it is reported instead. Empty for the most recent stops."),
+            Param("moment", "str", "", "ISO timestamp of a freeze someone remembers; the first start at or after it is reported when retention establishes it. Empty for the most recent stops."),
         ),
         private=("MachineName", "AttachedFiles", "dump paths", "user names inside Message", "profile paths inside Message"),
     )

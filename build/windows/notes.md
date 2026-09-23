@@ -13,7 +13,9 @@ A stethoscope for a Windows computer. It gathers the record the machine keeps of
 
 ## New in {{VERSION}}
 
-**Captures appear only when complete.** While the tool gathers readings, its ZIP stays hidden from the capture list and download route. The finished ZIP appears after its manifest closes, so a person or agent cannot mistake a partial file for a saved snapshot. Captures started in the same second keep separate names, and cancellation or failure removes unfinished work. If the process exits abruptly, the hidden pending file is cleaned up after 24 hours on the next capture or listing; completed captures are never removed by that cleanup.
+**A remembered freeze keeps its surviving evidence.** Give `crash` an ISO `moment` through the API or agent tool. The answer now shows how far back System and Application records reach and whether the first returned start is really the first one after that moment. If System retention begins later, report-only stops and a Kernel-Power 41 without a returned start remain in the stop list with the uncertainty named. A report's filing time is not the time its stop occurred.
+
+**A missing start is not a pre-start record.** A Kernel-Power 41 written after reboot cannot anchor a lookup for the last record before the reboot when its start record was not returned. That misleading lead is now absent. A clean-start answer and "no bug check recorded" also require the Application report log to reach before the relevant start.
 
 **Update from 1.1.0 or later in the app.** Choose *Check for updates…* from the tray's version menu. From a source install, run `system-sentinel update`. The tool checks only when asked, verifies the downloaded file before starting it, and preserves the token, stack and prompts. An installed 1.0.1 still needs one manual download to gain this action.
 

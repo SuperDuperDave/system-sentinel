@@ -502,23 +502,6 @@
   ],
   "before": [
     {
-      "RecordId": 895,
-      "Id": 7000,
-      "Level": 3,
-      "LevelDisplayName": "Warning",
-      "ProviderName": "Service Control Manager",
-      "MachineName": "WORKBENCH",
-      "TaskDisplayName": null,
-      "TimeCreated": "2026-09-02T06:58:10.0000000Z",
-      "Log": "System",
-      "Anchor": 900,
-      "Message": "The Example service failed to start due to the following error:\nThe service did not respond.",
-      "Properties": [
-        "Example",
-        "The service did not respond."
-      ]
-    },
-    {
       "RecordId": 995,
       "Id": 129,
       "Level": 3,
