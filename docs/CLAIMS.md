@@ -72,6 +72,7 @@ Every claim the page at mainthread.ai/work/system-sentinel/ could make about the
 | Six prompt presets by name, yours to add, edit and delete | `sentinel/stack.py` (`PRESET_PROMPTS`); `GET /api/prompts` |
 | The same evidence is not stacked twice | `POST /api/stack/items` → `409`; `tests/test_stack.py` |
 | A capture holds every reading that needs no exact selection, the stack and the composed text in one ZIP; its manifest lists the taken members, each outcome, the redaction applied and selection-dependent readings omitted without a false machine failure | `sentinel/capture.py`, `sentinel/reading.py` (`requires_selection`); check: `curl -X POST -H "Authorization: Bearer $TOKEN" -o capture.zip http://127.0.0.1:8000/api/captures && unzip -l capture.zip` |
+| A capture is listed and downloadable only after its ZIP and manifest are complete; concurrent captures keep separate names, and a canceled request leaves no final-looking partial file | `sentinel/capture.py` (`create`, `_publish`); `tests/test_capture.py` (in-flight, concurrent and cancellation cases) |
 
 ## The dashboard
 

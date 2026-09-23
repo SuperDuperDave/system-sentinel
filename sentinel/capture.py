@@ -8,13 +8,17 @@ needs an exact event or file reference is listed as omitted in that manifest. A 
 attempted but could not answer is written with its outcome, never hidden.
 
 The files are redacted like every other response unless the caller asked for ``unredacted`` by
-name. Nothing is ever deleted: the directory is the person's record.
+name. Completed captures are never deleted: the directory is the person's record. An unfinished
+pending file is not a capture and is removed after cancellation or once stale.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import re
+import tempfile
+import time
 import zipfile
 from collections import Counter
 from dataclasses import dataclass
@@ -37,6 +41,7 @@ STACK_MEMBER = "stack.json"
 COMPOSED_MEMBER = "composed.md"
 MANIFEST_MEMBER = "manifest.json"
 MAX_LIST_MANIFEST_BYTES = 256 * 1024
+STALE_PENDING_SECONDS = 24 * 60 * 60
 
 
 @dataclass(frozen=True)
@@ -50,51 +55,61 @@ class Capture:
 
 
 async def create(bridge: Bridge, stack: Stack, prompts: Prompts, redactor: Redactor | None = None, *, reason: str | None = None, reader: ReadingCall | None = None) -> Capture:
-    """Take every reading that needs no exact selection and write the ZIP."""
+    """Take automatic readings, then make the complete ZIP visible in one filesystem step."""
     started = datetime.now(UTC)
-    path = _free_path(started)
     members: list[dict[str, Any]] = []
     removed: set[str] = set()
     omitted = [{"reading": name, "reason": "requires an exact selection"} for name, spec in REGISTRY.items() if spec.requires_selection]
+    directory = captures_dir()
+    _reap_stale_pending(directory)
+    fd, temporary_name = tempfile.mkstemp(prefix=".capture-", suffix=".pending", dir=directory)
+    os.close(fd)
+    temporary = Path(temporary_name)
 
-    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
-        for name, spec in list(REGISTRY.items()):
-            if spec.requires_selection:
-                continue
-            reading = await _take(name, bridge, started, reader)
-            body = reading.to_dict()
+    try:
+        with zipfile.ZipFile(temporary, "w", zipfile.ZIP_DEFLATED) as archive:
+            for name, spec in list(REGISTRY.items()):
+                if spec.requires_selection:
+                    continue
+                reading = await _take(name, bridge, started, reader)
+                body = reading.to_dict()
+                if redactor is not None:
+                    body, taken_out = redactor.redact(body)
+                    body["redacted"] = taken_out
+                    removed.update(taken_out)
+                member = READINGS_MEMBER.format(name=name)
+                members.append({"path": member, "reading": name, "outcome": body["outcome"], "took_ms": body["took_ms"], "bytes": _write(archive, member, json.dumps(json_safe_integers(body), ensure_ascii=False, indent=1))})
+
+            state: dict[str, Any] = stack.state()
             if redactor is not None:
-                body, taken_out = redactor.redact(body)
-                body["redacted"] = taken_out
+                state, taken_out = redactor.redact(state)
                 removed.update(taken_out)
-            member = READINGS_MEMBER.format(name=name)
-            members.append({"path": member, "reading": name, "outcome": body["outcome"], "took_ms": body["took_ms"], "bytes": _write(archive, member, json.dumps(json_safe_integers(body), ensure_ascii=False, indent=1))})
+            members.append({"path": STACK_MEMBER, "items": len(state.get("items") or []), "bytes": _write(archive, STACK_MEMBER, json.dumps(json_safe_integers(state), ensure_ascii=False, indent=1))})
 
-        state: dict[str, Any] = stack.state()
-        if redactor is not None:
-            state, taken_out = redactor.redact(state)
-            removed.update(taken_out)
-        members.append({"path": STACK_MEMBER, "items": len(state.get("items") or []), "bytes": _write(archive, STACK_MEMBER, json.dumps(json_safe_integers(state), ensure_ascii=False, indent=1))})
+            composed = compose(stack, prompts, redactor)
+            removed.update(composed["redacted"])
+            members.append({"path": COMPOSED_MEMBER, "items": composed["items"], "bytes": _write(archive, COMPOSED_MEMBER, composed["text"])})
 
-        composed = compose(stack, prompts, redactor)
-        removed.update(composed["redacted"])
-        members.append({"path": COMPOSED_MEMBER, "items": composed["items"], "bytes": _write(archive, COMPOSED_MEMBER, composed["text"])})
+            manifest = {
+                "tool": "system-sentinel",
+                "version": __version__,
+                "created_at": _stamp(started),
+                "unredacted": redactor is None,
+                "redacted": sorted(removed),
+                "readings": len(REGISTRY) - len(omitted),
+                "omitted": omitted,
+                "members": members,
+            }
+            if reason and redactor is None:
+                manifest["reason"] = reason
+            _write(archive, MANIFEST_MEMBER, json.dumps(json_safe_integers(manifest), ensure_ascii=False, indent=1))
 
-        manifest = {
-            "tool": "system-sentinel",
-            "version": __version__,
-            "created_at": _stamp(started),
-            "unredacted": redactor is None,
-            "redacted": sorted(removed),
-            "readings": len(REGISTRY) - len(omitted),
-            "omitted": omitted,
-            "members": members,
-        }
-        if reason and redactor is None:
-            manifest["reason"] = reason
-        _write(archive, MANIFEST_MEMBER, json.dumps(json_safe_integers(manifest), ensure_ascii=False, indent=1))
-
-    return Capture(path=path, manifest=manifest)
+        # The ZIP central directory and manifest must be closed before a list or download can see it.
+        # Publication refuses an existing name, including another capture from this same second.
+        path = _publish(temporary, started)
+        return Capture(path=path, manifest=manifest)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 async def _take(name: str, bridge: Bridge, at: datetime, reader: ReadingCall | None = None) -> Reading:
@@ -118,7 +133,9 @@ async def _take(name: str, bridge: Bridge, at: datetime, reader: ReadingCall | N
 def listing() -> list[dict[str, Any]]:
     """What is on disk, newest first, with only bounded facts from each capture's manifest."""
     out = []
-    for path in captures_dir().glob("capture-*.zip"):
+    directory = captures_dir()
+    _reap_stale_pending(directory)
+    for path in directory.glob("capture-*.zip"):
         if NAME.match(path.name):
             try:
                 stat = path.stat()
@@ -195,14 +212,33 @@ def find(name: str) -> Path | None:
     return path if path.is_file() else None
 
 
-def _free_path(at: datetime) -> Path:
-    base = captures_dir() / f"capture-{at.strftime('%Y%m%dT%H%M%SZ')}.zip"
-    if not base.exists():
-        return base
-    n = 2
-    while (candidate := base.with_name(base.name.replace(".zip", f"-{n}.zip"))).exists():
-        n += 1
-    return candidate
+def _publish(temporary: Path, at: datetime) -> Path:
+    base = temporary.parent / f"capture-{at.strftime('%Y%m%dT%H%M%SZ')}.zip"
+    n = 1
+    while True:
+        candidate = base if n == 1 else base.with_name(f"{base.stem}-{n}.zip")
+        try:
+            # Windows rename refuses an existing destination. POSIX rename replaces it, so a
+            # same-directory hard link supplies its atomic, no-overwrite publication there.
+            if os.name == "nt":
+                os.rename(temporary, candidate)
+            else:
+                os.link(temporary, candidate)
+            return candidate
+        except FileExistsError:
+            n += 1
+
+
+def _reap_stale_pending(directory: Path) -> None:
+    """Remove abandoned scratch files without touching completed captures."""
+    cutoff = time.time() - STALE_PENDING_SECONDS
+    for path in directory.glob(".capture-*.pending"):
+        try:
+            if path.stat().st_mtime < cutoff:
+                path.unlink()
+        except OSError:
+            # A scanner may hold this file; a later pass can retry. The list stays usable.
+            continue
 
 
 def _write(archive: zipfile.ZipFile, member: str, text: str) -> int:

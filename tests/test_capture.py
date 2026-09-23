@@ -1,18 +1,23 @@
 """Captures: what is in the ZIP, what the manifest says about it, and that names cannot wander."""
 
+import asyncio
 import io
 import json
+import os
 import time
 import zipfile
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
 
+import sentinel.capture as capture
 from sentinel.app import State, create_app
 from sentinel.bridge import BridgeResult
-from sentinel.capture import MAX_LIST_MANIFEST_BYTES, listing
+from sentinel.capture import MAX_LIST_MANIFEST_BYTES, STALE_PENDING_SECONDS, listing
 from sentinel.paths import captures_dir
-from sentinel.reading import REGISTRY
+from sentinel.reading import REGISTRY, Reading
+from sentinel.stack import Prompts, Stack
 from tests.conftest import FakeBridge, identity_result, real_bridge_or_skip
 from tests.test_stack import EVENTS
 
@@ -119,6 +124,94 @@ def test_two_captures_in_the_same_second_do_not_overwrite_each_other(client: Tes
     names = {client.post("/api/captures", headers=AUTH).headers["X-Capture-Name"] for _ in range(2)}
     assert len(names) == 2
     assert len(client.get("/api/captures", headers=AUTH).json()["captures"]) == 2
+
+
+def test_concurrent_captures_appear_only_when_complete_and_keep_both_names(monkeypatch: pytest.MonkeyPatch):
+    class FixedClock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 9, 23, 12, 0, tzinfo=UTC)
+
+    monkeypatch.setattr(capture, "datetime", FixedClock)
+    monkeypatch.setattr(capture, "REGISTRY", {"health": REGISTRY["health"]})
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    arrivals = 0
+
+    async def reader(name, params):
+        nonlocal arrivals
+        arrivals += 1
+        if arrivals == 2:
+            entered.set()
+        await release.wait()
+        return Reading(reading=name, params=params, outcome="empty", method={"kind": "synthetic"})
+
+    async def exercise():
+        tasks = [asyncio.create_task(capture.create(FakeBridge(), Stack(), Prompts(), reader=reader)) for _ in range(2)]
+        await asyncio.wait_for(entered.wait(), 3)
+        assert listing() == []
+        assert len(list(captures_dir().glob("*.pending"))) == 2
+        release.set()
+        first, second = await asyncio.gather(*tasks)
+        assert {first.name, second.name} == {"capture-20260923T120000Z.zip", "capture-20260923T120000Z-2.zip"}
+        for made in (first, second):
+            with zipfile.ZipFile(made.path) as archive:
+                assert archive.testzip() is None
+                assert json.loads(archive.read("manifest.json"))["readings"] == 1
+        assert len(listing()) == 2
+        assert not list(captures_dir().glob("*.pending"))
+
+    asyncio.run(exercise())
+
+
+def test_cancelled_capture_leaves_no_listed_or_pending_file(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(capture, "REGISTRY", {"health": REGISTRY["health"]})
+    entered = asyncio.Event()
+    pause = asyncio.Event()
+
+    async def reader(name, params):
+        entered.set()
+        await pause.wait()
+        return Reading(reading=name, params=params, outcome="empty", method={"kind": "synthetic"})
+
+    async def exercise():
+        task = asyncio.create_task(capture.create(FakeBridge(), Stack(), Prompts(), reader=reader))
+        await asyncio.wait_for(entered.wait(), 3)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert listing() == []
+        assert not list(captures_dir().iterdir())
+
+    asyncio.run(exercise())
+
+
+def test_publish_failure_leaves_no_partial_capture(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(capture, "REGISTRY", {"health": REGISTRY["health"]})
+
+    async def reader(name, params):
+        return Reading(reading=name, params=params, outcome="empty", method={"kind": "synthetic"})
+
+    def refuse(*_args):
+        raise PermissionError("synthetic publication refusal")
+
+    monkeypatch.setattr(capture.os, "rename" if os.name == "nt" else "link", refuse)
+    with pytest.raises(PermissionError, match="synthetic publication refusal"):
+        asyncio.run(capture.create(FakeBridge(), Stack(), Prompts(), reader=reader))
+    assert listing() == []
+    assert not list(captures_dir().iterdir())
+
+
+def test_listing_reaps_abandoned_pending_files_without_touching_recent_ones():
+    directory = captures_dir()
+    old = directory / ".capture-old.pending"
+    recent = directory / ".capture-recent.pending"
+    old.write_bytes(b"partial private evidence")
+    recent.write_bytes(b"active private evidence")
+    stale_at = time.time() - STALE_PENDING_SECONDS - 60
+    os.utime(old, (stale_at, stale_at))
+    assert listing() == []
+    assert not old.exists() and recent.exists()
 
 
 def test_listing_keeps_missing_damaged_and_oversized_manifests_explicit():

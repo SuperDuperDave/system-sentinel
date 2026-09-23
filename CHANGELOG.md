@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.3] - 2026-09-23
+
+### Changed
+- Captures are now published only after their ZIP and manifest close. A capture in progress does not appear in the list or download route, and concurrent captures started in the same second keep separate files. Canceling or failing a capture removes its unfinished file; a pending file left by an abrupt process exit is removed when it is older than 24 hours and a new capture or listing runs. Completed captures are never removed by this cleanup. On POSIX, new capture files are owner-only.
+
+### Limits
+- An abrupt process exit can leave a hidden pending file until the next cleanup pass; it is never presented as a completed capture. The capture still takes readings sequentially, so its members carry their own observation times rather than a single simultaneous snapshot.
+
 ## [1.3.2] - 2026-09-23
 
 ### Added
