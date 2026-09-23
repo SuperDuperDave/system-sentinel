@@ -29,7 +29,7 @@
 /* The lit stretches, as hit targets over the line. Nothing is drawn until one is under the
    pointer or the focus ring: the trace stays the only lit thing, and the targets say where
    they go through their label. */
-.traceHits { position: absolute; inset: 0; }
+.traceHits { position: absolute; inset: 0; overflow: hidden; }
 .traceHit {
   position: absolute;
   top: 0;
@@ -41,6 +41,8 @@
 }
 .traceHit:hover { background: rgba(111, 240, 168, 0.14); }
 .traceTick { stroke: var(--rule-soft); stroke-width: 1; }
+.traceUnknown { fill: url(#stormUnknown); }
+.traceUnknownHatch { stroke: var(--muted); stroke-width: 1; opacity: .42; }
 .tracePath {
   stroke: var(--phosphor);
   stroke-width: 1.25;
@@ -48,6 +50,8 @@
   stroke-linecap: round;
   filter: drop-shadow(0 0 5px rgba(111, 240, 168, 0.45));
 }
+.tracePoint { fill: var(--phosphor); }
+.tracePartialPoint { fill: var(--phosphor); stroke: var(--muted); stroke-width: 1.5; }
 .traceScale { display: block; margin: 8px 0 0; }
 .traceEnds { display: flex; justify-content: space-between; color: var(--muted); }
 .tracePeak { display: block; margin-top: 4px; color: var(--body); }

@@ -15,22 +15,28 @@ interface Buckets {
   bucket_count: number;
   total: number;
   unplaced: number;
-  totals: number[];
-  active: { index: number; start: string; total: number; signatures: Record<string, number> }[];
+  totals: (number | null)[];
+  unknown_buckets: number;
+  active: { index: number; start: string; total: number; complete: boolean; signatures: Record<string, number> }[];
 }
+
+interface Coverage { system: { covered_from: string | null; covered_from_inclusive: boolean | null; complete: boolean | null } }
 
 /** The burst and acceleration rules applied to those buckets: a lead, never a diagnosis. */
 interface Status {
   state: string;
   severity: string | null;
   reason: string;
-  peak_rate: number;
-  recent_rate: number;
-  baseline_rate: number;
-  acceleration: number;
+  peak_rate: number | null;
+  observed_peak: number;
+  recent_rate: number | null;
+  baseline_rate: number | null;
+  acceleration: number | null;
   dominant: string[];
   recent_buckets: number;
   baseline_buckets: number;
+  recent_observed: number;
+  baseline_observed: number;
 }
 
 interface Signature {
@@ -105,6 +111,12 @@ export function Errors() {
 
   const buckets = part<Buckets>(storms.reading, 'buckets');
   const status = part<Status>(storms.reading, 'status');
+  const coverage = part<Coverage>(storms.reading, 'coverage')?.system;
+  const emptyStormText = coverage?.complete
+    ? `No WHEA-Logger records ${inWindow}`
+    : coverage?.covered_from == null
+      ? `No WHEA-Logger records returned ${inWindow}; log coverage could not be established`
+      : `No WHEA-Logger records returned ${inWindow}; the window is not fully covered`;
   const signatures = part<Signature[]>(storms.reading, 'signatures') ?? [];
 
   const records = part<EventRecord[]>(whea.reading, 'records') ?? [];
@@ -131,7 +143,7 @@ export function Errors() {
           )}
         </p>
       ) : (
-        <OutcomeLine taken={storms} noun="WHEA-Logger records" singular="WHEA-Logger record" emptyText={`No WHEA-Logger records ${inWindow}`} />
+        <OutcomeLine taken={storms} noun={coverage?.complete ? 'WHEA-Logger records' : 'returned WHEA-Logger records'} singular={coverage?.complete ? 'WHEA-Logger record' : 'returned WHEA-Logger record'} emptyText={emptyStormText} />
       )}
 
       {hours !== null && observed(storms.reading) && status ? (
@@ -146,9 +158,9 @@ export function Errors() {
             <span className={styles.reason}>{status.reason}</span>
           </p>
           <p className={`${styles.rates} readout`}>
-            recent {status.recent_rate.toFixed(2)} · baseline {status.baseline_rate.toFixed(2)} · acceleration {status.acceleration.toFixed(2)}× · peak{' '}
-            {status.peak_rate} in one bucket — records per bucket of {buckets?.bucket_seconds ?? 60} s, over the last {status.recent_buckets} buckets
-            against the {status.baseline_buckets} before them
+            recent {status.recent_rate?.toFixed(2) ?? 'unknown'} · baseline {status.baseline_rate?.toFixed(2) ?? 'unknown'} · acceleration {status.acceleration == null ? 'unknown' : `${status.acceleration.toFixed(2)}×`} ·{' '}
+            {status.peak_rate == null ? (status.observed_peak ? `at least ${status.observed_peak} returned in one bucket` : 'peak unknown; no records returned in recent buckets') : `peak ${status.peak_rate} in one bucket`} — records per bucket of {buckets?.bucket_seconds ?? 60} s;{' '}
+            {status.recent_observed} of {status.recent_buckets} recent and {status.baseline_observed} of {status.baseline_buckets} baseline buckets observed
             {status.severity ? ` · severity ${status.severity}` : ''}
           </p>
           {status.dominant.length ? <p className={`${styles.rates} readout`}>most of it: {status.dominant.join(' · ')}</p> : null}
@@ -233,6 +245,7 @@ export function Errors() {
 function Trace({ buckets }: { buckets: Buckets }) {
   const setMoment = useApp((s) => s.setMoment);
   const totals = buckets.totals ?? [];
+  const active = new Map(buckets.active.map((bucket) => [bucket.index, bucket.total]));
   const width = 720;
   const height = 72;
   const quarters = 4;
@@ -242,14 +255,26 @@ function Trace({ buckets }: { buckets: Buckets }) {
     const from = Math.floor(i * per);
     const to = Math.max(from + 1, Math.floor((i + 1) * per));
     let top = 0;
-    for (let j = from; j < to && j < totals.length; j += 1) top = Math.max(top, totals[j]);
-    return { top, ends: Math.min(to, totals.length) };
+    let known = true;
+    for (let j = from; j < to && j < totals.length; j += 1) {
+      if (totals[j] === null) known = false;
+      top = Math.max(top, totals[j] ?? active.get(j) ?? 0);
+    }
+    return { top, known, ends: Math.min(to, totals.length) };
   });
   const peak = peaks.reduce((a, b) => Math.max(a, b.top), 0);
   const floor = height - 3;
   const scale = peak > 0 ? (height - 6) / peak : 0;
-  const points = peaks.map((p, i) => `${((i / Math.max(1, columns - 1)) * width).toFixed(1)},${(floor - p.top * scale).toFixed(1)}`).join(' ');
-  const label = `${buckets.total} WHEA-Logger records over ${buckets.bucket_count} buckets of ${buckets.bucket_seconds} seconds; highest ${peak} in one bucket`;
+  const x = (index: number) => (index / Math.max(1, columns - 1)) * width;
+  const observedRuns: { from: number; to: number }[] = [];
+  const unknownRuns: { from: number; to: number }[] = [];
+  peaks.forEach((column, index) => {
+    const group = column.known ? observedRuns : unknownRuns;
+    const last = group[group.length - 1];
+    if (last && last.to === index - 1) last.to = index;
+    else group.push({ from: index, to: index });
+  });
+  const label = `${buckets.total} returned WHEA-Logger records over ${buckets.bucket_count} buckets of ${buckets.bucket_seconds} seconds; coverage unknown for ${buckets.unknown_buckets} buckets; highest returned count ${peak} in one bucket`;
 
   // The lit stretches are the only ones worth going to, so they are the only ones that are a
   // control: a hit target over each run of columns that holds a record, and nothing at all over a
@@ -263,11 +288,20 @@ function Trace({ buckets }: { buckets: Buckets }) {
     <figure className={styles.traceFigure}>
       <div className={styles.traceStage}>
         <svg className={styles.trace} viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" role="img" aria-label={label}>
+          <defs>
+            <pattern id="stormUnknown" width="7" height="7" patternUnits="userSpaceOnUse"><path className={styles.traceUnknownHatch} d="M0 7L7 0" /></pattern>
+          </defs>
+          {unknownRuns.map((run) => <rect key={`unknown-${run.from}`} className={styles.traceUnknown} x={(run.from / columns) * width} y="0" width={((run.to - run.from + 1) / columns) * width} height={height} />)}
           {Array.from({ length: quarters - 1 }, (_, i) => {
             const x = ((i + 1) / quarters) * width;
             return <line key={i} className={styles.traceTick} x1={x} y1="0" x2={x} y2={height} vectorEffect="non-scaling-stroke" />;
           })}
-          <polyline className={styles.tracePath} points={points} fill="none" vectorEffect="non-scaling-stroke" />
+          {observedRuns.map((run) => run.from === run.to ? (
+            <circle key={`observed-${run.from}`} className={styles.tracePoint} cx={x(run.from)} cy={floor - peaks[run.from].top * scale} r="2" />
+          ) : (
+            <polyline key={`observed-${run.from}`} className={styles.tracePath} points={peaks.slice(run.from, run.to + 1).map((p, offset) => `${x(run.from + offset).toFixed(1)},${(floor - p.top * scale).toFixed(1)}`).join(' ')} fill="none" vectorEffect="non-scaling-stroke" />
+          ))}
+          {peaks.map((p, i) => !p.known && p.top > 0 ? <circle key={`partial-${i}`} className={styles.tracePartialPoint} cx={x(i)} cy={floor - p.top * scale} r="2.5" /> : null)}
         </svg>
         {runs.length ? (
           <div className={styles.traceHits}>
@@ -295,8 +329,8 @@ function Trace({ buckets }: { buckets: Buckets }) {
           <span>now</span>
         </span>
         <span className={`${styles.tracePeak} readout`}>
-          {peak === 0 ? `nothing in any of the ${buckets.bucket_count} buckets` : `highest ${peak} in one bucket of ${buckets.bucket_seconds} s`}
-          {buckets.unplaced ? ` · ${buckets.unplaced} undated` : ''}
+          {peak === 0 ? (buckets.unknown_buckets ? `no returned records; coverage unknown for ${buckets.unknown_buckets} buckets` : `nothing in any of the ${buckets.bucket_count} buckets`) : `highest returned ${peak} in one bucket of ${buckets.bucket_seconds} s${buckets.unknown_buckets ? ` · coverage unknown for ${buckets.unknown_buckets} buckets` : ''}`}
+          {buckets.unplaced ? ` · ${buckets.unplaced} returned records not bucketed` : ''}
         </span>
       </figcaption>
     </figure>
@@ -346,8 +380,8 @@ function SignatureDetail({ signature }: { signature: Signature }) {
           ['MCi status', <Value value={signature.mci_status} />],
           ['PCI vendor:device', signature.vendor_id ? <Value value={`${signature.vendor_id}:${signature.device_id}`} /> : <Value value={null} />],
           ['Event ids', <Value value={signature.event_ids} />],
-          ['First seen', <Value value={`${signature.first_seen} · ${ago(signature.first_seen)}`} />],
-          ['Last seen', <Value value={`${signature.last_seen} · ${ago(signature.last_seen)}`} />],
+          ['First returned', <Value value={`${signature.first_seen} · ${ago(signature.first_seen)}`} />],
+          ['Last returned', <Value value={`${signature.last_seen} · ${ago(signature.last_seen)}`} />],
           ['Key', <span className={styles.key}>{signature.key}</span>],
         ]}
       />

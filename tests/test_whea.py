@@ -11,9 +11,10 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import time
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -48,8 +49,30 @@ def _powershell_stamp(epoch: float) -> str:
     return moment.strftime("%Y-%m-%dT%H:%M:%S.") + f"{moment.microsecond:06d}0Z"
 
 
-def storms(records: list[dict[str, Any]], outcome: str = "ok", **params: Any):
-    bridge = FakeBridge(BridgeResult(outcome, items=records, took_ms=9))
+def storms(records: list[dict[str, Any]], outcome: str = "ok", *, oldest: str | None = None, truncated: bool = False, log_state: str = "ok", query_outcome: str | None = None, host_now: float | None = None, start_shift: int = 0, **params: Any):
+    class StormBridge:
+        def run(self, script: str, *, depth: int = 6):
+            if outcome not in ("ok", "empty"):
+                return BridgeResult(outcome, error="the log is not there", took_ms=9)
+            bucket_seconds = int(re.search(r"\$bucketTicks = \[long\](\d+)", script).group(1))
+            count = int(re.search(r"\(\[long\]\((\d+) - 1\)", script).group(1))
+            machine_now = host_now if host_now is not None else time.time()
+            last = int(machine_now // bucket_seconds) * bucket_seconds
+            start = whea._stamp(last - (count - 1) * bucket_seconds + start_shift)
+            before = datetime.fromisoformat(start.replace("Z", "+00:00")) - timedelta(seconds=1)
+            rows = [
+                {**{key: record.get(key) for key in whea.STORM_ROW_KEYS if key in record}, "ProviderName": whea.PROVIDER, "LogName": whea.LOG}
+                for record in records
+            ]
+            source = {
+                "log": whea.LOG, "outcome": query_outcome or outcome, "error": "synthetic query failure" if query_outcome in ("failed", "denied") else None,
+                "returned": len(rows), "limit": whea.RECORD_CAP,
+                "truncated": truncated, "records": rows, "log_enabled": True, "log_mode": "Circular", "log_state": log_state,
+                "log_error": None, "log_oldest": oldest or before.isoformat().replace("+00:00", "Z"), "oldest_state": "ok", "oldest_error": None,
+            }
+            return BridgeResult("ok", items=[{"window_start": start, "window_end": _powershell_stamp(int(machine_now * 1000) / 1000), "source": source}], took_ms=9)
+
+    bridge = StormBridge()
     return asyncio.run(take("storms", bridge, params))
 
 
@@ -151,7 +174,7 @@ def test_the_window_is_aligned_to_bucket_boundaries_and_ends_with_the_current_bu
 
 @pytest.mark.parametrize(
     "params",
-    [{"hours": 0}, {"bucket_seconds": 0}, {"bucket_seconds": 1}, {"burst_threshold": 0}, {"accel_threshold": 0}],
+    [{"hours": 0}, {"hours": whea.MAX_HOURS + 1}, {"bucket_seconds": 0}, {"bucket_seconds": 1}, {"burst_threshold": 0}, {"accel_threshold": 0}],
 )
 def test_a_window_that_cannot_be_counted_is_refused_before_the_machine_is_asked(params):
     with pytest.raises(ValueError):
@@ -161,8 +184,10 @@ def test_a_window_that_cannot_be_counted_is_refused_before_the_machine_is_asked(
 def test_the_query_bounds_the_window_by_the_logs_own_index():
     window = whea.window_for(24, 60, now=1_758_000_123.75)
     script = whea.storms_script(window)
-    assert "Microsoft-Windows-WHEA-Logger" in script and whea._stamp(window.start) in script
-    assert f"-MaxEvents {whea.RECORD_CAP}" in script and "NoMatchingEventsFound" in script
+    assert "Microsoft-Windows-WHEA-Logger" in script and "$currentBucketTicks" in script
+    assert f"$bucketTicks = [long]{window.bucket_seconds}" in script and f"([long]({window.count} - 1)" in script
+    assert f"-MaxEvents {whea.RECORD_CAP + 1}" in script and "NoMatchingEventsFound" in script
+    assert "Read-LogMetadata 'System'" in script
     assert "RawData" not in script  # the payload is whea's business, not the storm rule's
 
 
@@ -251,6 +276,81 @@ def test_an_empty_window_is_a_finding_with_the_buckets_still_there():
     assert status["state"] == "quiet" and status["reason"] == "the window holds no WHEA-Logger records"
 
 
+def test_retention_gap_is_unknown_buckets_and_cannot_read_as_quiet():
+    oldest = _powershell_stamp(time.time() - 12 * 3600)
+    reading = storms([], outcome="empty", oldest=oldest)
+    assert reading.outcome == "empty" and reading.count == 0
+    totals = reading.section("buckets").data["totals"]
+    assert totals[0] is None and totals[-1] == 0
+    assert reading.section("buckets").data["unknown_buckets"] > 0
+    assert reading.section("coverage").data["system"]["complete"] is False
+    assert reading.section("status").data["state"] == "unknown"
+    assert "no WHEA-Logger records" not in reading.section("status").data["reason"]
+
+
+def test_a_burst_of_returned_records_survives_a_retention_gap():
+    reading = storms(load(), oldest=_powershell_stamp(time.time() - 12 * 3600))
+    assert reading.section("coverage").data["system"]["complete"] is False
+    assert reading.section("status").data["state"] == "burst"
+
+
+@pytest.mark.parametrize("skew_seconds", [-3600, 3600])
+def test_host_clock_aligns_the_query_and_buckets_even_when_python_time_differs(skew_seconds):
+    host_now = time.time() + skew_seconds
+    reading = storms(load(now=host_now), host_now=host_now)
+    window = whea.window_for(24, 60, now=host_now)
+    buckets = reading.section("buckets").data
+    assert reading.outcome == "ok" and buckets["from"] == whea._stamp(window.start)
+    assert buckets["total"] == reading.count == 40 and buckets["unplaced"] == 0
+    assert reading.section("status").data["state"] == "burst"
+
+
+def test_a_single_bucket_at_its_exact_start_is_an_empty_interval_not_a_collector_failure():
+    instant = whea.window_for(1, 3600, now=time.time()).end
+    reading = storms([], outcome="empty", host_now=instant, hours=1, bucket_seconds=3600)
+    assert reading.outcome == "empty" and reading.count == 0
+    assert reading.section("buckets").data["bucket_count"] == 1
+    assert reading.section("status").data["state"] == "unknown"  # no baseline for a trend
+
+
+def test_a_misaligned_host_window_fails_with_its_own_reason():
+    reading = storms([], outcome="empty", start_shift=1)
+    assert reading.outcome == "failed" and reading.count is None
+    assert "window bounds" in reading.error["detail"]
+    assert reading.section("buckets") is None
+
+
+def test_one_extra_record_makes_the_storm_cap_exact(monkeypatch):
+    monkeypatch.setattr(whea, "RECORD_CAP", 3)
+    script = whea.storms_script(whea.window_for(24, 60))
+    assert "-MaxEvents 4" in script
+    reading = storms(load(groups={"tail"})[:3], truncated=True)
+    assert reading.outcome == "ok" and reading.count == 3
+    assert reading.section("collection").data["system"]["truncated"] is True
+    assert reading.section("coverage").data["system"]["covered_from_inclusive"] is False
+    assert reading.section("buckets").data["unknown_buckets"] > 0
+    assert reading.section("status").data["state"] == "unknown"
+
+
+def test_a_failed_supporting_probe_keeps_a_clean_query_but_unknown_reach():
+    reading = storms([], outcome="empty", log_state="failed")
+    assert reading.outcome == "empty" and reading.count == 0
+    assert reading.section("coverage").data["system"]["complete"] is False
+    assert reading.section("status").data["state"] == "unknown"
+    assert "could not be established" in reading.section("status").data["reason"]
+    assert any("could not be established" in warning for warning in reading.warnings)
+    denied = storms([], query_outcome="denied")
+    assert denied.outcome == "denied" and denied.count is None
+    assert denied.section("buckets") is None
+    assert denied.section("collection").data["system"]["outcome"] == "denied"
+    assert denied.section("coverage").data["system"]["complete"] is None
+    from sentinel.stack import _item_lines
+
+    handoff = "\n".join(_item_lines(1, {"kind": "reading", "title": "Hardware errors", "reading": denied.to_dict(), "verbosity": "summary"}))
+    assert '"name": "collection"' in handoff and '"name": "coverage"' in handoff
+    assert '"outcome": "denied"' in handoff
+
+
 def test_a_failed_query_concludes_nothing_about_the_machine():
     reading = storms([], outcome="denied", **{})
     assert reading.outcome == "denied" and reading.sections == []
@@ -259,15 +359,15 @@ def test_a_failed_query_concludes_nothing_about_the_machine():
 
 def test_the_envelope_serializes_with_its_classes_and_its_basis():
     body = storms(load()).to_dict()
-    assert [(s["name"], s["class"]) for s in body["sections"]] == [("buckets", "derived"), ("signatures", "derived"), ("status", "inferred")]
-    assert all(s.get("basis") for s in body["sections"])
+    assert [(s["name"], s["class"]) for s in body["sections"]] == [("buckets", "derived"), ("signatures", "derived"), ("status", "inferred"), ("collection", "raw"), ("coverage", "derived")]
+    assert all(s.get("basis") for s in body["sections"] if s["class"] != "raw")
     assert body["method"]["kind"] == "powershell" and "QueryList" in body["method"]["query"]
 
 
 def test_the_catalog_carries_both_readings_with_what_redaction_removes():
     from sentinel.reading import REGISTRY
 
-    assert REGISTRY["whea"].classes == ("raw", "derived") and REGISTRY["storms"].classes == ("derived", "inferred")
+    assert REGISTRY["whea"].classes == ("raw", "derived") and REGISTRY["storms"].classes == ("raw", "derived", "inferred")
     assert REGISTRY["whea"].private and REGISTRY["storms"].private
     assert [p.name for p in REGISTRY["storms"].params] == ["hours", "bucket_seconds", "burst_threshold", "accel_threshold"]
 
@@ -297,8 +397,17 @@ def test_storms_answers_on_this_machine():
     reading = _observed(asyncio.run(take("storms", real_bridge_or_skip(), {"hours": 24})))
     buckets = reading.section("buckets").data
     assert len(buckets["totals"]) == buckets["bucket_count"] == 1440
-    assert reading.section("status").data["state"] in ("quiet", "burst", "accelerating")
+    assert reading.section("status").data["state"] in ("quiet", "burst", "accelerating", "unknown")
+    assert reading.section("coverage").data["system"]["complete"] in (True, False)
     assert reading.section("status").data["reason"]
+
+
+@pytest.mark.host
+def test_wider_storm_buckets_align_on_this_machine():
+    reading = _observed(asyncio.run(take("storms", real_bridge_or_skip(), {"hours": 24, "bucket_seconds": 900})))
+    buckets = reading.section("buckets").data
+    assert buckets["bucket_seconds"] == 900 and buckets["bucket_count"] == 96
+    assert whea.stamp_key(buckets["from"]) == whea.stamp_key(reading.section("collection").data["window_start"])
 
 
 def minimal_cper() -> str:

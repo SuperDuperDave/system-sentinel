@@ -78,8 +78,17 @@ def test_failure_and_retention_are_not_an_observed_absence():
 
     empty = take([source("windows_update"), source("device_configuration", oldest="2026-09-21T12:00:00Z"), source("msi")])
     assert empty.outcome == "empty" and empty.count == 0
-    assert empty.section("coverage").data["device_configuration"] == {"covered_from": "2026-09-21T12:00:00Z", "covered_from_inclusive": True, "complete": False}
+    assert empty.section("coverage").data["device_configuration"] == {"covered_from": "2026-09-21T12:00:00Z", "covered_from_inclusive": False, "complete": False}
     assert any("does not cover the whole requested window" in warning for warning in empty.warnings)
+
+    at_boundary = take([source("windows_update", oldest=START), source("device_configuration"), source("msi")])
+    assert at_boundary.section("coverage").data["windows_update"] == {"covered_from": START, "covered_from_inclusive": False, "complete": False}
+
+    no_metadata = source("windows_update")
+    no_metadata["log_state"] = "failed"
+    unknown = take([no_metadata, source("device_configuration"), source("msi")])
+    assert unknown.section("coverage").data["windows_update"]["covered_from"] is None
+    assert any("windows_update log coverage could not be established" in warning for warning in unknown.warnings)
 
 
 def test_truncation_and_bad_collector_rows_are_visible():
@@ -150,7 +159,7 @@ def test_seventh_digit_changes_reach_and_rejects_a_row_before_the_window():
     later_oldest = "2026-09-21T00:00:00.1234562Z"
     bridge.sources[0] = source("windows_update", oldest=later_oldest)
     limited = take_changes(bridge, {"before": BEFORE, "hours": 24, "count": 3})
-    assert limited.section("coverage").data["windows_update"] == {"covered_from": later_oldest, "covered_from_inclusive": True, "complete": False}
+    assert limited.section("coverage").data["windows_update"] == {"covered_from": later_oldest, "covered_from_inclusive": False, "complete": False}
 
 
 @pytest.mark.parametrize("metadata_key, metadata_value", [("log_enabled", False), ("log_mode", "AutoBackup"), ("oldest_state", "failed")])
@@ -160,7 +169,7 @@ def test_an_empty_source_without_retention_evidence_is_not_complete(metadata_key
     reading = take([uncertain, source("device_configuration"), source("msi")])
     assert reading.outcome == "empty"
     assert reading.section("coverage").data["windows_update"] == {"covered_from": None, "covered_from_inclusive": None, "complete": False}
-    assert any("windows_update does not cover" in warning for warning in reading.warnings)
+    assert any("windows_update log coverage could not be established" in warning for warning in reading.warnings)
 
 
 def test_a_failed_source_has_unknown_reach_and_surviving_records_remain_useful():

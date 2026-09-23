@@ -10,11 +10,15 @@ from __future__ import annotations
 
 import re
 from collections import Counter
-from datetime import UTC, datetime
 from typing import Any
 
 from ..bridge import Bridge
 from ..reading import Param, Reading, Section, Spec, from_object, register
+from .event_coverage import COVERAGE_BASIS, LOG_METADATA_SCRIPT
+from .event_coverage import coverage as _coverage
+from .event_coverage import metadata as _metadata
+from .event_coverage import parse_stamp as _parse
+from .event_coverage import stamp_key as _stamp_key
 from .events import _utc_stamp
 
 MAX_HOURS = 2160
@@ -94,11 +98,6 @@ function Project-Change($event, [string]$source) {{
 }}
 $sources = foreach ($spec in $specs) {{
     $log = $spec.log; $provider = $spec.provider; $ids = $spec.ids
-    $logEnabled = $null; $logMode = $null; $logState = 'failed'; $logError = $null
-    try {{
-        $info = Get-WinEvent -ListLog $log -ErrorAction Stop
-        $logEnabled = [bool]$info.IsEnabled; $logMode = [string]$info.LogMode; $logState = 'ok'
-    }} catch {{ $logState = FailureOutcome $_; $logError = $_.Exception.Message }}
     $query = @"
 <QueryList><Query Id='0' Path='$log'><Select Path='$log'>*[System[Provider[@Name='$provider'] and ($ids) and TimeCreated[@SystemTime&gt;='$startIso' and @SystemTime&lt;'$endIso']]]</Select></Query></QueryList>
 "@
@@ -112,20 +111,12 @@ $sources = foreach ($spec in $specs) {{
         if ($_.FullyQualifiedErrorId -like 'NoMatchingEventsFound*') {{ $outcome = 'empty'; $truncated = $false }}
         else {{ $outcome = FailureOutcome $_; $errorText = $_.Exception.Message }}
     }}
-    # Check retention after the event query: a circular log can wrap while the query runs.
-    $logOldest = $null; $oldestState = 'failed'; $oldestError = $null
-    try {{
-        $oldest = Get-WinEvent -LogName $log -Oldest -MaxEvents 1 -ErrorAction Stop
-        $logOldest = $oldest.TimeCreated.ToUniversalTime().ToString('o'); $oldestState = 'ok'
-    }} catch {{
-        if ($_.FullyQualifiedErrorId -like 'NoMatchingEventsFound*') {{ $oldestState = 'empty' }}
-        else {{ $oldestState = FailureOutcome $_; $oldestError = $_.Exception.Message }}
-    }}
+    $meta = Read-LogMetadata $log
     [pscustomobject]@{{
         name = $spec.name; log = $log; outcome = $outcome; error = $errorText
         returned = $records.Count; limit = $limit; truncated = $truncated; records = $records
-        log_enabled = $logEnabled; log_mode = $logMode; log_state = $logState; log_error = $logError
-        log_oldest = $logOldest; oldest_state = $oldestState; oldest_error = $oldestError
+        log_enabled = $meta.log_enabled; log_mode = $meta.log_mode; log_state = $meta.log_state; log_error = $meta.log_error
+        log_oldest = $meta.log_oldest; oldest_state = $meta.oldest_state; oldest_error = $meta.oldest_error
     }}
 }}
 [pscustomobject]@{{ window_start = $startIso; window_end = $endIso; sources = @($sources) }}
@@ -139,15 +130,6 @@ CHANGES_BASIS = (
     "MSI status 1641 means restart initiated and 3010 means restart required. "
     "A nearby event is a lead to inspect, not proof that it caused a later failure."
 )
-COVERAGE_BASIS = (
-    "For each observed source, compare the requested UTC start with the log's oldest retained "
-    "record and the oldest matching record returned when the response was truncated. Complete "
-    "means this retained circular log was enabled, reached the requested start and returned all "
-    "matching records within the per-source limit. A truncated boundary is exclusive because "
-    "other matching records can share its timestamp. This does not prove Windows emitted every event."
-)
-
-
 def changes_script(before: str, hours: int, count: int) -> str:
     if not 1 <= hours <= MAX_HOURS:
         raise ValueError(f"parameter 'hours': must be between 1 and {MAX_HOURS}")
@@ -158,7 +140,7 @@ def changes_script(before: str, hours: int, count: int) -> str:
     except ValueError as exc:
         raise ValueError(f"parameter 'before': not an ISO timestamp ({exc})") from exc
     assignment = f"$until = [datetimeoffset]::Parse('{stamp}').UtcDateTime" if stamp else "$until = (Get-Date).ToUniversalTime()"
-    return CHANGES_SCRIPT.replace("{before_assignment}", assignment).replace("{hours}", str(hours)).replace("{count}", str(count)).replace("{{", "{").replace("}}", "}")
+    return LOG_METADATA_SCRIPT + CHANGES_SCRIPT.replace("{before_assignment}", assignment).replace("{hours}", str(hours)).replace("{count}", str(count)).replace("{{", "{").replace("}}", "}")
 
 
 def take_changes(bridge: Bridge, params: dict[str, Any]) -> Reading:
@@ -205,7 +187,10 @@ def take_changes(bridge: Bridge, params: dict[str, Any]) -> Reading:
         if source["truncated"]:
             reading.warnings.append(f"{name} reached its {source['limit']}-record limit; older matching records in the window were not returned")
         if coverage[name]["complete"] is False:
-            reading.warnings.append(f"{name} does not cover the whole requested window")
+            reading.warnings.append(
+                f"{name} log coverage could not be established" if coverage[name]["covered_from"] is None
+                else f"{name} does not cover the whole requested window"
+            )
     if rows:
         reading.outcome = "ok"
         reading.count = len(rows)
@@ -247,10 +232,6 @@ def _source(name: str, value: Any, limit: int, start: Any, end: Any) -> tuple[di
     return {**_metadata({}), "log": SOURCE_EXPECTED[name][0], "outcome": "failed", "returned": 0, "limit": limit, "truncated": None, "error": problem, "log_state": "failed", "oldest_state": "failed"}, []
 
 
-def _metadata(value: dict[str, Any]) -> dict[str, Any]:
-    return {key: value.get(key) for key in ("log", "log_enabled", "log_mode", "log_state", "log_error", "log_oldest", "oldest_state", "oldest_error")}
-
-
 def _valid_row(name: str, row: Any, start: Any, end: Any) -> bool:
     if not isinstance(row, dict) or not set(row) <= RAW_KEYS or not isinstance(row.get("Data"), dict):
         return False
@@ -273,35 +254,6 @@ def _valid_row(name: str, row: Any, start: Any, end: Any) -> bool:
         and set(data) <= SAFE_DATA_KEYS[name]
         and all(isinstance(key, str) and (value is None or isinstance(value, str)) for key, value in data.items())
     )
-
-
-def _coverage(source: dict[str, Any], rows: list[dict[str, Any]], start: str, end: str) -> dict[str, Any]:
-    if source["outcome"] not in ("ok", "empty"):
-        return {"covered_from": None, "covered_from_inclusive": None, "complete": None}
-    covered = _covered_from(source, rows, start, end)
-    return {
-        "covered_from": covered,
-        "covered_from_inclusive": None if covered is None else not source["truncated"],
-        "complete": covered is not None and not source["truncated"] and _stamp_key(covered) == _stamp_key(start),
-    }
-
-
-def _covered_from(source: dict[str, Any], rows: list[dict[str, Any]], start: str, end: str) -> str | None:
-    # A disabled or non-circular log can stop accepting records while a query still succeeds.
-    if source.get("log_state") != "ok" or source.get("log_enabled") is not True or source.get("log_mode") != "Circular" or source.get("oldest_state") != "ok":
-        return None
-    oldest_text = source.get("log_oldest")
-    oldest = _stamp_key(oldest_text)
-    window_start, window_end = _stamp_key(start), _stamp_key(end)
-    if not isinstance(oldest_text, str) or oldest is None or window_start is None or window_end is None or oldest >= window_end:
-        return None
-    candidates: list[str] = [start, oldest_text]
-    if source.get("truncated"):
-        returned = [row.get("TimeCreated") for row in rows]
-        if not returned or any(not isinstance(moment, str) or _stamp_key(moment) is None for moment in returned):
-            return None
-        candidates.append(min((moment for moment in returned if isinstance(moment, str)), key=_known_stamp_key))
-    return max(candidates, key=_known_stamp_key)
 
 
 def _change(record: dict[str, Any]) -> dict[str, Any]:
@@ -358,32 +310,6 @@ def _integer(value: Any) -> int | None:
         return int(str(value))
     except (TypeError, ValueError):
         return None
-
-
-def _parse(value: Any) -> datetime | None:
-    if not isinstance(value, str):
-        return None
-    try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-        return parsed.astimezone(UTC) if parsed.tzinfo else None
-    except ValueError:
-        return None
-
-
-def _stamp_key(value: Any) -> tuple[datetime, int] | None:
-    """Compare Windows' seven-digit UTC fractions without rounding a coverage boundary backward."""
-    parsed = _parse(value)
-    if parsed is None:
-        return None
-    fraction = re.search(r"\.(\d+)(?:Z|[+-]\d{2}:\d{2})$", value)
-    seventh = int((fraction.group(1) + "0000000")[:7]) % 10 if fraction else 0
-    return parsed, seventh
-
-
-def _known_stamp_key(value: str) -> tuple[datetime, int]:
-    key = _stamp_key(value)
-    assert key is not None
-    return key
 
 
 register(

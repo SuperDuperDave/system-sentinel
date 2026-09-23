@@ -162,9 +162,9 @@ _BEFORE_RE = re.compile(r"SystemTime&lt;'([^']+)'")
 
 
 def answer_events(script: str) -> BridgeResult:
-    levels = {int(v) for v in _LEVEL_RE.search(script).group(1).split(",")}
+    levels = {int(v) for v in re.findall(r"Level=(\d+)", script)}
     count = int(_MAXEVENTS_RE.search(script).group(1))
-    records = [r for r in system_log_records(time.time()) if r["Level"] in levels][:count]
+    records = [r for r in system_log_records(time.time()) if not levels or r["Level"] in levels][:count]
     return BridgeResult("ok" if records else "empty", items=records, took_ms=41)
 
 
@@ -188,10 +188,30 @@ class FixtureBridge:
             # logs to a real high-water mark makes it read as caught up, not broken.
             top = max((r["RecordId"] for r in system_log_records(time.time())), default=0)
             return BridgeResult("ok", items=[{"log": "System", "record": top}, {"log": "Application", "record": 1}], took_ms=6)
+        if "window_start = $startIso" in script and "WHEA-Logger" in script:
+            # The storm collector returns one source object, not the record list used by whea.
+            now = time.time()
+            bucket_seconds = int(re.search(r"\$bucketTicks = \[long\](\d+)", script).group(1))
+            count = int(re.search(r"\(\[long\]\((\d+) - 1\)", script).group(1))
+            start = _powershell_stamp((int(now // bucket_seconds) - count + 1) * bucket_seconds)
+            end = _powershell_stamp(int(now * 1000) / 1000)
+            cap = max(int(value) for value in _MAXEVENTS_RE.findall(script)) - 1
+            first, until = _parse_stamp(start), _parse_stamp(end)
+            records = [
+                {"RecordId": row["RecordId"], "Id": row["Id"], "ProviderName": "Microsoft-Windows-WHEA-Logger", "LogName": "System", "LevelDisplayName": row.get("LevelDisplayName"), "TimeCreated": row["TimeCreated"], "Message": row.get("Message")}
+                for row in whea_records(now) if first <= _parse_stamp(row["TimeCreated"]) < until
+            ]
+            source = {
+                "log": "System", "outcome": "ok" if records else "empty", "error": None,
+                "returned": min(len(records), cap), "limit": cap, "truncated": len(records) > cap, "records": records[:cap],
+                "log_enabled": True, "log_mode": "Circular", "log_state": "ok", "log_error": None,
+                "log_oldest": _powershell_stamp(_parse_stamp(start) - 86400), "oldest_state": "ok", "oldest_error": None,
+            }
+            return BridgeResult("ok", items=[{"window_start": start, "window_end": end, "source": source}], took_ms=412)
         if "WHEA-Logger" in script:
             cap = _MAXEVENTS_RE.search(script)
             return BridgeResult("ok", items=whea_records(time.time(), int(cap.group(1)) if cap else None), took_ms=412)
-        if "FilterHashtable" in script:
+        if "Get-WinEvent -FilterXml $xml" in script and "SystemTime&lt;" not in script:
             return answer_events(script)
         if "SystemTime&lt;" in script:
             return answer_record(script)

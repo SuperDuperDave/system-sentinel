@@ -105,6 +105,10 @@ def test_change_handoff_leads_with_meaning_and_keeps_raw_selection_available():
     unsuccessful = "\n".join(_item_lines(1, {"kind": "reading", "title": "Changes", "reading": failed, "verbosity": "summary"}))
     assert "one source failed" in unsuccessful and '"complete": false' in unsuccessful
 
+    failed_storm = {**failed, "reading": "storms"}
+    storm_handoff = "\n".join(_item_lines(1, {"kind": "reading", "title": "Hardware errors", "reading": failed_storm, "verbosity": "summary"}))
+    assert "one source failed" in storm_handoff and '"complete": false' in storm_handoff
+
 
 def test_the_stack_starts_empty_with_a_prompt_chosen(client: TestClient):
     state = client.get("/api/stack", headers=AUTH).json()

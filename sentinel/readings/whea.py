@@ -34,7 +34,10 @@ from datetime import UTC, datetime
 from typing import Any
 
 from ..bridge import WSL_INTEROP_ERRORS, Bridge
-from ..reading import Param, Reading, Section, Spec, from_bridge, register
+from ..reading import Param, Reading, Section, Spec, from_bridge, from_object, register
+from .event_coverage import COVERAGE_BASIS, LOG_METADATA_SCRIPT, stamp_key
+from .event_coverage import coverage as log_coverage
+from .event_coverage import metadata as log_metadata
 from .events import record_projection, winevent
 from .health import DECODER
 
@@ -54,6 +57,7 @@ DECODED_BASIS = "CPER header and section bounds checked locally, then DecodeWhea
 # out of the log and say so when the cap bites, rather than serializing an unbounded log.
 RECORD_CAP = 20_000
 MAX_BUCKETS = 20_000
+MAX_HOURS = 43_800  # Five years bounds host DateTime arithmetic even with wide buckets.
 RECENT_BUCKETS = 10
 BASELINE_BUCKETS = 240
 BASELINE_FLOOR = 0.1  # a baseline of zero would make every recent event infinitely accelerated
@@ -236,6 +240,8 @@ class Window:
 def window_for(hours: int, bucket_seconds: int, now: float | None = None) -> Window:
     if hours is None or hours <= 0:
         raise ValueError("parameter 'hours': must be at least one hour")
+    if hours > MAX_HOURS:
+        raise ValueError(f"parameter 'hours': must be at most {MAX_HOURS} hours")
     if bucket_seconds is None or bucket_seconds <= 0:
         raise ValueError("parameter 'bucket_seconds': must be at least one second")
     count = int(hours * 3600 // bucket_seconds)
@@ -247,14 +253,49 @@ def window_for(hours: int, bucket_seconds: int, now: float | None = None) -> Win
     return Window(start=last - (count - 1) * bucket_seconds, bucket_seconds=bucket_seconds, count=count)
 
 
+STORMS_SCRIPT_TEMPLATE = r"""
+$until = (Get-Date).ToUniversalTime()
+$until = $until.AddTicks(-($until.Ticks % 10000))
+$untilIso = $until.ToString('o')
+$epoch = [datetime]::SpecifyKind([datetime]'1970-01-01T00:00:00', [System.DateTimeKind]::Utc)
+$bucketTicks = [long]{bucket_seconds} * [long]10000000
+$elapsedTicks = $until.Ticks - $epoch.Ticks
+$currentBucketTicks = $elapsedTicks - ($elapsedTicks % $bucketTicks)
+$startIso = $epoch.AddTicks($currentBucketTicks - ([long]({count} - 1) * $bucketTicks)).ToString('o')
+$xml = @"
+<QueryList><Query Id='0' Path='System'><Select Path='System'>*[System[Provider[@Name='Microsoft-Windows-WHEA-Logger'] and TimeCreated[@SystemTime&gt;='$startIso' and @SystemTime&lt;'$untilIso']]]</Select></Query></QueryList>
+"@
+$records = @(); $outcome = 'failed'; $errorText = $null; $truncated = $null
+try {
+    $found = @(Get-WinEvent -FilterXml ([xml]$xml) -MaxEvents {extra} -ErrorAction Stop)
+    $truncated = $found.Count -gt {cap}
+    $records = @($found | Select-Object -First {cap} | Select-Object RecordId, Id, ProviderName, LogName, LevelDisplayName,
+        @{Name='TimeCreated'; Expression={ $_.TimeCreated.ToUniversalTime().ToString('o') }}, Message)
+    $outcome = if ($records.Count) { 'ok' } else { 'empty' }
+} catch {
+    if ($_.FullyQualifiedErrorId -like 'NoMatchingEventsFound*') { $outcome = 'empty'; $truncated = $false }
+    else {
+        $outcome = if ($_.CategoryInfo.Category -eq [System.Management.Automation.ErrorCategory]::PermissionDenied -or $_.Exception -is [System.UnauthorizedAccessException]) { 'denied' } else { 'failed' }
+        $errorText = $_.Exception.Message
+    }
+}
+$meta = Read-LogMetadata 'System'
+[pscustomobject]@{
+    window_start = $startIso; window_end = $untilIso
+    source = [pscustomobject]@{
+        log = 'System'; outcome = $outcome; error = $errorText
+        returned = $records.Count; limit = {cap}; truncated = $truncated; records = $records
+        log_enabled = $meta.log_enabled; log_mode = $meta.log_mode; log_state = $meta.log_state; log_error = $meta.log_error
+        log_oldest = $meta.log_oldest; oldest_state = $meta.oldest_state; oldest_error = $meta.oldest_error
+    }
+}
+"""
+
+
 def storms_script(window: Window) -> str:
-    """The records from the window's start; the buckets need the time and the message, not the payload."""
-    return query_xml(_stamp(window.start)) + winevent(
-        f"""Get-WinEvent -FilterXml $xml -MaxEvents {RECORD_CAP} -ErrorAction Stop |
-    Select-Object RecordId, Id, LevelDisplayName,
-        @{{Name='TimeCreated'; Expression={{ $_.TimeCreated.ToUniversalTime().ToString('o') }}}},
-        Message"""
-    )
+    """Ask the Windows clock for both the query bounds and the bucket alignment."""
+    return (LOG_METADATA_SCRIPT + STORMS_SCRIPT_TEMPLATE.replace("{bucket_seconds}", str(window.bucket_seconds))
+            .replace("{count}", str(window.count)).replace("{cap}", str(RECORD_CAP)).replace("{extra}", str(RECORD_CAP + 1)))
 
 
 def take_storms(bridge: Bridge, params: dict[str, Any]) -> Reading:
@@ -263,34 +304,111 @@ def take_storms(bridge: Bridge, params: dict[str, Any]) -> Reading:
         raise ValueError("parameter 'burst_threshold': must be at least one record")
     if params["accel_threshold"] is None or params["accel_threshold"] <= 0:
         raise ValueError("parameter 'accel_threshold': must be greater than zero")
-    window = window_for(params["hours"], params["bucket_seconds"])
-    script = storms_script(window)
+    # This validates the requested shape; the Windows collector supplies the actual clock.
+    requested = window_for(params["hours"], params["bucket_seconds"], now=0)
+    script = storms_script(requested)
     result = bridge.run(script)
 
-    reading = Reading(
-        reading="storms",
-        params=params,
-        outcome=result.outcome,
-        method={"kind": "powershell", "query": script},
-        took_ms=result.took_ms,
-        warnings=list(result.warnings),
-    )
-    if not reading.observed:
-        reading.error = {"kind": result.outcome, "detail": result.error or ""}
-        return reading
+    collection: dict[str, Any] = {}
+    reach: dict[str, Any] = {}
+    records: list[dict[str, Any]] = []
 
-    records = result.items if result.outcome == "ok" else []
-    if len(records) >= RECORD_CAP:
-        reading.warnings.append(f"the window holds at least {RECORD_CAP} records; the buckets cover only the most recent {RECORD_CAP}")
-    reading.count = len(records)
-    reading.sections = compose(records, window, params)
+    def build(payload: dict[str, Any]) -> list[Section]:
+        start_text, end_text = payload.get("window_start"), payload.get("window_end")
+        host_window = _host_window(start_text, end_text, requested)
+        source, returned = _storm_source(
+            payload.get("source") if host_window else None, start_text, end_text,
+            problem="the collector's window bounds did not match the requested bucket shape" if host_window is None else "the storm source result or record projection failed validation",
+        )
+        collection.update(window_start=start_text, window_end=end_text, system=source)
+        records.extend(returned)
+        reach.update(system=log_coverage(source, returned, start_text, end_text))
+        sections = compose(returned, host_window, params, reach["system"]) if host_window and source["outcome"] in ("ok", "empty") else []
+        return [
+            *sections,
+            Section("collection", "raw", collection),
+            Section("coverage", "derived", reach, basis=COVERAGE_BASIS),
+        ]
+
+    reading = from_object("storms", params, script, result, build)
+    if not reading.observed:
+        return reading
+    source = collection["system"]
+    if source["outcome"] not in ("ok", "empty"):
+        reading.outcome = source["outcome"]
+        reading.count = None
+        reading.error = {"kind": reading.outcome, "detail": source["error"] or "The System event query did not answer."}
+    else:
+        reading.outcome = source["outcome"]
+        reading.count = len(records)
+        if source["truncated"]:
+            reading.warnings.append(f"the System query reached its {RECORD_CAP}-record limit; older matching records were not returned")
+        if reach["system"]["complete"] is False:
+            reading.warnings.append(
+                "System log coverage could not be established" if reach["system"]["covered_from"] is None
+                else "System log retention or the record limit does not cover the whole requested storm window"
+            )
     reading.took_ms = _ms(started)
     return reading
 
 
-def compose(records: list[dict[str, Any]], window: Window, params: dict[str, Any]) -> list[Section]:
-    """The three sections: what was counted, what it was, and what the rule makes of it."""
-    totals = [0] * window.count
+STORM_ROW_KEYS = {"RecordId", "Id", "ProviderName", "LogName", "LevelDisplayName", "TimeCreated", "Message"}
+
+
+def _host_window(start: Any, end: Any, requested: Window) -> Window | None:
+    """Validate the host's exact window before any returned row is counted."""
+    end_key = stamp_key(end)
+    if end_key is None:
+        return None
+    current = int(end_key[0].timestamp() // requested.bucket_seconds) * requested.bucket_seconds
+    aligned = Window(current - (requested.count - 1) * requested.bucket_seconds, requested.bucket_seconds, requested.count)
+    if stamp_key(start) != stamp_key(_stamp(aligned.start)) or stamp_key(start) > end_key:
+        return None
+    return aligned
+
+
+def _storm_source(value: Any, start: Any, end: Any, *, problem: str = "the storm source result or record projection failed validation") -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    fallback = {**log_metadata({}), "log": LOG, "outcome": "failed", "returned": 0, "limit": RECORD_CAP, "truncated": None, "error": problem}
+    first, until = stamp_key(start), stamp_key(end)
+    if not isinstance(value, dict) or first is None or until is None or first > until:
+        return fallback, []
+    outcome = value.get("outcome")
+    if outcome in ("failed", "denied"):
+        return {**log_metadata(value), "log": LOG, "outcome": outcome, "returned": 0, "limit": RECORD_CAP, "truncated": None, "error": value.get("error") or "the source did not answer"}, []
+    rows = value.get("records")
+    if outcome not in ("ok", "empty") or not isinstance(rows, list):
+        return fallback, []
+    valid = (
+        value.get("log") == LOG
+        and type(value.get("returned")) is int and value["returned"] == len(rows)
+        and type(value.get("limit")) is int and value["limit"] == RECORD_CAP
+        and type(value.get("truncated")) is bool and len(rows) <= RECORD_CAP
+        and (not value["truncated"] or len(rows) == RECORD_CAP)
+        and (outcome == "empty") == (len(rows) == 0)
+        and all(_valid_storm_row(row, first, until) for row in rows)
+    )
+    if not valid:
+        return fallback, []
+    return {**log_metadata(value), "outcome": outcome, "returned": len(rows), "limit": RECORD_CAP, "truncated": value["truncated"], "error": None}, rows
+
+
+def _valid_storm_row(row: Any, first: tuple[datetime, int], until: tuple[datetime, int]) -> bool:
+    if not isinstance(row, dict) or not set(row) <= STORM_ROW_KEYS:
+        return False
+    at = stamp_key(row.get("TimeCreated"))
+    return (
+        row.get("LogName") == LOG and row.get("ProviderName") == PROVIDER
+        and type(row.get("RecordId")) is int and row["RecordId"] > 0
+        and type(row.get("Id")) is int
+        and (row.get("LevelDisplayName") is None or isinstance(row["LevelDisplayName"], str))
+        and (row.get("Message") is None or isinstance(row["Message"], str))
+        and at is not None and first <= at < until
+    )
+
+
+def compose(records: list[dict[str, Any]], window: Window, params: dict[str, Any], reach: dict[str, Any]) -> list[Section]:
+    """Returned events remain visible; a bucket is zero only when retention covers all of it."""
+    returned_totals = [0] * window.count
     per_bucket: list[dict[str, int]] = [{} for _ in range(window.count)]
     signatures: dict[str, _Signature] = {}
     unplaced = 0
@@ -302,24 +420,30 @@ def compose(records: list[dict[str, Any]], window: Window, params: dict[str, Any
             unplaced += 1
             continue
         sig = _accumulate(signatures, record)
-        totals[idx] += 1
+        returned_totals[idx] += 1
         per_bucket[idx][sig.id] = per_bucket[idx].get(sig.id, 0) + 1
 
-    # Every bucket is counted, but a day of idle minutes does not need a day of objects:
-    # ``totals`` is the shape of the window, one count per bucket, oldest first; ``active``
-    # names the buckets that hold records and what was in them.
+    cutoff = stamp_key(reach.get("covered_from"))
+    inclusive = reach.get("covered_from_inclusive") is True
+    totals: list[int | None] = []
+    for index, count in enumerate(returned_totals):
+        start = stamp_key(_stamp(window.start + index * window.bucket_seconds))
+        covered = cutoff is not None and start is not None and (start > cutoff or inclusive and start == cutoff)
+        totals.append(count if covered else None)
+
     buckets = {
         "from": _stamp(window.start),
         "to": _stamp(window.end),
         "bucket_seconds": window.bucket_seconds,
         "bucket_count": window.count,
-        "total": sum(totals),
+        "total": sum(returned_totals),
         "unplaced": unplaced,
         "totals": totals,
+        "unknown_buckets": sum(value is None for value in totals),
         "active": [
-            {"index": i, "start": _stamp(window.start + i * window.bucket_seconds), "total": totals[i], "signatures": per_bucket[i]}
+            {"index": i, "start": _stamp(window.start + i * window.bucket_seconds), "total": returned_totals[i], "complete": totals[i] is not None, "signatures": per_bucket[i]}
             for i in range(window.count)
-            if totals[i]
+            if returned_totals[i]
         ],
     }
     ranked = sorted(signatures.values(), key=lambda s: (s.count, s.last_seen), reverse=True)
@@ -329,24 +453,25 @@ def compose(records: list[dict[str, Any]], window: Window, params: dict[str, Any
             "derived",
             buckets,
             basis=(
-                f"the WHEA-Logger records in the window counted into wall-clock buckets of {window.bucket_seconds} seconds, idle buckets included: "
-                "'totals' holds one count per bucket from 'from' onwards, 'active' the buckets that hold records, "
-                "'unplaced' the records whose timestamp could not be read"
+                f"returned WHEA-Logger records counted into wall-clock buckets of {window.bucket_seconds} seconds: "
+                "'totals' has null where retained history or the record cap cannot establish a whole bucket, "
+                "zero only for an observed quiet bucket, and a count otherwise. 'active' keeps returned "
+                "records even in an incomplete bucket; the current bucket is observed only through collection.window_end"
             ),
         ),
         Section(
             "signatures",
             "derived",
             [s.to_dict() for s in ranked],
-            basis="SHA-256 over the error type, bank, APIC id, MCI status, PCI vendor and device ids and the normalized message text; the first characters of the digest identify the signature",
+            basis="Counts and first/last times describe returned records only. SHA-256 over the error type, bank, APIC id, MCI status, PCI vendor and device ids and the normalized message text; the first characters of the digest identify the signature",
         ),
-        Section("status", "inferred", status(totals, per_bucket, params, unplaced), basis=_status_basis(params)),
+        Section("status", "inferred", status(totals, returned_totals, per_bucket, params, unplaced, reach=reach), basis=_status_basis(params)),
     ]
     return sections
 
 
-def status(totals: list[int], per_bucket: list[dict[str, int]], params: dict[str, Any], unplaced: int = 0) -> dict[str, Any]:
-    """The old detector's rules, over wall-clock buckets: a burst first, then an acceleration, else quiet."""
+def status(totals: list[int | None], returned_totals: list[int], per_bucket: list[dict[str, int]], params: dict[str, Any], unplaced: int = 0, *, reach: dict[str, Any]) -> dict[str, Any]:
+    """A returned burst is evidence; acceleration and quiet require their whole source window."""
     burst_threshold = params["burst_threshold"]
     accel_threshold = params["accel_threshold"]
 
@@ -354,23 +479,37 @@ def status(totals: list[int], per_bucket: list[dict[str, int]], params: dict[str
     recent_from = max(0, len(totals) - RECENT_BUCKETS)
     baseline = totals[max(0, recent_from - BASELINE_BUCKETS) : recent_from]
 
-    peak = max(recent) if recent else 0
-    recent_rate = _mean(recent)
-    baseline_rate = _mean(baseline)
-    acceleration = round(recent_rate / max(baseline_rate, BASELINE_FLOOR), 3)
+    recent_known = bool(recent) and all(value is not None for value in recent)
+    baseline_known = bool(baseline) and all(value is not None for value in baseline)
+    whole_window = all(value is not None for value in totals) and not unplaced
+    observed_peak = max(returned_totals[-RECENT_BUCKETS:], default=0)
+    peak = max(recent) if recent_known else None
+    recent_rate = _mean([value for value in recent if value is not None]) if recent_known else None
+    baseline_rate = _mean([value for value in baseline if value is not None]) if baseline_known else None
+    acceleration = round(recent_rate / max(baseline_rate, BASELINE_FLOOR), 3) if recent_rate is not None and baseline_rate is not None else None
     dominant = _dominant(per_bucket[recent_from:])
 
-    if peak >= burst_threshold:
-        state, severity = "burst", ("critical" if peak > burst_threshold * 2 else "warning")
-        reason = f"{peak} records in one bucket of the recent window; the burst threshold is {burst_threshold}"
-    elif acceleration >= accel_threshold and recent_rate > RECENT_FLOOR:
+    if observed_peak >= burst_threshold:
+        state, severity = "burst", ("critical" if observed_peak > burst_threshold * 2 else "warning")
+        reason = f"at least {observed_peak} returned records in one recent bucket; the burst threshold is {burst_threshold}" if not recent_known else f"{observed_peak} records in one bucket of the recent window; the burst threshold is {burst_threshold}"
+    elif acceleration is not None and acceleration >= accel_threshold and recent_rate is not None and recent_rate > RECENT_FLOOR:
         state, severity = "accelerating", "warning"
         reason = f"the recent rate is {acceleration}x the baseline ({recent_rate} against {baseline_rate} per bucket); the acceleration threshold is {accel_threshold}"
+    elif not whole_window or not baseline_known:
+        state, severity = "unknown", None
+        if unplaced:
+            reason = "Some returned records could not be placed in time buckets."
+        elif reach.get("covered_from") is None:
+            reason = "Log coverage could not be established for the requested window."
+        elif not whole_window:
+            reason = "The requested window is not fully covered by retained log history and returned records."
+        else:
+            reason = "There are too few buckets to establish a baseline."
     else:
         state, severity = "quiet", None
         reason = (
             "the window holds no WHEA-Logger records"
-            if sum(totals) == 0 and not unplaced
+            if sum(value for value in totals if value is not None) == 0
             else f"no bucket reached the burst threshold of {burst_threshold} and the recent rate is not {accel_threshold}x the baseline"
         )
 
@@ -378,21 +517,25 @@ def status(totals: list[int], per_bucket: list[dict[str, int]], params: dict[str
         "state": state,
         "severity": severity,
         "reason": reason,
-        "peak_rate": float(peak),
+        "peak_rate": float(peak) if peak is not None else None,
+        "observed_peak": observed_peak,
         "recent_rate": recent_rate,
         "baseline_rate": baseline_rate,
         "acceleration": acceleration,
         "dominant": dominant,
         "recent_buckets": len(recent),
         "baseline_buckets": len(baseline),
+        "recent_observed": sum(value is not None for value in recent),
+        "baseline_observed": sum(value is not None for value in baseline),
     }
 
 
 def _status_basis(params: dict[str, Any]) -> str:
     return (
-        f"the last {RECENT_BUCKETS} buckets against the {BASELINE_BUCKETS} before them, averaged over every wall-clock bucket including idle ones: "
-        f"burst when one recent bucket reaches {params['burst_threshold']} records (critical above twice that), otherwise accelerating when the recent "
-        f"rate is at least {params['accel_threshold']}x the baseline and above the noise floor. A lead to investigate, not a diagnosis."
+        f"the last {RECENT_BUCKETS} buckets against the {BASELINE_BUCKETS} before them, averaged over covered wall-clock buckets including observed idle ones: "
+        f"a burst is reportable when at least {params['burst_threshold']} returned records share a recent bucket (critical above twice that); "
+        f"acceleration needs the whole recent and baseline windows, a ratio of at least {params['accel_threshold']} and the noise floor. "
+        "Quiet requires coverage of the whole requested window; a gap yields unknown. The current bucket is only observed through the query time. A lead, not a diagnosis."
     )
 
 
@@ -591,7 +734,7 @@ register(
     Spec(
         name="storms",
         description="WHEA-Logger records over a window in wall-clock buckets, grouped by signature, with the burst and acceleration rules applied. Computed from the log on each take; nothing is stored between takes.",
-        classes=("derived", "inferred"),
+        classes=("raw", "derived", "inferred"),
         take=take_storms,
         params=(
             Param("hours", "int", 24, "How far back the window reaches."),

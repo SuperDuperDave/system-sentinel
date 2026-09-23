@@ -17,7 +17,10 @@ async function signIn(page) {
 }
 
 async function openView(page, name) {
-  await page.click(`nav button:has-text("${name}")`);
+  const nav = page.locator('nav[aria-label="Views"]:visible').first();
+  const choice = nav.locator('button', { hasText: name }).first();
+  if (!(await choice.isVisible())) await nav.locator('summary').click();
+  await choice.click();
   await page.waitForTimeout(300);
   await waitSettled(page);
 }
@@ -49,7 +52,7 @@ async function openKernelPower41(page) {
     await signIn(page);
     await page.fill('#token', token);
     await page.click('button[type=submit]');
-    await page.waitForSelector('h1', { timeout: 20000 });
+    await page.waitForSelector('nav[aria-label="Views"]:visible', { timeout: 20000 });
 
     await openView(page, 'Hardware errors');
     // The whea reading decodes every record in the capped set through a real subprocess per
@@ -107,7 +110,7 @@ async function openKernelPower41(page) {
 
     await page.fill('#token', token);
     await page.click('button[type=submit]');
-    await page.waitForSelector('h1', { timeout: 20000 });
+    await page.waitForSelector('nav[aria-label="Views"]:visible', { timeout: 20000 });
 
     await openView(page, 'Hardware errors');
     await waitSettled(page, 90000);

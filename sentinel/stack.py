@@ -371,8 +371,9 @@ def _item_lines(position: int, item: dict[str, Any]) -> list[str]:
     if envelope.get("outcome") not in ("ok", "empty"):
         detail = (envelope.get("error") or {}).get("detail") or ""
         lines += [f"The machine was not observed{': ' + detail if detail else ''}.", ""]
-        if envelope.get("reading") == "changes":
-            lines += _json_block([section for section in envelope.get("sections") or [] if isinstance(section, dict) and section.get("name") in ("collection", "coverage")])
+        source_context = [section for section in envelope.get("sections") or [] if isinstance(section, dict) and section.get("name") in ("collection", "coverage")]
+        if source_context:
+            lines += _json_block(source_context)
         return lines
     if envelope.get("reading") == "changes" and (item.get("verbosity") == "summary" or item.get("ids") is not None):
         lines += _json_block(_change_handoff_sections(envelope, records if item.get("ids") is not None else None, item.get("verbosity") == "summary"))
