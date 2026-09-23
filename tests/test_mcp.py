@@ -141,6 +141,24 @@ def test_a_reason_is_asked_for_only_where_it_could_be_needed():
     assert "unredacted" not in listed["capture_list"].input_schema["properties"]
 
 
+def test_count_ranges_are_visible_to_mcp_clients():
+    listed = {tool.name: tool for tool in tools()}
+    for name in ("events", "record", "whea", "faults", "drivers"):
+        count = listed[name].input_schema["properties"]["count"]
+        assert count["minimum"] == 1
+    assert listed["events"].input_schema["properties"]["count"]["maximum"] == 2000
+    assert listed["faults"].input_schema["properties"]["count"]["maximum"] == 500
+
+
+def test_mcp_rejects_out_of_range_count_before_querying(surface: Surface):
+    bridge = surface.state.bridge
+    bridge.scripts.clear()
+    for value in (0, -1, 2001, True):
+        answer = call(surface, "events", count=value)
+        assert answer.is_error is True and "count" in answer.content[0].text
+    assert bridge.scripts == []
+
+
 def test_two_things_cannot_claim_one_tool_name():
     """``tool_name`` turns a dot into an underscore, so the catalog could grow a second claim on one
     tool name and one reading would quietly answer for the other. The guard runs at import."""

@@ -17,6 +17,7 @@ import json
 import re
 import threading
 import uuid
+from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -33,6 +34,8 @@ VERBOSITIES = ("summary", "full")
 RANKS = (1, 2, 3, 4, 5)
 SUMMARY_MESSAGE = 80
 """How much of a record's message a summary table carries."""
+SUMMARY_LOG_LIMIT = 100
+SUMMARY_LOG_EDGE = 5
 
 
 class Duplicate(Exception):
@@ -289,7 +292,9 @@ async def new_item(stack: Stack, bridge: Bridge, body: dict[str, Any], *, reader
         if kind == "selection":
             ids = _selection_ids(envelope, body.get("ids") or [])
 
-    verbosity = requested_verbosity or ("summary" if kind == "reading" and envelope and envelope.get("reading") == "storms" else "full")
+    large_log = bool(kind == "reading" and envelope and envelope.get("reading") in ("events", "record", "whea", "faults") and len(_records(envelope) or []) > SUMMARY_LOG_LIMIT)
+    is_storm = bool(kind == "reading" and envelope and envelope.get("reading") == "storms")
+    verbosity = requested_verbosity or ("summary" if is_storm or large_log else "full")
 
     return Item(
         id=uuid.uuid4().hex,
@@ -363,6 +368,10 @@ def _item_lines(position: int, item: dict[str, Any]) -> list[str]:
     lines.append(f"- outcome: {_outcome_text(envelope)}")
     if isinstance(envelope.get("count"), int):
         lines.append(f"- reading count: {envelope['count']}")
+    if item.get("verbosity") == "summary" and envelope.get("reading") in ("events", "record", "whea", "faults"):
+        cutoff = next((section.get("data") for section in sections if section.get("name") == "collection"), None)
+        if isinstance(cutoff, dict) and all(key in cutoff for key in ("limit", "returned", "truncated")):
+            lines.append(f"- record cutoff: limit={cutoff['limit']}, returned={cutoff['returned']}, truncated={str(cutoff['truncated']).lower()}")
     method = envelope.get("method") if isinstance(envelope.get("method"), dict) else {}
     lines.append(f"- method: {method.get('kind', 'unknown')}")
     warnings = envelope.get("warnings")
@@ -412,7 +421,7 @@ def _item_lines(position: int, item: dict[str, Any]) -> list[str]:
             selected_signals["data"] = [{k: s.get(k) for k in ("id", "class", "title", "summary", "readings")} for s in selected_signals["data"]]
         lines += _json_block(selected_signals)
     elif item.get("verbosity") == "summary" and records is not None:
-        lines += _table(records)
+        lines += _log_summary(records)
     elif item.get("verbosity") == "summary" and envelope.get("reading") == "dump_header":
         # The exact bytes remain on the stored reading and in the API. A handoff starts with
         # the meaning and the file identity; an agent can expand the item to full when needed.
@@ -670,6 +679,19 @@ def _table(records: list[dict[str, Any]]) -> list[str]:
         cells = [record.get("TimeCreated", ""), record.get("LevelDisplayName", ""), record.get("ProviderName", ""), record.get("Id", ""), clipped]
         lines.append("| " + " | ".join(str(c).replace("|", "\\|") for c in cells) + " |")
     return lines
+
+
+def _log_summary(records: list[dict[str, Any]]) -> list[str]:
+    if len(records) <= SUMMARY_LOG_LIMIT:
+        return _table(records)
+    sources = Counter(str(record.get("ProviderName") or "unknown") for record in records)
+    leading = ", ".join(f"{name} ({count})" for name, count in sources.most_common(5))
+    return [
+        f"Showing the first and last {SUMMARY_LOG_EDGE} of {len(records)} returned records. Set this Stack item to full for every stored row.",
+        f"Leading sources: {leading}.",
+        "",
+        *_table([*records[:SUMMARY_LOG_EDGE], *records[-SUMMARY_LOG_EDGE:]]),
+    ]
 
 
 def _json_block(data: Any) -> list[str]:

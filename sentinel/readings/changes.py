@@ -320,8 +320,8 @@ register(
         take=take_changes,
         params=(
             Param("before", "str", "", "ISO timestamp; events strictly before it, or now when empty."),
-            Param("hours", "int", 168, "Hours before the moment, 1 to 2160."),
-            Param("count", "int", 100, "Most recent records per source, 1 to 500; collection reports truncation."),
+            Param("hours", "int", 168, "Hours before the moment, 1 to 2160.", minimum=1, maximum=MAX_HOURS),
+            Param("count", "int", 100, "Most recent records per source, 1 to 500; collection reports truncation.", minimum=1, maximum=MAX_COUNT),
         ),
         private=("user names or profile paths within update titles and MSI product names",),
         heavy=True,

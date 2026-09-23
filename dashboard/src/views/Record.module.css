@@ -191,5 +191,5 @@
   border-bottom: 1px solid var(--rule);
 }
 .more:hover { border-color: var(--muted); }
-.more:disabled { color: var(--muted); border-color: var(--rule-soft); cursor: default; }
+.more[aria-disabled='true'] { color: var(--muted); border-color: var(--rule-soft); cursor: default; }
 .logStart { margin: 8px 0 2px; color: var(--muted); }

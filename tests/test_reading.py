@@ -137,6 +137,34 @@ def test_spec_coerces_defaults_types_and_choices():
         spec.coerce({"log": "Security"})
     with pytest.raises(ValueError):
         spec.coerce({"count": "many"})
+    assert spec.coerce({"count": None})["count"] == 50
+
+
+def test_numeric_bounds_are_shared_by_the_catalog_and_all_callers():
+    for spec in REGISTRY.values():
+        for param in spec.params:
+            if param.minimum is not None:
+                assert param.default >= param.minimum, (spec.name, param.name)
+            if param.maximum is not None:
+                assert param.default <= param.maximum, (spec.name, param.name)
+    for name in ("events", "record", "whea", "faults", "crash", "drivers"):
+        spec = REGISTRY[name]
+        count = next(p for p in spec.params if p.name == "count")
+        published = next(p for p in spec.to_dict()["params"] if p["name"] == "count")
+        assert published["minimum"] == 1
+        if count.maximum is not None:
+            assert published["maximum"] == count.maximum
+            with pytest.raises(ValueError, match="count"):
+                spec.coerce({"count": count.maximum + 1, **({"before": "2026-09-20T18:04:11Z"} if name == "record" else {})})
+        for bad in (0, -1, True, 1.5):
+            with pytest.raises(ValueError, match="count"):
+                spec.coerce({"count": bad, **({"before": "2026-09-20T18:04:11Z"} if name == "record" else {})})
+    with pytest.raises(ValueError, match="finite"):
+        Spec("synthetic", "", ("raw",), lambda b, p: None, (Param("rate", "float", 1.0, "", minimum=0),)).coerce({"rate": float("nan")})
+
+    for name, param_name, maximum in (("changes", "hours", 2160), ("changes", "count", 500), ("reliability", "days", 366), ("performance_history", "hours", 48), ("storms", "hours", 43800)):
+        param = next(p for p in REGISTRY[name].to_dict()["params"] if p["name"] == param_name)
+        assert param["minimum"] == 1 and param["maximum"] == maximum
 
 
 def test_required_param_is_refused_when_missing():
@@ -165,7 +193,7 @@ def test_register_twice_is_an_error():
 def test_events_script_asks_the_log_index_for_the_levels():
     s = events_script("Application", [1, 2, 3], 7)
     assert "<Select Path='Application'>*[System[(Level=1 or Level=2 or Level=3)]]</Select>" in s
-    assert "-FilterXml $xml" in s and "-MaxEvents 7" in s and "-ErrorAction Stop" in s
+    assert "-FilterXml $xml" in s and "-MaxEvents 8" in s and "-ErrorAction Stop" in s
     assert "FilterHashtable" not in s  # StartTime there does not honour a timestamp's Kind
 
 
@@ -209,7 +237,7 @@ def test_record_stamp_is_utc_milliseconds():
 
 def test_record_script_filters_before_the_moment():
     s = record_script("System", "2026-09-20T18:04:11Z", 20)
-    assert "@SystemTime&lt;'2026-09-20T18:04:11.000Z'" in s and "-MaxEvents 20" in s
+    assert "@SystemTime&lt;'2026-09-20T18:04:11.000Z'" in s and "-MaxEvents 21" in s
 
 
 def test_take_events_through_a_fake_bridge():
@@ -217,7 +245,26 @@ def test_take_events_through_a_fake_bridge():
     r = asyncio.run(take("events", bridge, {"count": "3"}))
     assert r.outcome == "ok" and r.count == 1
     assert r.params == {"log": "System", "levels": [1, 2], "count": 3, "since": ""}
-    assert "-MaxEvents 3" in bridge.scripts[0]
+    assert "-MaxEvents 4" in bridge.scripts[0]
+
+
+def test_a_time_window_reports_an_exact_record_cutoff_and_retains_only_the_requested_rows():
+    rows = [{"Id": number} for number in (4, 3, 2, 1)]  # Windows returns newest first
+    bridge = FakeBridge(BridgeResult("ok", items=rows))
+    reading = asyncio.run(take("events", bridge, {"count": 3, "since": "boot"}))
+    assert [row["Id"] for row in reading.section("records").data] == [4, 3, 2]
+    assert reading.count == 3 and reading.section("collection").data == {"limit": 3, "returned": 3, "truncated": True}
+    assert any("older matching records" in warning for warning in reading.warnings)
+
+    exactly = asyncio.run(take("events", FakeBridge(BridgeResult("ok", items=rows[:3])), {"count": 3, "since": "boot"}))
+    assert exactly.section("collection").data["truncated"] is False and exactly.warnings == []
+    recent = asyncio.run(take("events", bridge, {"count": 3}))
+    assert recent.section("collection").data["truncated"] is True and recent.warnings == []
+
+    empty = asyncio.run(take("events", FakeBridge(BridgeResult("empty")), {"count": 3, "since": "boot"}))
+    assert empty.outcome == "empty" and empty.section("collection").data == {"limit": 3, "returned": 0, "truncated": False}
+    failed = asyncio.run(take("events", FakeBridge(BridgeResult("timeout")), {"count": 3, "since": "boot"}))
+    assert failed.count is None and failed.sections == []
 
 
 def test_take_record_reverses_to_oldest_first_and_rejects_bad_timestamps():
@@ -226,6 +273,10 @@ def test_take_record_reverses_to_oldest_first_and_rejects_bad_timestamps():
     assert [x["Id"] for x in r.section("records").data] == [1, 2, 3]
     with pytest.raises(ValueError):
         asyncio.run(take("record", bridge, {"before": "yesterday"}))
+
+    capped = asyncio.run(take("record", bridge, {"before": "2026-09-20T18:04:11Z", "count": 2}))
+    assert [row["Id"] for row in capped.section("records").data] == [2, 3]
+    assert capped.section("collection").data == {"limit": 2, "returned": 2, "truncated": True}
 
 
 def test_unknown_reading_is_a_key_error():

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import math
 import textwrap
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -83,6 +84,8 @@ class Param:
     default: Any
     description: str
     choices: tuple[Any, ...] | None = None
+    minimum: int | float | None = None
+    maximum: int | float | None = None
 
 
 Taker = Callable[..., "Reading | Awaitable[Reading]"]
@@ -109,7 +112,12 @@ class Spec:
             "description": self.description,
             "classes": list(self.classes),
             "params": [
-                {"name": p.name, "type": p.type, "default": p.default, "description": p.description, **({"choices": list(p.choices)} if p.choices else {})}
+                {
+                    "name": p.name, "type": p.type, "default": p.default, "description": p.description,
+                    **({"choices": list(p.choices)} if p.choices else {}),
+                    **({"minimum": p.minimum} if p.minimum is not None else {}),
+                    **({"maximum": p.maximum} if p.maximum is not None else {}),
+                }
                 for p in self.params
             ],
             "private": list(self.private),
@@ -128,22 +136,31 @@ class Spec:
             if value is None:
                 if p.default is None:
                     raise ValueError(f"parameter {p.name!r} is required")
-                out[p.name] = None
-                continue
+                value = p.default
             try:
                 out[p.name] = _coerce(p, value)
-            except (TypeError, ValueError) as exc:
+            except (TypeError, ValueError, OverflowError) as exc:
                 raise ValueError(f"parameter {p.name!r}: {exc}") from exc
             if p.choices is not None and out[p.name] not in p.choices:
                 raise ValueError(f"parameter {p.name!r} must be one of {list(p.choices)}")
+            if p.type in ("int", "float"):
+                if p.minimum is not None and out[p.name] < p.minimum:
+                    raise ValueError(f"parameter {p.name!r}: must be at least {p.minimum}")
+                if p.maximum is not None and out[p.name] > p.maximum:
+                    raise ValueError(f"parameter {p.name!r}: must be at most {p.maximum}")
         return out
 
 
 def _coerce(p: Param, value: Any) -> Any:
     if p.type == "int":
+        if isinstance(value, bool) or isinstance(value, float) and not value.is_integer():
+            raise ValueError("must be an integer")
         return int(value)
     if p.type == "float":
-        return float(value)
+        number = float(value)
+        if not math.isfinite(number):
+            raise ValueError("must be finite")
+        return number
     if p.type == "bool":
         if isinstance(value, str):
             return value.lower() in ("1", "true", "yes", "on")

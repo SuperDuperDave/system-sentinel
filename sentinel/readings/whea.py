@@ -38,10 +38,11 @@ from ..reading import Param, Reading, Section, Spec, from_bridge, from_object, r
 from .event_coverage import COVERAGE_BASIS, LOG_METADATA_SCRIPT, stamp_key
 from .event_coverage import coverage as log_coverage
 from .event_coverage import metadata as log_metadata
-from .events import record_projection, winevent
+from .events import bounded_log_records, record_projection, winevent
 from .health import DECODER
 
 PROVIDER = "Microsoft-Windows-WHEA-Logger"
+MAX_WHEA_RECORDS = 500
 LOG = "System"
 
 # The decoder takes the record on the command line, which Windows caps near 32,000 characters.
@@ -89,7 +90,7 @@ def query_xml(since: str | None = None) -> str:
 def whea_script(count: int) -> str:
     """The records in the shared record shape, plus the CPER payload: the first binary property."""
     return query_xml() + winevent(
-        f"""Get-WinEvent -FilterXml $xml -MaxEvents {int(count)} -ErrorAction Stop |
+        f"""Get-WinEvent -FilterXml $xml -MaxEvents {int(count) + 1} -ErrorAction Stop |
     {record_projection(RAW_DATA)}"""
     )
 
@@ -101,10 +102,12 @@ RAW_DATA = "RawData = $( $b = $_.Properties | Where-Object { $_.Value -is [byte[
 def take_whea(bridge: Bridge, params: dict[str, Any]) -> Reading:
     started = time.perf_counter()
     script = whea_script(params["count"])
-    reading = from_bridge("whea", params, script, bridge.run(script))
+    reading = bounded_log_records(from_bridge("whea", params, script, bridge.run(script)), params["count"])
     if not reading.observed:
         return reading
-    records = reading.section("records").data
+    record_section = reading.section("records")
+    assert record_section is not None
+    records = record_section.data
     decoded, warnings = decode_all(records)
     reading.sections.append(Section("decoded", "derived", decoded, basis=DECODED_BASIS))
     reading.warnings.extend(warnings)
@@ -777,7 +780,7 @@ register(
         description="WHEA-Logger records with their binary payload, each decoded beside it: what the firmware told Windows about a hardware error, and what the CPER record inside it says.",
         classes=("raw", "derived"),
         take=take_whea,
-        params=(Param("count", "int", 30, "How many of the most recent records."),),
+        params=(Param("count", "int", 30, "How many of the most recent records.", minimum=1, maximum=MAX_WHEA_RECORDS),),
         private=("MachineName", "user names inside Message", "serial and UUID fields inside the decoded structure"),
     )
 )
@@ -789,9 +792,9 @@ register(
         classes=("raw", "derived", "inferred"),
         take=take_storms,
         params=(
-            Param("hours", "int", 24, "How far back the window reaches."),
-            Param("bucket_seconds", "int", 60, "The width of one wall-clock bucket."),
-            Param("burst_threshold", "int", 5, "Records in one bucket that count as a burst; twice this is critical."),
+            Param("hours", "int", 24, "How far back the window reaches.", minimum=1, maximum=MAX_HOURS),
+            Param("bucket_seconds", "int", 60, "The width of one wall-clock bucket.", minimum=1),
+            Param("burst_threshold", "int", 5, "Records in one bucket that count as a burst; twice this is critical.", minimum=1),
             Param("accel_threshold", "float", 2.0, "How many times the baseline rate the recent rate must reach to count as accelerating."),
         ),
         private=("user names and profile paths inside the signature samples' message text",),

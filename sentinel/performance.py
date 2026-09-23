@@ -30,6 +30,7 @@ INTERVAL_SECONDS = 60
 MIN_INTERVAL = 60
 MAX_INTERVAL = 600
 KEEP_DAYS = 30
+MAX_HISTORY_HOURS = 48
 MAX_DAY_BYTES = 512_000
 TRIM_DAY_BYTES = 400_000
 
@@ -392,8 +393,8 @@ def history_shape(rows: list[dict[str, Any]], start: datetime, end: datetime) ->
 
 def take_history(_bridge: Bridge, params: dict[str, Any]) -> Reading:
     hours = params["hours"]
-    if not 1 <= hours <= 48:
-        raise ValueError("hours must be between 1 and 48")
+    if not 1 <= hours <= MAX_HISTORY_HOURS:
+        raise ValueError(f"hours must be between 1 and {MAX_HISTORY_HOURS}")
     end = _parse_time(params["end"]) if params["end"] else datetime.now(UTC)
     if end is None:
         raise ValueError("end must be an ISO time with a UTC offset")
@@ -421,4 +422,4 @@ def take_history(_bridge: Bridge, params: dict[str, Any]) -> Reading:
 
 
 register(Spec(name="load", description="One aggregate processor, memory and physical-disk performance snapshot from Windows; numeric fields only, with missing classes left null.", classes=("raw",), take=take_load, heavy=True))
-register(Spec(name="performance_history", description="Local numeric performance samples retained across stops; query a window ending now or at an ISO moment, with per-metric shape and collection status.", classes=("raw", "derived"), take=take_history, params=(Param("hours", "int", 24, "Hours to return, from 1 to 48"), Param("end", "str", "", "ISO time with offset to end the window; blank means now"))))
+register(Spec(name="performance_history", description="Local numeric performance samples retained across stops; query a window ending now or at an ISO moment, with per-metric shape and collection status.", classes=("raw", "derived"), take=take_history, params=(Param("hours", "int", 24, f"Hours to return, from 1 to {MAX_HISTORY_HOURS}", minimum=1, maximum=MAX_HISTORY_HOURS), Param("end", "str", "", "ISO time with offset to end the window; blank means now"))))

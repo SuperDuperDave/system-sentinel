@@ -82,7 +82,7 @@ def storms(records: list[dict[str, Any]], outcome: str = "ok", *, oldest: str | 
 def test_the_query_asks_the_provider_for_the_payload_and_treats_a_no_match_as_empty():
     script = whea.whea_script(12)
     assert "Microsoft-Windows-WHEA-Logger" in script and 'Path="System"' in script
-    assert "-MaxEvents 12" in script and "-ErrorAction Stop" in script
+    assert "-MaxEvents 13" in script and "-ErrorAction Stop" in script
     assert "RawData" in script and "byte[]" in script
     assert "NoMatchingEventsFound" in script
 
@@ -102,13 +102,27 @@ def test_each_record_carries_its_decoded_structure_or_the_reason_there_is_none(m
 
     reading = asyncio.run(take("whea", FakeBridge(BridgeResult("ok", items=records, took_ms=11)), {"count": 2}))
     assert reading.outcome == "ok" and reading.count == 2
-    records_section, decoded = reading.sections
+    records_section, collection, decoded = reading.sections
+    assert collection.name == "collection" and collection.data == {"limit": 2, "returned": 2, "truncated": False}
     assert (records_section.name, records_section.cls) == ("records", "raw")
     assert "RawData" in records_section.data[0]
     assert (decoded.name, decoded.cls, decoded.basis) == ("decoded", "derived", whea.DECODED_BASIS)
     assert decoded.data[0] == {"RecordId": records[0]["RecordId"], "decoded": {"SectionCount": 1, "ErrorSeverity": "Corrected"}}
     assert decoded.data[1]["RecordId"] == records[1]["RecordId"]
     assert decoded.data[1]["error"] == "Hexadecimal string is not a valid CPER record"
+
+
+def test_whea_cutoff_excludes_the_probe_record_from_decoding(monkeypatch):
+    records = load(groups={"burst"})[:3]
+    records[0]["RawData"] = minimal_cper()
+    records[1]["RawData"] = minimal_cper()
+    records[2]["RawData"] = minimal_cper()
+    calls = []
+    monkeypatch.setattr(whea, "_run_decoder", lambda payload, timeout: (calls.append(payload) or '{}', "", 0, None))
+    reading = asyncio.run(take("whea", FakeBridge(BridgeResult("ok", items=records)), {"count": 2}))
+    assert reading.count == 2 and [r["RecordId"] for r in reading.section("records").data] == [r["RecordId"] for r in records[:2]]
+    assert reading.section("collection").data == {"limit": 2, "returned": 2, "truncated": True}
+    assert len(reading.section("decoded").data) == 2 and len(calls) == 1  # repeated payload decoded once
 
 
 def test_identical_cper_payloads_are_decoded_once_and_keep_their_own_record_ids(monkeypatch):

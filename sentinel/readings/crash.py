@@ -30,7 +30,7 @@ from typing import Any
 from ..bridge import Bridge
 from ..reading import Param, Reading, Section, Spec, from_bridge, from_object, register
 from .dumps import DUMPS_SCRIPT, inventory, missing_file
-from .events import _utc_stamp, record_projection, since_clause, winevent
+from .events import _utc_stamp, bounded_log_records, record_projection, since_clause, winevent
 from .fault_process import APPLICATION_ERROR, APPLICATION_ERROR_1000, APPLICATION_HANG, APPLICATION_HANG_1002, process_identity
 
 # The providers, spelled once. The same event id means different things under different providers:
@@ -636,7 +636,7 @@ def faults_script(count: int, since: str) -> str:
 "@
 """
         + winevent(
-            f"""Get-WinEvent -FilterXml ([xml]$xml) -MaxEvents {int(count)} -ErrorAction Stop |
+            f"""Get-WinEvent -FilterXml ([xml]$xml) -MaxEvents {int(count) + 1} -ErrorAction Stop |
     {record_projection("Log = $_.LogName")}"""
         )
     )
@@ -1150,10 +1150,12 @@ def take_faults(bridge: Bridge, params: dict[str, Any]) -> Reading:
     except ValueError as exc:
         raise ValueError(f"parameter 'since': {exc}") from exc
 
-    reading = from_bridge("faults", params, script, bridge.run(script))
+    reading = bounded_log_records(from_bridge("faults", params, script, bridge.run(script)), count, window=bool(params.get("since", "").strip()))
     if not reading.observed:
         return reading
-    records = reading.section("records").data
+    record_section = reading.section("records")
+    assert record_section is not None
+    records = record_section.data
     decoded = decode_faults(records)
     reading.sections.append(Section("decoded", "derived", decoded, basis=FAULTS_BASIS))
     reading.sections.append(Section("summary", "derived", faults_summary(records, decoded), basis=SUMMARY_BASIS))
@@ -1312,7 +1314,7 @@ register(
         classes=("raw", "derived"),
         take=take_crash,
         params=(
-            Param("count", "int", 5, f"How many stops, newest first; 1 to {MAX_STOPS}."),
+            Param("count", "int", 5, f"How many stops, newest first; 1 to {MAX_STOPS}.", minimum=1, maximum=MAX_STOPS),
             Param("moment", "str", "", "ISO timestamp of a freeze someone remembers; the first start at or after it is reported instead. Empty for the most recent stops."),
         ),
         private=("MachineName", "AttachedFiles", "dump paths", "user names inside Message", "profile paths inside Message"),
@@ -1331,7 +1333,7 @@ register(
         classes=("raw", "derived"),
         take=take_faults,
         params=(
-            Param("count", "int", 30, f"How many of the most recent records; 1 to {MAX_FAULTS}."),
+            Param("count", "int", 30, f"How many of the most recent records; 1 to {MAX_FAULTS}.", minimum=1, maximum=MAX_FAULTS),
             Param("since", "str", "", "ISO timestamp, or the word 'boot' for this session only. Empty for the most recent records."),
         ),
         private=("AppPath", "ModulePath", "ExeFileName", "AttachedFiles", "StorePath", "user names inside Message"),

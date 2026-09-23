@@ -596,7 +596,7 @@ def test_the_faults_query_asks_the_three_selectors_and_the_window():
     for provider in ("Application Error", "Application Hang", "Windows Error Reporting"):
         assert f"Provider[@Name='{provider}']" in script
     assert "EventData[Data[@Name='EventName']='LiveKernelEvent']" in script
-    assert "-MaxEvents 30" in script and "NoMatchingEventsFound" in script
+    assert "-MaxEvents 31" in script and "NoMatchingEventsFound" in script
     assert "TimeCreated[@SystemTime" not in script
 
     at_boot = faults_script(30, "boot")
@@ -652,9 +652,20 @@ def test_the_summary_counts_what_failed_and_how_often():
 
 def test_faults_keeps_the_sections_apart():
     reading = faults(faults_fixture(), count=30)
-    assert [(s.name, s.cls) for s in reading.sections] == [("records", "raw"), ("decoded", "derived"), ("summary", "derived")]
+    assert [(s.name, s.cls) for s in reading.sections] == [("records", "raw"), ("collection", "raw"), ("decoded", "derived"), ("summary", "derived")]
     assert reading.section("decoded").basis and reading.section("summary").basis
     assert faults([], outcome="empty").outcome == "empty"
+
+
+def test_faults_cutoff_limits_raw_and_derived_evidence_together():
+    records = faults_fixture()
+    reading = faults(records, count=2, since="boot")
+    assert reading.count == 2
+    assert reading.section("records").data == records[:2]
+    assert reading.section("collection").data == {"limit": 2, "returned": 2, "truncated": True}
+    assert all(entry["RecordId"] in {row["RecordId"] for row in records[:2]} for entry in reading.section("decoded").data)
+    assert any("older matching records" in warning for warning in reading.warnings)
+    assert faults(records, count=2).warnings == []
 
 
 # ---------------------------------------------------------------- the boundary
@@ -738,7 +749,7 @@ def test_faults_answers_on_this_machine():
     assert reading.outcome in ("ok", "empty"), reading.error
     if reading.outcome == "empty":
         return
-    assert [s.name for s in reading.sections] == ["records", "decoded", "summary"]
+    assert [s.name for s in reading.sections] == ["records", "collection", "decoded", "summary"]
     kinds = {e["kind"] for e in reading.section("decoded").data}
     assert kinds <= {"application crash", "application hang", "live kernel event", "report"}
     for entry in reading.section("decoded").data:

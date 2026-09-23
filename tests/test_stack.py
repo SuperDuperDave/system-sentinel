@@ -324,6 +324,33 @@ def test_the_prompt_library_ships_with_six_and_takes_more(client: TestClient):
     assert len(client.get("/api/prompts", headers=AUTH).json()["prompts"]) == len(PRESET_PROMPTS)
 
 
+def test_large_log_defaults_to_a_bounded_summary_with_full_evidence_on_demand(client: TestClient):
+    rows = [
+        {"RecordId": number, "Id": number, "LevelDisplayName": "Information", "ProviderName": "Synthetic-Provider",
+         "TimeCreated": "2026-09-20T18:04:11Z", "Message": f"synthetic row {number}"}
+        for number in range(1, 201)
+    ]
+    envelope = {
+        "reading": "record", "params": {"count": 200, "before": "2026-09-20T19:00:00Z"},
+        "asked_at": "2026-09-20T19:00:00Z", "outcome": "ok", "method": {"kind": "fixture"}, "count": 200,
+        "error": None, "warnings": [], "redacted": [],
+        "sections": [
+            {"name": "records", "class": "raw", "data": rows},
+            {"name": "collection", "class": "raw", "data": {"limit": 200, "returned": 200, "truncated": True}},
+        ],
+    }
+    item = add(client, kind="reading", envelope=envelope)
+    assert item["verbosity"] == "summary"
+    summary = client.get("/api/stack/composed", headers=AUTH).json()["text"]
+    assert len(summary) < 5000
+    assert "synthetic row 1" in summary and "synthetic row 200" in summary
+    assert "synthetic row 100" not in summary and "- record cutoff: limit=200, returned=200, truncated=true" in summary
+    assert "Leading sources: Synthetic-Provider (200)." in summary
+    assert client.patch(f"/api/stack/items/{item['id']}", headers=AUTH, json={"verbosity": "full"}).status_code == 200
+    full = client.get("/api/stack/composed", headers=AUTH).json()["text"]
+    assert "synthetic row 100" in full
+
+
 def test_the_composed_handoff(client: TestClient):
     summary = add(client, kind="reading", rank=1, verbosity="summary", take={"name": "events", "params": {"count": 2}})
     add(client, kind="selection", rank=2, ids=[307002], take={"name": "events", "params": {"count": 5}})
@@ -336,6 +363,7 @@ def test_the_composed_handoff(client: TestClient):
     assert text.index("QUANTUM DIAGNOSTICIAN") < text.index(f"## 1. {summary['title']}") < text.index("## 2.") < text.index("## 3.")
     assert "- reading: `events` (log=System, levels=1,2, count=2)" in text
     assert "- outcome: ok — the machine was observed" in text and "- reading count: 2" in text
+    assert "- record cutoff: limit=2, returned=2, truncated=" in text
     assert "- method: powershell" in text and "- class: raw" in text and "- kind: selection" in text
 
     assert "| Time | Level | Provider | Id | Message |" in text

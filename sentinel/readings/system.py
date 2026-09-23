@@ -835,6 +835,6 @@ register(
         description="Current signed driver inventory, sorted by the driver's authored date. That date is not when the driver was installed on this machine.",
         classes=("raw",),
         take=take_drivers,
-        params=(Param("count", "int", 30, "How many of the most recently dated drivers."),),
+        params=(Param("count", "int", 30, "How many of the most recently dated drivers.", minimum=1),),
     )
 )

@@ -281,7 +281,7 @@ register(
         ),
         classes=("raw", "derived"),
         take=take_reliability,
-        params=(Param("days", "int", 30, f"How many days back; 1 to {MAX_DAYS}."),),
+        params=(Param("days", "int", 30, f"How many days back; 1 to {MAX_DAYS}.", minimum=1, maximum=MAX_DAYS),),
         private=("User", "ComputerName", "user names inside Message"),
         heavy=True,
     )

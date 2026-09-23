@@ -86,6 +86,18 @@ def test_unknown_reading_and_bad_parameter(client: TestClient):
     assert r.status_code == 422 and "before" in r.json()["detail"]
 
 
+def test_count_bounds_are_rejected_before_the_bridge(client: TestClient):
+    client.bridge.scripts.clear()
+    for name, params in (("events", ""), ("record", "&before=2026-09-20T18%3A04%3A11Z"), ("whea", ""), ("faults", ""), ("drivers", "")):
+        response = client.get(f"/api/readings/{name}?count=0{params}", headers=AUTH)
+        assert response.status_code == 422 and "count" in response.json()["detail"], name
+    assert client.bridge.scripts == []
+    catalog = {spec["name"]: spec for spec in client.get("/api/readings", headers=AUTH).json()["readings"]}
+    for name in ("events", "record", "whea", "faults", "drivers"):
+        count = next(p for p in catalog[name]["params"] if p["name"] == "count")
+        assert count["minimum"] == 1
+
+
 def test_failure_is_visible_on_the_wire(client: TestClient):
     client.bridge.result = BridgeResult("denied", error="Access is denied.", took_ms=2)
     body = client.get("/api/readings/events", headers=AUTH).json()

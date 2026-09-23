@@ -16,9 +16,10 @@ from datetime import UTC, datetime
 from typing import Any
 
 from ..bridge import Bridge
-from ..reading import Param, Reading, Spec, from_bridge, register
+from ..reading import Param, Reading, Section, Spec, from_bridge, register
 
 LOGS = ("System", "Application")
+MAX_LOG_RECORDS = 2000  # per-request cap for the log and its progressively widened Record frame
 
 # One projection for every log reading (events, record, whea, the stream), so every client sees the
 # same record shape. It is built as a pscustomobject rather than Select-Object's calculated properties:
@@ -86,7 +87,7 @@ def events_script(log: str, levels: list[int], count: int, since: str = "") -> s
 {events_query(log, levels, window)}
 "@
 """ + winevent(
-        f"""Get-WinEvent -FilterXml $xml -MaxEvents {int(count)} -ErrorAction Stop |
+        f"""Get-WinEvent -FilterXml $xml -MaxEvents {int(count) + 1} -ErrorAction Stop |
     {RECORD_SELECT}"""
     )
 
@@ -98,7 +99,7 @@ def record_script(log: str, before: str, count: int) -> str:
 {query_list(log, body)}
 "@
 """ + winevent(
-        f"""Get-WinEvent -FilterXml $xml -MaxEvents {int(count)} -ErrorAction Stop |
+        f"""Get-WinEvent -FilterXml $xml -MaxEvents {int(count) + 1} -ErrorAction Stop |
     {RECORD_SELECT}"""
     )
 
@@ -121,7 +122,7 @@ def take_events(bridge: Bridge, params: dict[str, Any]) -> Reading:
     except ValueError as exc:
         raise ValueError(f"parameter 'since': {exc}") from exc
     result = bridge.run(script)
-    return from_bridge("events", params, script, result)
+    return bounded_log_records(from_bridge("events", params, script, result), params["count"], window=bool(params.get("since", "").strip()))
 
 
 def take_record(bridge: Bridge, params: dict[str, Any]) -> Reading:
@@ -130,10 +131,28 @@ def take_record(bridge: Bridge, params: dict[str, Any]) -> Reading:
     except ValueError as exc:
         raise ValueError(f"parameter 'before': not an ISO timestamp ({exc})") from exc
     result = bridge.run(script)
-    reading = from_bridge("record", params, script, result)
+    reading = bounded_log_records(from_bridge("record", params, script, result), params["count"])
     records = reading.section("records")
     if records and isinstance(records.data, list):
         records.data.reverse()  # oldest first: the reader follows time forward into the moment
+    return reading
+
+
+def bounded_log_records(reading: Reading, limit: int, *, window: bool = False) -> Reading:
+    """Keep exactly the requested records and say whether Windows returned one more.
+
+    A plain most-recent-N request expects a cutoff. A request for a time window needs a
+    warning when the cutoff leaves part of that window unreturned.
+    """
+    records = reading.section("records")
+    if not reading.observed or records is None or not isinstance(records.data, list):
+        return reading
+    truncated = len(records.data) > limit
+    records.data = records.data[:limit]
+    reading.count = len(records.data)
+    reading.sections.append(Section("collection", "raw", {"limit": limit, "returned": reading.count, "truncated": truncated}))
+    if window and truncated:
+        reading.warnings.append(f"the event query reached its {limit}-record limit; older matching records in the requested window were not returned")
     return reading
 
 
@@ -150,7 +169,7 @@ register(
         params=(
             Param("log", "str", "System", "Which log.", choices=LOGS),
             Param("levels", "list[int]", [1, 2], "Levels to include: 1 critical, 2 error, 3 warning, 4 information."),
-            Param("count", "int", 50, "How many of the most recent records."),
+            Param("count", "int", 50, "How many of the most recent records.", minimum=1, maximum=MAX_LOG_RECORDS),
             Param("since", "str", "", "ISO timestamp, or the word 'boot' for this session only. Empty for the most recent records."),
         ),
         private=("MachineName", "user names inside Message", "profile paths inside Message"),
@@ -165,7 +184,7 @@ register(
         take=take_record,
         params=(
             Param("before", "str", None, "ISO timestamp; the records strictly before it are returned."),
-            Param("count", "int", 50, "How many records before the moment."),
+            Param("count", "int", 50, "How many records before the moment.", minimum=1, maximum=MAX_LOG_RECORDS),
             Param("log", "str", "System", "Which log.", choices=LOGS),
         ),
         private=("MachineName", "user names inside Message", "profile paths inside Message"),

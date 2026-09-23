@@ -322,6 +322,10 @@ def input_schema(spec: Spec) -> dict[str, Any]:
             prop["default"] = p.default
         if p.choices:
             prop["enum"] = list(p.choices)
+        if p.minimum is not None:
+            prop["minimum"] = p.minimum
+        if p.maximum is not None:
+            prop["maximum"] = p.maximum
         props[p.name] = prop
     return _with_unredacted({"type": "object", "properties": props, "required": [p.name for p in spec.params if p.default is None]})
 
@@ -473,10 +477,9 @@ class Surface:
             reason = ""
         elif not reason:
             return _refused(NEEDS_REASON)
-        redactor = None if unredacted else self.state.redactor
-
         tool = ROUTE_TOOLS.get(params.name)
         if tool is not None:
+            redactor = None if unredacted else self.state.redactor
             if params.name == "capture_create" and reason:
                 # The capture outlives this tool result; keep the stated reason inside its ZIP.
                 arguments["reason"] = reason

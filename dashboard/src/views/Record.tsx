@@ -11,9 +11,10 @@ type Levels = 'errors' | 'all';
 type Span = 'recent' | 'boot';
 const LEVELS: Record<Levels, number[]> = { errors: [1, 2], all: [1, 2, 3, 4] };
 const COUNTS = [50, 200, 500];
-/** Since boot is a window, not a count: it asks for the whole session and the outcome line says how much that was. */
+/** The boot window is bounded; the reading warns when older matching records were left out. */
 const BOOT_COUNT = 500;
 const PAGE = 25;
+const FRAME_LIMIT = 2000;
 
 /**
  * The record: the System log, most recent first, each row inspectable in place, and for any row the
@@ -49,7 +50,7 @@ function Log() {
         <h1 className={`${styles.title} display`}>Record</h1>
         <button className={styles.filterToggle} onClick={() => setFiltersOpen((open) => !open)} aria-expanded={filtersOpen} aria-controls="record-controls">
           <span className="readout">Window</span>
-          <span className={styles.filterValue}>{levels === 'errors' ? 'Critical and error' : 'Every level'} · {boot ? 'Since boot' : `Last ${count}`}</span>
+          <span className={styles.filterValue}>{levels === 'errors' ? 'Critical and error' : 'Every level'} · {boot ? `Since boot · up to ${BOOT_COUNT}` : `Last ${count}`}</span>
           <span className={styles.filterChevron} aria-hidden="true">⌄</span>
         </button>
         <div className={`${styles.controls} ${filtersOpen ? '' : styles.controlsClosed}`} id="record-controls" role="group" aria-label="Which records">
@@ -315,13 +316,15 @@ interface Widened {
   held: Reading<EventRecord[]> | null;
   rows: EventRecord[];
   more: () => void;
+  moreCount: number;
   list: Ref<HTMLOListElement>;
-  /** The log answered with fewer records than were asked for: there is nothing earlier to ask for. */
+  /** The log answered that the requested frame has no older record. */
   atStart: boolean;
+  atLimit: boolean;
 }
 
 /**
- * The records before a moment, widened a page at a time.
+ * The records before a moment, progressively widened from a small first page.
  *
  * One reading, not a stitched sequence of them: asking for more asks the log for a longer run
  * before the same moment, so two records written in the same second cannot fall between two takes,
@@ -341,30 +344,52 @@ function useBefore(moment: string): Widened {
   const rows = section(held, 'records') ?? [];
   const list = useRef<HTMLOListElement>(null);
   const place = useRef<{ id: string; top: number } | null>(null);
+  const heldCount = typeof held?.params.count === 'number' ? held.params.count : PAGE;
+  const nextCount = Math.min(FRAME_LIMIT, heldCount * 2);
 
   const more = useCallback(() => {
     const first = list.current?.querySelector<HTMLElement>('[data-record]');
     place.current = first?.dataset.record ? { id: first.dataset.record, top: first.getBoundingClientRect().top } : null;
-    setCount((c) => c + PAGE);
-  }, []);
+    if (nextCount === count) taken.retake();
+    else setCount(nextCount);
+  }, [count, nextCount, taken.retake]);
 
   useLayoutEffect(() => {
-    const held = place.current;
-    if (!held || taken.state === 'taking') return;
-    const node = list.current?.querySelector<HTMLElement>(`[data-record="${held.id}"]`);
-    if (node) window.scrollBy(0, node.getBoundingClientRect().top - held.top);
+    const saved = place.current;
+    if (!saved || held !== taken.reading) return;
+    const node = list.current?.querySelector<HTMLElement>(`[data-record="${saved.id}"]`);
+    if (node) window.scrollBy(0, node.getBoundingClientRect().top - saved.top);
     place.current = null;
-  }, [rows.length, taken.state]);
+  }, [held, taken.reading]);
 
-  return { taken, held, rows, more, list, atStart: taken.state === 'done' && observed(taken.reading) && rows.length < count };
+  const collection = held?.sections.find((s) => s.name === 'collection')?.data as unknown as { truncated?: boolean } | undefined;
+  const heldLimit = held?.params.count;
+  return {
+    taken, held, rows, more, moreCount: nextCount - heldCount, list,
+    atStart: observed(held) && collection?.truncated === false,
+    atLimit: heldLimit === FRAME_LIMIT && collection?.truncated === true,
+  };
 }
 
 /** The way further back, at the top of the list because that is where the records it asks for appear. */
 function More({ before }: { before: Widened }) {
-  if (before.atStart) return <p className={`${styles.logStart} readout`}>The log holds nothing earlier than this.</p>;
+  const status = useRef<HTMLParagraphElement>(null);
+  const hadFocus = useRef(false);
+  useLayoutEffect(() => {
+    if (status.current && hadFocus.current) {
+      status.current.focus();
+      hadFocus.current = false;
+    }
+  }, [before.atStart, before.atLimit]);
+  if (before.atStart || before.atLimit) {
+    const message = before.atStart
+      ? 'The log holds nothing earlier than this.'
+      : `This frame reached ${FRAME_LIMIT.toLocaleString()} records. Choose an earlier moment to continue.`;
+    return <p ref={status} tabIndex={-1} aria-live="polite" className={`${styles.logStart} readout`}>{message}</p>;
+  }
   return (
-    <button className={`${styles.more} readout`} onClick={before.more} disabled={before.taken.state === 'taking'}>
-      {before.taken.state === 'taking' ? 'Taking…' : `${PAGE} more before this`}
+    <button className={`${styles.more} readout`} onClick={() => { if (before.taken.state !== 'taking') { hadFocus.current = true; before.more(); } }} onFocus={() => { hadFocus.current = true; }} onBlur={() => { hadFocus.current = false; }} aria-disabled={before.taken.state === 'taking'}>
+      {before.taken.state === 'taking' ? 'Taking…' : `${before.moreCount} more before this`}
     </button>
   );
 }
