@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import ipaddress
+import logging
 import threading
 import time
 from collections.abc import AsyncIterator, Callable
@@ -38,6 +39,7 @@ from .stream import Stream
 
 STATIC = Path(__file__).parent / "static"
 RELEARN_SECONDS = 60.0
+logger = logging.getLogger(__name__)
 DEFAULT_PORT = 8000
 
 
@@ -291,15 +293,15 @@ def create_app(state: State | None = None, mcp: bool = True) -> FastAPI:
     async def saved_context_unavailable(_request: Request, exc: StoreUnavailable) -> JSONResponse:
         return JSONResponse({"error": "saved_context_unavailable", "reason": exc.reason, "detail": str(exc)}, status_code=503)
 
-    async def handoff_changed() -> None:
-        if mcp_app is not None:
-            await mcp_app.state.surface.handoff_changed()
-
     def handoff_changed_from_route() -> None:
         # FastAPI runs synchronous routes in a worker thread. Publish on the server's event loop
         # so the subscription stream can receive the event without moving file I/O onto that loop.
         if mcp_app is not None:
-            anyio.from_thread.run(mcp_app.state.surface.handoff_changed)
+            try:
+                anyio.from_thread.run(mcp_app.state.surface.handoff_changed)
+            except Exception:
+                # A saved edit cannot be reported as failed solely because a subscriber did not hear it.
+                logger.exception("saved Stack change could not notify subscribers")
 
     def respond(payload: Any, policy: Redactor | None, status_code: int = 200) -> JSONResponse:
         if policy is not None:
@@ -491,9 +493,12 @@ def create_app(state: State | None = None, mcp: bool = True) -> FastAPI:
         policy = None if unredacted else await state.redaction()
         try:
             added = await new_item(state.stack, state.bridge, item.model_dump(exclude_unset=True), reader=state.readings.take)
-            response = respond(index_entry(state.stack.add(added).to_dict()), policy, status_code=201)
-            await handoff_changed()
-            return response
+            def save_and_announce() -> JSONResponse:
+                saved = state.stack.add(added)
+                handoff_changed_from_route()
+                return respond(index_entry(saved.to_dict()), policy, status_code=201)
+
+            return await anyio.to_thread.run_sync(save_and_announce)
         except Duplicate as exc:
             return JSONResponse({"error": "duplicate", "detail": "this observation is already on the stack", "id": str(exc), "asked_at": exc.asked_at}, status_code=409)
         except ValueError as exc:

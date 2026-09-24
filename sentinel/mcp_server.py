@@ -12,8 +12,7 @@ stops confirming the harmless ones; every reading declares one shared ``outputSc
 with ``structuredContent`` beside its text, so a client branches on ``outcome`` and ``class`` as
 typed fields instead of parsing a string; the prompt library is offered as prompts; and the
 catalog and the composed handoff are resources, so a client can hold the handoff open beside the
-work instead of calling a tool for it. What a change to the handoff publishes, and why nothing is
-subscribed to it yet, is in :func:`build_mcp`.
+work instead of calling a tool for it. :func:`build_mcp` wires handoff changes to subscribed clients.
 
 :class:`Surface` holds every method, over one ``State``; :func:`build_mcp` wires it to the
 transport. Nothing in the surface knows about JSON-RPC.
@@ -23,10 +22,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
+import anyio
 from mcp import types
 from mcp.server.lowlevel import Server
 from mcp.server.subscriptions import InMemorySubscriptionBus, ListenHandler, ResourceUpdated
@@ -44,6 +45,7 @@ if TYPE_CHECKING:
     from .app import State
 
 _JSON_TYPES = {"int": "integer", "float": "number", "bool": "boolean", "str": "string", "list[int]": "array"}
+logger = logging.getLogger(__name__)
 
 INSTRUCTIONS = (
     "A stethoscope for this Windows computer. Each reading tool takes one reading and returns an envelope: "
@@ -136,6 +138,14 @@ class Answer:
 
 
 @dataclass(frozen=True)
+class PreparedChange:
+    """Async validation is done; the saved edit and its notice must now run together."""
+
+    save: Callable[[], Any]
+    answer: Callable[[Any], Any]
+
+
+@dataclass(frozen=True)
 class RouteTool:
     """A tool over a route rather than over the machine. Each one is a route as well."""
 
@@ -148,49 +158,55 @@ class RouteTool:
     carries_machine_data: bool = True
     """Whether what it returns passes through the redaction, and so takes ``unredacted``."""
     updates: str | None = None
-    """The resource this tool changes, published on the surface's bus once the call has succeeded."""
+    """The resource this tool changes, published after the saved edit even if its caller leaves."""
 
 
 async def _stack_list(state: State, _arguments: dict[str, Any], redactor: Redactor | None) -> Any:
-    return _redacted(index_state(state.stack.state()), redactor)
+    return await anyio.to_thread.run_sync(lambda: _redacted(index_state(state.stack.state()), redactor))
 
 
 async def _stack_item(state: State, arguments: dict[str, Any], redactor: Redactor | None) -> Any:
-    return _redacted(state.stack.item(str(arguments.get("id") or "")), redactor)
+    return await anyio.to_thread.run_sync(lambda: _redacted(state.stack.item(str(arguments.get("id") or "")), redactor))
 
 
 async def _stack_add(state: State, arguments: dict[str, Any], redactor: Redactor | None) -> Any:
     item = await new_item(state.stack, state.bridge, arguments, reader=state.readings.take)
-    return _redacted(index_entry(state.stack.add(item).to_dict()), redactor)
+    return PreparedChange(lambda: state.stack.add(item), lambda saved: _redacted(index_entry(saved.to_dict()), redactor))
 
 
 async def _stack_remove(state: State, arguments: dict[str, Any], redactor: Redactor | None) -> Any:
-    remaining = state.stack.remove(str(arguments.get("id") or ""))
-    return _redacted(index_state(remaining), redactor)
+    return PreparedChange(lambda: state.stack.remove(str(arguments.get("id") or "")), lambda saved: _redacted(index_state(saved), redactor))
 
 
 async def _stack_clear(state: State, _arguments: dict[str, Any], redactor: Redactor | None) -> Any:
-    cleared = state.stack.clear()
-    return _redacted(index_state(cleared), redactor)
+    return PreparedChange(state.stack.clear, lambda saved: _redacted(index_state(saved), redactor))
 
 
 async def _compose(state: State, _arguments: dict[str, Any], redactor: Redactor | None) -> Any:
-    composed = compose(state.stack, state.prompts, redactor)
+    composed = await anyio.to_thread.run_sync(compose, state.stack, state.prompts, redactor)
     return Answer(text=composed["text"], data=composed)
 
 
 async def _prompts_list(state: State, _arguments: dict[str, Any], _redactor: Redactor | None) -> Any:
-    return {"prompts": state.prompts.all()}
+    return {"prompts": await anyio.to_thread.run_sync(state.prompts.all)}
 
 
 async def _stack_update(state: State, arguments: dict[str, Any], redactor: Redactor | None) -> Any:
-    item = state.stack.update(str(arguments.get("id") or ""), rank=arguments.get("rank"), verbosity=arguments.get("verbosity"), title=arguments.get("title"))
-    return _redacted(index_entry(item), redactor)
+    return PreparedChange(
+        save=lambda: state.stack.update(
+            str(arguments.get("id") or ""), rank=arguments.get("rank"), verbosity=arguments.get("verbosity"), title=arguments.get("title")
+        ),
+        answer=lambda saved: _redacted(index_entry(saved), redactor),
+    )
 
 
 async def _stack_prompt(state: State, arguments: dict[str, Any], redactor: Redactor | None) -> Any:
-    chosen = state.stack.choose(prompt_id=arguments.get("prompt_id"), system_prompt=arguments.get("system_prompt"), set_prompt="prompt_id" in arguments)
-    return _redacted(index_state(chosen), redactor)
+    return PreparedChange(
+        save=lambda: state.stack.choose(
+            prompt_id=arguments.get("prompt_id"), system_prompt=arguments.get("system_prompt"), set_prompt="prompt_id" in arguments
+        ),
+        answer=lambda saved: _redacted(index_state(saved), redactor),
+    )
 
 
 async def _capture_create(state: State, arguments: dict[str, Any], redactor: Redactor | None) -> Any:
@@ -205,7 +221,7 @@ async def _capture_create(state: State, arguments: dict[str, Any], redactor: Red
 
 
 async def _capture_list(_state: State, _arguments: dict[str, Any], _redactor: Redactor | None) -> Any:
-    return {"captures": capture.listing()}
+    return {"captures": await anyio.to_thread.run_sync(capture.listing)}
 
 
 STACK_TOOLS: dict[str, RouteTool] = {
@@ -476,6 +492,16 @@ class Surface:
         """Tell subscribed agents to refetch after a dashboard edit to the handoff."""
         await self.bus.publish(ResourceUpdated(HANDOFF_URI))
 
+    def _commit(self, change: PreparedChange, uri: str) -> Any:
+        """Keep a saved edit and its notice together even if its caller disconnects."""
+        saved = change.save()
+        try:
+            anyio.from_thread.run(self.bus.publish, ResourceUpdated(uri))
+        except Exception:
+            # The edit landed. A notification failure must not invite a duplicate retry.
+            logger.exception("saved Stack change could not notify subscribers")
+        return change.answer(saved)
+
     async def list_tools(self, _ctx: Any = None, _params: Any = None) -> types.ListToolsResult:
         return types.ListToolsResult(tools=tools())
 
@@ -498,6 +524,10 @@ class Surface:
                 arguments["reason"] = reason
             try:
                 payload = await tool.call(self.state, arguments, redactor)
+                if tool.updates:
+                    if not isinstance(payload, PreparedChange):
+                        raise RuntimeError(f"{tool.name} did not prepare its saved change")
+                    payload = await anyio.to_thread.run_sync(self._commit, payload, tool.updates)
             except Duplicate as exc:
                 return _refused(f"this observation ({exc.asked_at or 'time unknown'}) is already on the stack as item {exc}")
             except StoreUnavailable as exc:
@@ -506,8 +536,6 @@ class Surface:
                 return _refused(f"nothing on the stack with id {exc}")
             except ValueError as exc:
                 return _refused(str(exc))
-            if tool.updates:
-                await self.bus.publish(ResourceUpdated(tool.updates))
             return _answer(_warned(payload, reason))
 
         reading_name = reading_for(params.name)
@@ -525,7 +553,7 @@ class Surface:
         """The prompt library, as prompts. The id is the name a client calls back with; the person's
         own title and description are what they see."""
         try:
-            prompts = self.state.prompts.all()
+            prompts = await anyio.to_thread.run_sync(self.state.prompts.all)
         except StoreUnavailable as exc:
             raise MCPError(types.INTERNAL_ERROR, f"{exc.reason}: {exc}") from exc
         return types.ListPromptsResult(
@@ -534,7 +562,7 @@ class Surface:
 
     async def get_prompt(self, _ctx: Any, params: types.GetPromptRequestParams) -> types.GetPromptResult:
         try:
-            prompt = self.state.prompts.get(params.name)
+            prompt = await anyio.to_thread.run_sync(self.state.prompts.get, params.name)
         except StoreUnavailable as exc:
             raise MCPError(types.INTERNAL_ERROR, f"{exc.reason}: {exc}") from exc
         if prompt is None:

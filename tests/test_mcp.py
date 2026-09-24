@@ -298,9 +298,7 @@ def test_agent_stacks_a_whole_storm_reading_in_summary_without_asking_for_full(s
 
 
 def test_a_stack_change_publishes_the_handoff(surface: Surface):
-    """What a subscribed client would be told. Nothing is subscribed on this transport yet — see
-    ``build_mcp`` — so what is asserted here is the half the surface owns: the stack tools that
-    change the handoff publish it, and the ones that only read it stay quiet."""
+    """Saved Stack changes notify subscribers; reads and refused edits stay quiet."""
     published: list[ServerEvent] = []
     surface.bus.subscribe(published.append)
 

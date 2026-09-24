@@ -2,16 +2,20 @@
 
 import asyncio
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 
+import anyio
 import httpx
 import pytest
 from mcp import types
+from mcp.server.subscriptions import ResourceUpdated
 
 from sentinel.app import State, create_app
 from sentinel.bridge import BridgeResult
-from sentinel.mcp_server import Surface
+from sentinel.mcp_server import HANDOFF_URI, Surface
+from sentinel.redact import Identity, Redactor
 from sentinel.stack import Item
 from tests.conftest import FakeBridge, identity_result
 
@@ -229,3 +233,232 @@ def test_sync_redactor_cannot_be_called_on_the_event_loop(monkeypatch, tmp_path)
             _ = state.redactor
 
     asyncio.run(read_wrongly())
+
+
+def test_saved_stack_work_in_async_http_and_mcp_keeps_loop_free(monkeypatch, tmp_path):
+    monkeypatch.setenv("SYSTEM_SENTINEL_HOME", str(tmp_path))
+    state = State(bridge=FakeBridge(), token=TOKEN)
+    state._redactor = Redactor(Identity(host="TESTBOX", user="tester"))
+    state._learned_at = time.time()
+    state.stack.add(Item(id="seed", added_at="2026-09-24T00:00:00Z", kind="note", title="TESTBOX", note="TESTBOX tester"))
+    surface = Surface(state)
+    app = create_app(state, mcp=False)
+    entered, release = threading.Event(), threading.Event()
+    original_read = state.stack.store.read
+
+    def gated_read():
+        entered.set()
+        release.wait(3)
+        return original_read()
+
+    monkeypatch.setattr(state.stack.store, "read", gated_read)
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            async def mcp(name, arguments):
+                answer = await surface.call_tool(None, types.CallToolRequestParams(name=name, arguments=arguments))
+                assert not answer.is_error
+                return answer.content[0].text
+
+            operations = (
+                (lambda: mcp("stack_list", {}), "<host>"),
+                (lambda: mcp("compose", {}), "<host>"),
+                (lambda: mcp("stack_prompt", {"system_prompt": False}), "<host>"),
+                (lambda: client.post("/api/stack/items", json={"kind": "note", "note": "TESTBOX kept"}, headers=AUTH), "<host>"),
+                (lambda: client.get("/api/stack", headers=AUTH), "<host>"),
+            )
+            for operation, expected in operations:
+                entered.clear()
+                release.clear()
+                safety = threading.Timer(2, release.set)
+                safety.start()
+                try:
+                    task = asyncio.create_task(operation())
+                    assert await asyncio.to_thread(entered.wait, 3), "saved Stack read never began"
+                    assert not release.is_set(), "saved Stack work blocked the event loop"
+                finally:
+                    release.set()
+                    safety.cancel()
+                answer = await task
+                body = answer.text if isinstance(answer, httpx.Response) else answer
+                assert expected in body and "TESTBOX" not in body
+                if isinstance(answer, httpx.Response):
+                    assert answer.status_code in (200, 201)
+
+    asyncio.run(run())
+
+
+def test_prompt_library_reads_in_async_mcp_keep_loop_free(monkeypatch, tmp_path):
+    monkeypatch.setenv("SYSTEM_SENTINEL_HOME", str(tmp_path))
+    state = State(bridge=FakeBridge(), token=TOKEN)
+    state._redactor = Redactor(Identity(host="TESTBOX", user="tester"))
+    state._learned_at = time.time()
+    surface = Surface(state)
+    state.prompts.all()  # seed before the gate
+    entered, release = threading.Event(), threading.Event()
+    original_read = state.prompts.store.read
+
+    def gated_read():
+        entered.set()
+        release.wait(3)
+        return original_read()
+
+    monkeypatch.setattr(state.prompts.store, "read", gated_read)
+
+    async def run():
+        for operation in (
+            lambda: surface.call_tool(None, types.CallToolRequestParams(name="prompts_list", arguments={})),
+            lambda: surface.list_prompts(),
+        ):
+            entered.clear()
+            release.clear()
+            safety = threading.Timer(2, release.set)
+            safety.start()
+            try:
+                task = asyncio.create_task(operation())
+                assert await asyncio.to_thread(entered.wait, 3)
+                assert not release.is_set(), "prompt read blocked the event loop"
+            finally:
+                release.set()
+                safety.cancel()
+            assert await task is not None
+
+    asyncio.run(run())
+
+
+def test_mcp_stack_read_waiting_on_another_edit_keeps_loop_free(monkeypatch, tmp_path):
+    monkeypatch.setenv("SYSTEM_SENTINEL_HOME", str(tmp_path))
+    state = State(bridge=FakeBridge(), token=TOKEN)
+    state._redactor = Redactor(Identity(host="TESTBOX", user="tester"))
+    state._learned_at = time.time()
+    surface = Surface(state)
+    holder_entered, request_entered, release = threading.Event(), threading.Event(), threading.Event()
+    original_state = state.stack.state
+
+    def waiting_state():
+        request_entered.set()
+        return original_state()
+
+    monkeypatch.setattr(state.stack, "state", waiting_state)
+
+    def hold_transaction():
+        with state.stack.store.transaction():
+            holder_entered.set()
+            release.wait(3)
+
+    holder = threading.Thread(target=hold_transaction)
+    holder.start()
+
+    async def run():
+        assert await asyncio.to_thread(holder_entered.wait, 3)
+        safety = threading.Timer(2, release.set)
+        safety.start()
+        try:
+            task = asyncio.create_task(surface.call_tool(None, types.CallToolRequestParams(name="stack_list", arguments={})))
+            assert await asyncio.to_thread(request_entered.wait, 3)
+            assert not release.is_set(), "waiting for another saved edit blocked the event loop"
+        finally:
+            release.set()
+            safety.cancel()
+        assert not (await task).is_error
+
+    try:
+        asyncio.run(run())
+    finally:
+        release.set()
+        holder.join(timeout=4)
+    assert not holder.is_alive()
+
+
+@pytest.mark.parametrize(("client_kind", "cancel_kind"), [("mcp_remove", "task"), ("http_add", "task"), ("mcp_remove", "anyio")])
+def test_cancelled_saved_edit_still_notifies_subscribers(monkeypatch, tmp_path, client_kind, cancel_kind):
+    monkeypatch.setenv("SYSTEM_SENTINEL_HOME", str(tmp_path))
+    state = State(bridge=FakeBridge(), token=TOKEN)
+    state._redactor = Redactor(Identity(host="TESTBOX", user="tester"))
+    state._learned_at = time.time()
+    state.stack.add(Item(id="seed", added_at="2026-09-24T00:00:00Z", kind="note", title="Seed", note="keep"))
+    app = create_app(state)
+    surface = app.state.mcp_surface
+    published = []
+    surface.bus.subscribe(published.append)
+    entered, release, write_done = threading.Event(), threading.Event(), threading.Event()
+    original_write = state.stack.store.write
+
+    def gated_write(saved):
+        entered.set()
+        release.wait(3)
+        original_write(saved)
+        write_done.set()
+
+    monkeypatch.setattr(state.stack.store, "write", gated_write)
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            if client_kind == "mcp_remove":
+                operation = surface.call_tool(None, types.CallToolRequestParams(name="stack_remove", arguments={"id": "seed"}))
+            else:
+                operation = client.post("/api/stack/items", json={"kind": "note", "note": "TESTBOX new"}, headers=AUTH)
+            safety = threading.Timer(3, release.set)
+            safety.start()
+            try:
+                if cancel_kind == "anyio":
+                    async def perform():
+                        await operation
+
+                    async with anyio.create_task_group() as group:
+                        group.start_soon(perform)
+                        assert await asyncio.to_thread(entered.wait, 4), "save did not begin"
+                        group.cancel_scope.cancel()
+                        release.set()
+                else:
+                    task = asyncio.create_task(operation)
+                    assert await asyncio.to_thread(entered.wait, 4), "save did not begin"
+                    task.cancel()
+                    with pytest.raises(asyncio.CancelledError):
+                        await task
+            finally:
+                release.set()
+                safety.cancel()
+            assert await asyncio.to_thread(write_done.wait, 4), "cancelled worker did not finish its save"
+            for _ in range(100):
+                if published:
+                    break
+                await asyncio.sleep(0.01)
+            assert published == [ResourceUpdated(HANDOFF_URI)]
+            ids = [item["id"] for item in state.stack.state()["items"]]
+            if client_kind == "mcp_remove":
+                assert "seed" not in ids
+            else:
+                assert "seed" in ids and len(ids) == 2
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("client_kind", ["mcp_remove", "http_add"])
+def test_notification_failure_does_not_report_a_saved_edit_as_failed(monkeypatch, tmp_path, caplog, client_kind):
+    monkeypatch.setenv("SYSTEM_SENTINEL_HOME", str(tmp_path))
+    state = State(bridge=FakeBridge(), token=TOKEN)
+    state._redactor = Redactor(Identity(host="TESTBOX", user="tester"))
+    state._learned_at = time.time()
+    state.stack.add(Item(id="seed", added_at="2026-09-24T00:00:00Z", kind="note", title="Seed", note="keep"))
+    app = create_app(state)
+    surface = app.state.mcp_surface
+
+    async def broken_publish(_event):
+        raise RuntimeError("synthetic subscriber failure")
+
+    monkeypatch.setattr(surface.bus, "publish", broken_publish)
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            if client_kind == "mcp_remove":
+                answer = await surface.call_tool(None, types.CallToolRequestParams(name="stack_remove", arguments={"id": "seed"}))
+                assert not answer.is_error
+                assert state.stack.state()["items"] == []
+            else:
+                answer = await client.post("/api/stack/items", json={"kind": "note", "note": "TESTBOX saved"}, headers=AUTH)
+                assert answer.status_code == 201 and "<host> saved" in answer.text
+                assert len(state.stack.state()["items"]) == 2
+
+    asyncio.run(run())
+    assert "saved Stack change could not notify subscribers" in caplog.text

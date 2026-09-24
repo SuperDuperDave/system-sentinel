@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.9.10] - 2026-09-24
+
+### Fixed
+- Async HTTP Stack add and MCP Stack, prompt and capture-list operations now put saved-file work in workers. A slow read, write or lock wait no longer holds the event loop and delays unrelated clients.
+- Once a Stack edit begins in a worker, its saved change and handoff notification finish together even if the caller cancels. A refused edit still sends no notification; a notification failure cannot make a saved edit look unsuccessful.
+
+### Limits
+- A gated synthetic Stack read and a held transaction reproduced the previous loop stall and verified the correction; native Windows Stack size and latency remain unmeasured. These calls can still wait on their own saved-file lock or worker capacity. Capture ZIP assembly and large MCP answer encoding remain separate measurements before changing them.
+
 ## [1.9.9] - 2026-09-24
 
 ### Fixed
