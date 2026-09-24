@@ -71,21 +71,23 @@ Every reading is one request for evidence, returned in one envelope. Most ask Wi
 {
   "reading": "events",
   "params": { "log": "System", "levels": [1, 2], "count": 50, "since": "", "before": "" },
+  "outcome": "ok",
+  "count": 50,
+  "error": null,
+  "warnings": [],
+  "redacted": ["host", "user"],
   "asked_at": "2026-09-20T18:04:11.204Z",
   "took_ms": 812,
-  "outcome": "ok",
-  "method": { "kind": "powershell", "query": "...Get-WinEvent -FilterXml ([xml]$xml) -MaxEvents 51..." },
-  "count": 50,
   "sections": [
     { "name": "records", "class": "raw", "data": [ ... ] },
     { "name": "collection", "class": "raw", "data": { "log": "System", "outcome": "ok", "limit": 50, "returned": 50, "truncated": true, "stopped": null, "oldest_state": "ok" } },
     { "name": "coverage", "class": "derived", "data": { "log": "System", "retained_from": "2026-01-01T00:00:00.0000000Z", "covered_from": null, "covered_from_inclusive": null, "complete": null } }
   ],
-  "error": null,
-  "warnings": [],
-  "redacted": ["host", "user"]
+  "method": { "kind": "powershell", "query": "...Get-WinEvent -FilterXml ([xml]$xml) -MaxEvents 51..." }
 }
 ```
+
+The verdict, error, warnings and redaction notes appear before bulk sections and the collection script in JSON text. This makes the beginning of a long answer useful to a text reader; it does not limit answer size or guarantee how an MCP client handles a large result. The same fields and values are available to structured clients regardless of order.
 
 **`outcome`** is one of:
 

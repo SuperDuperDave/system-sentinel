@@ -62,18 +62,21 @@ class Reading:
         return next((s for s in self.sections if s.name == name), None)
 
     def to_dict(self) -> dict[str, Any]:
+        # Keep the verdict and qualifications ahead of potentially large evidence arrays and
+        # scripts. JSON field order is not the contract, but text-only clients can read this
+        # useful prefix before reaching the bulk of the answer.
         return {
             "reading": self.reading,
             "params": self.params,
-            "asked_at": self.asked_at,
-            "took_ms": self.took_ms,
             "outcome": self.outcome,
-            "method": self.method,
             "count": self.count,
-            "sections": [s.to_dict() for s in self.sections],
             "error": self.error,
             "warnings": self.warnings,
             "redacted": self.redacted,
+            "asked_at": self.asked_at,
+            "took_ms": self.took_ms,
+            "sections": [s.to_dict() for s in self.sections],
+            "method": self.method,
         }
 
 

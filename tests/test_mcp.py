@@ -189,6 +189,27 @@ def test_the_typed_answer_is_the_text_answer(client: TestClient):
     assert refused["isError"] is True and "structuredContent" not in refused
 
 
+def test_long_reading_puts_its_verdict_and_warnings_before_bulk_evidence():
+    first = {**EVENT, "Message": "Synthetic event detail. " * 400}
+    second = {**first, "RecordId": 2}
+    bridge = LogBridge(result=BridgeResult("ok", items=[first, second], took_ms=5),
+                       by_marker={"$env:COMPUTERNAME": identity_result("TESTBOX", "tester")})
+    surface = Surface(State(bridge=bridge, token=TOKEN))
+    for disclosure in ({}, {"unredacted": True, "reason": "checking a synthetic event"}):
+        answer = call(surface, "events", count=1, since="2026-09-20T00:00:00Z", **disclosure)
+        text = answer.content[0].text
+        typed = answer.structured_content
+        assert typed == json.loads(text)
+        assert typed["outcome"] == "ok" and typed["count"] == 1
+        assert any("1-record limit" in warning for warning in typed["warnings"])
+        if disclosure:
+            assert any("checking a synthetic event" in warning for warning in typed["warnings"])
+        prefix = text[:text.index('"sections"')]
+        assert len(prefix.encode()) < 2048
+        assert all(json.dumps(warning) in prefix for warning in typed["warnings"])
+        assert text.index('"method"') > text.index('"sections"')
+
+
 def test_a_reading_that_did_not_observe_the_machine_says_so_in_the_typed_answer(client: TestClient):
     client.app.state.sentinel.bridge.result = BridgeResult("denied", error="Access is denied.", took_ms=2)
     typed = rpc(client, "tools/call", {"name": "events"})["result"]["structuredContent"]

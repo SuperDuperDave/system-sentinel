@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.9.4] - 2026-09-24
+
+### Changed
+- Reading envelopes now put outcome, count, error, warnings and redaction notes before bulk sections and the collection script. HTTP and MCP return the same fields and full evidence; a text reader sees the verdict and caveats at the beginning of a long answer.
+- A reproducible synthetic [agent-answer size measurement](docs/measurements/agent-answers.md) records text, serialized MCP result, section and method bytes, including a 2,000-record case. It reads no machine data.
+
+### Limits
+- Field order does not reduce answer size or establish whether an agent client passes, truncates or rejects a large result. Any future summary projection needs client evidence and must preserve source reach, omission counts and links between raw and derived sections.
+
 ## [1.9.3] - 2026-09-24
 
 ### Changed
