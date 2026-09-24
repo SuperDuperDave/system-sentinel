@@ -24,6 +24,7 @@ def test_screen_fixture_answers_current_record_and_nearby_source_contracts():
 
     recent = asyncio.run(take("events", bridge, {"log": "System", "levels": [1, 2], "count": 50}))
     before = asyncio.run(take("record", bridge, {"before": stamp(moment), "count": 25}))
+    after = asyncio.run(take("events", bridge, {"log": "System", "levels": [], "since": stamp(moment), "order": "oldest", "count": 25}))
     faults = asyncio.run(take("faults", bridge, {
         "since": stamp(moment - timedelta(hours=1)), "before": stamp(moment + timedelta(hours=1)), "count": 100,
     }))
@@ -41,6 +42,8 @@ def test_screen_fixture_answers_current_record_and_nearby_source_contracts():
 
     assert recent.outcome == "ok" and recent.section("records").data
     assert before.outcome == "ok" and before.section("coverage").data["reaches_before"] is True
+    assert after.outcome == "ok" and after.count == 25
+    assert after.section("collection").data["order"] == "oldest" and after.section("coverage").data["covered_until"] == after.section("collection").data["probe_time"]
     assert faults.outcome == "ok" and faults.section("decoded").data
     assert faults.section("coverage").data["complete"] is True
     assert all(row["Log"] == "Application" for row in faults.section("records").data)

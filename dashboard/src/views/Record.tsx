@@ -12,7 +12,7 @@ import styles from './Record.module.css';
 
 type Levels = 'errors' | 'all';
 type Span = 'recent' | 'boot';
-const LEVELS: Record<Levels, number[]> = { errors: [1, 2], all: [1, 2, 3, 4] };
+const LEVELS: Record<Levels, number[]> = { errors: [1, 2], all: [] };
 const COUNTS = [50, 200, 500];
 /** The boot window is bounded; the reading warns when older matching records were left out. */
 const BOOT_COUNT = 500;
@@ -121,7 +121,7 @@ function Log() {
 }
 
 /**
- * The log framed on a moment: the records before it, oldest first, ending there. The title says
+ * The log framed on a moment: the records before it and those Windows wrote after it. The title says
  * what the list is rather than what the view is called, because that is the question being asked;
  * the way back is beside it and clears the moment everywhere.
  */
@@ -133,7 +133,7 @@ function Frame({ moment }: { moment: string }) {
   return (
     <section>
       <div className={styles.head}>
-        <h1 className={`${styles.title} display`}>The record before {clock.format(when)}</h1>
+        <h1 className={`${styles.title} display`}>The record around {clock.format(when)}</h1>
         <div className={styles.controls}>
           <button className={styles.action} onClick={() => setMoment(null)}>
             Back to the log
@@ -143,7 +143,13 @@ function Frame({ moment }: { moment: string }) {
           ) : null}
         </div>
       </div>
-      <p className={`${styles.frameLine} readout`}>{day.format(when)} · the System log, every level, oldest first and ending at this moment</p>
+      <p className={`${styles.frameLine} readout`}>{day.format(when)} · System log, every level · records timestamped before this moment and the first returned records timestamped at or after it</p>
+      <button className={`${styles.jumpAfter} readout`} onClick={() => {
+        const heading = document.getElementById('record-after-title');
+        heading?.focus({ preventScroll: true });
+        heading?.scrollIntoView({ block: 'start' });
+      }}>Jump to the records at or after this time ↓</button>
+      <h2 className={`${styles.frameSideTitle} display`}>Before this moment</h2>
       <OutcomeLine taken={before.taken} noun="records" singular="record" emptyText="No retained System records returned before this moment" />
       {before.rows.length && before.held ? (
         <>
@@ -151,10 +157,65 @@ function Frame({ moment }: { moment: string }) {
           <Rows records={before.rows} reading={before.held} listRef={before.list} />
         </>
       ) : null}
+      <After moment={moment} />
       <FaultWindow moment={moment} />
       <KernelReportWindow moment={moment} />
     </section>
   );
+}
+
+/** A separate, exact oldest-first reading; its reach is never merged with the before frame. */
+function After({ moment }: { moment: string }) {
+  const [count, setCount] = useState(PAGE);
+  const frame = useRef<HTMLElement>(null);
+  const focusNewRow = useRef<number | null>(null);
+  const taken = useReading<EventRecord[]>('events', { log: 'System', levels: [], since: moment, order: 'oldest', count });
+  const held = useHeld(taken);
+  const rows = section(held, 'records') ?? [];
+  useLayoutEffect(() => {
+    const index = focusNewRow.current;
+    if (index === null) return;
+    if (rows.length > index) {
+      frame.current?.querySelectorAll<HTMLButtonElement>('li[data-record] > button')[index]?.focus();
+      focusNewRow.current = null;
+    } else if (taken.state === 'lost' || taken.state === 'done') {
+      focusNewRow.current = null;
+    }
+  }, [rows.length, taken.state, held, taken.reading]);
+  const collection = held?.sections.find((s) => s.name === 'collection')?.data as unknown as
+    ({ truncated?: boolean | null; stopped?: unknown; queried_at?: string | null; window_end?: string | null; log_oldest?: string | null; oldest_state?: string | null; log_enabled?: boolean | null } | undefined);
+  const coverage = held?.sections.find((s) => s.name === 'coverage')?.data as unknown as NearbyReach | undefined;
+  const heldCount = typeof held?.params.count === 'number' ? held.params.count : PAGE;
+  const nextCount = Math.min(FRAME_LIMIT, heldCount * 2);
+  const stale = held && held !== taken.reading;
+  const reachedEnd = coverage?.complete === true;
+  const limitReached = heldCount === FRAME_LIMIT && collection?.truncated === true;
+  const stopped = collection?.stopped != null;
+
+  return <section ref={frame} className={styles.after} aria-labelledby="record-after-title">
+    <div className={styles.momentMarker}><span className="readout">Selected moment · {moment}</span></div>
+    <div className={styles.afterHead}>
+      <div><p className="label">The System log · every level</p><h2 id="record-after-title" tabIndex={-1} className="display">At or after this moment</h2></div>
+      {held && observed(held) ? <AddToStack item={{ kind: 'reading', envelope: held, title: `The record at or after ${moment}` }} label={stale ? 'Stack this held reading' : 'Stack this reading'} /> : null}
+    </div>
+    <p className={styles.afterIntro}>The first returned System records timestamped from this instant. A restart can write its own record here. Clock changes can move records across this boundary. A nearby record is a lead to inspect, not proof of a cause.</p>
+    <OutcomeLine taken={taken} noun="records" singular="record" emptyText="No retained System records returned at or after this moment" />
+    {stale ? <p className={`${styles.afterStatus} readout`} role="status">Showing the last observed reading while {taken.state === 'taking' ? 'another take is in progress.' : 'the latest take did not observe the machine.'}</p> : null}
+    {stale && held?.warnings.length ? <ul className={`${styles.nearbyWarnings} readout`} aria-label="Limits of the held reading">{held.warnings.map((warning, index) => <li key={index}>{firstLine(warning)}</li>)}</ul> : null}
+    {collection && coverage ? <p className={`${styles.afterStatus} readout`}>{nearbyReachText(coverage, collection, collection.window_end ?? collection.queried_at ?? moment, 'System log')} · {rows.length} returned of {heldCount} requested{collection.truncated === true ? '; later matching records remain' : ''}.</p> : null}
+    {rows.length && held ? <Rows records={rows} reading={held} /> : null}
+    <div className={styles.afterActions}>
+      {rows.length > 0 && held && observed(held) && collection?.truncated === true && !stopped && heldCount < FRAME_LIMIT ? <button className={`${styles.more} readout`} aria-disabled={taken.state === 'taking'} onClick={(event) => {
+        if (taken.state === 'taking') return;
+        if (event.detail === 0) focusNewRow.current = rows.length;
+        if (nextCount === count) taken.retake();
+        else setCount(nextCount);
+      }}>{taken.state === 'taking' ? 'Taking…' : `${nextCount - heldCount} more at or after this`}</button> : null}
+      {limitReached ? <p className={`${styles.afterStatus} readout`}>This frame reached {FRAME_LIMIT.toLocaleString()} records. Choose a later moment to continue.</p> : null}
+      {collection?.truncated === false && !reachedEnd ? <p className={`${styles.afterStatus} readout`}>This read reached the end of retained matching records; coverage of the requested time could not be established.</p> : null}
+      {rows.length > 0 ? <button className={`${styles.action} readout`} aria-disabled={taken.state === 'taking'} onClick={() => { if (taken.state !== 'taking') taken.retake(); }}>{taken.state === 'taking' ? 'Taking…' : 'Read this side again'}</button> : null}
+    </div>
+  </section>;
 }
 
 /** An optional second source beside the System frame, opened only when the person asks for it. */

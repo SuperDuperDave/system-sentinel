@@ -598,7 +598,7 @@ def test_stack_index_size_does_not_scale_with_stored_record_rows(client: TestCli
 def test_adding_a_reading_takes_it_now_and_keeps_its_provenance(client: TestClient):
     item = add(client, kind="reading", take={"name": "events", "params": {"count": 2}})
     assert item["kind"] == "reading" and item["rank"] == 3 and item["verbosity"] == "full"
-    assert item["title"] == "events (log=System, levels=1,2, count=2)"
+    assert item["title"] == "events (log=System, levels=1,2, count=2, order=newest)"
     assert "reading" not in item and item["provenance"]["outcome"] == "ok"
     assert item["provenance"]["asked_at"] and item["provenance"]["params"]["count"] == 2
     saved = full_item(client, item["id"])
@@ -961,6 +961,11 @@ def test_log_handoffs_keep_retention_and_citable_rows(client: TestClient):
     assert "| Time | Level | Provider | Id | Record | Message |" in summary
     assert "System:307001" in summary and '"complete": true' in summary
     assert '"retained_from": "2026-09-01T00:00:00Z"' in summary and "Synthetic window reach" in summary
+    oldest = {**envelope, "sections": [envelope["sections"][0],
+              {**envelope["sections"][1], "data": {**envelope["sections"][1]["data"], "order": "oldest"}},
+              envelope["sections"][2]]}
+    assert "Returned rows are oldest first." in handoff(oldest)
+    assert "Returned rows are newest first." in handoff(envelope)
     assert "No bounded summary" not in summary
     compact_selection = handoff(envelope, ids=["System:307001"])
     assert "by log and RecordId" in compact_selection
@@ -1178,7 +1183,7 @@ def test_the_composed_handoff(client: TestClient):
 
     assert text.startswith("# System Sentinel handoff")
     assert text.index("QUANTUM DIAGNOSTICIAN") < text.index(f"## 1. {summary['title']}") < text.index("## 2.") < text.index("## 3.")
-    assert "- reading: `events` (log=System, levels=1,2, count=2)" in text
+    assert "- reading: `events` (log=System, levels=1,2, count=2, order=newest)" in text
     assert "- outcome: ok — the machine was observed" in text and "- reading count: 2" in text
     assert "- record cutoff: limit=2, returned=2, truncated=" in text
     assert "- method: powershell" in text and "- class: raw" in text and "- kind: selection" in text

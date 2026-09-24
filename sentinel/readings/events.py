@@ -138,10 +138,14 @@ def events_query(log: str, levels: list[int], window: str) -> str:
     return query_list(log, f"*[System[{' and '.join(parts)}]]" if parts else "*")
 
 
-def events_script(log: str, levels: list[int], count: int, since: str = "", before: str = "") -> str:
+def events_script(log: str, levels: list[int], count: int, since: str = "", before: str = "", order: str = "newest") -> str:
+    if order not in ("newest", "oldest"):
+        raise ValueError("parameter 'order': choose newest or oldest")
+    if order == "oldest" and (not since.strip() or since.strip().lower() == "boot"):
+        raise ValueError("parameter 'since': oldest-first events require an explicit inclusive timestamp")
     prelude, window, start, end, from_ticks, until_ticks = window_clauses(since, before)
     return log_records_script(log, events_query(log, levels, window), count, prelude=prelude, window_start=start, window_end=end,
-                              from_ticks=from_ticks, until_ticks=until_ticks)
+                              from_ticks=from_ticks, until_ticks=until_ticks, oldest=order == "oldest")
 
 
 def record_script(log: str, before: str, count: int) -> str:
@@ -229,12 +233,17 @@ def _utc_stamp(before: str) -> str:
 
 
 def take_events(bridge: Bridge, params: dict[str, Any]) -> Reading:
-    script = events_script(params["log"], params["levels"], params["count"], str(params.get("since") or ""), str(params.get("before") or ""))
+    order = str(params["order"])
+    script = events_script(params["log"], params["levels"], params["count"], str(params.get("since") or ""),
+                           str(params.get("before") or ""), order)
     result = bridge.run(script, depth=8)
     has_since = bool(str(params.get("since") or "").strip())
     before = str(params.get("before") or "").strip()
     return from_log_collector("events", params, script, result, params["log"], params["count"], window=has_since,
-                              before=exact_stamp(before, "before")[0] if before and not has_since else None)
+                              before=exact_stamp(before, "before")[0] if before and not has_since else None,
+                              order=order,
+                              requested_start=exact_stamp(str(params["since"]), "since", naive="local")[0] if order == "oldest" else None,
+                              requested_end=exact_stamp(before, "before")[0] if order == "oldest" and before else None)
 
 
 def take_record(bridge: Bridge, params: dict[str, Any]) -> Reading:
@@ -305,13 +314,13 @@ def oldest_window_coverage(
     if any(moment is None for moment in times):
         return reach, "an oldest-first returned record had no readable time"
     if any(not start_key <= moment < observed_key for moment in times if moment is not None):
-        return reach, "an oldest-first returned record fell outside the observed requested window"
+        return reach, "an oldest-first returned record was outside the pre-query observed time window; it may have been filed while the query ran"
     if isinstance(probe, str):
         times.append(known_stamp_key(probe))
     ordered = all(left <= right for left, right in zip(times, times[1:], strict=False) if left is not None and right is not None)
     reach["returned_time_ordered"] = ordered
     if not ordered:
-        return reach, "returned Application filing times moved backward in log order; contiguous time reach is unknown"
+        return reach, f"returned {source['log']} record times moved backward in log order; contiguous time reach is unknown"
     validated = directional_reach(source, rows, requested_start, end, observed_end, query, "oldest", probe if isinstance(probe, str) else None, ordered)
     return {**validated, "returned_time_ordered": ordered}, None
 
@@ -465,10 +474,11 @@ register(
         take=take_events,
         params=(
             Param("log", "str", "System", "Which log.", choices=LOGS),
-            Param("levels", "list[int]", [1, 2], "Levels to include: 1 critical, 2 error, 3 warning, 4 information."),
-            Param("count", "int", 50, "How many of the most recent records.", minimum=1, maximum=MAX_LOG_RECORDS),
+            Param("levels", "list[int]", [1, 2], "Levels to include: 1 critical, 2 error, 3 warning, 4 information. An empty list means every level, including levels outside 1–4."),
+            Param("count", "int", 50, "How many records to return in the selected order.", minimum=1, maximum=MAX_LOG_RECORDS),
             Param("since", "str", "", "Inclusive ISO timestamp, preserving up to seven fractional digits, or 'boot' for Windows' reported kernel-session start. Empty for the most recent records."),
             Param("before", "str", "", "Exclusive ISO end with Z or an offset, preserving up to seven fractional digits. Pair with since for an anchored window; empty uses the query time."),
+            Param("order", "str", "newest", "Keep the newest matching records, or the oldest from an explicit since timestamp. 'boot' is not an exact anchor for oldest-first reads.", choices=("newest", "oldest")),
         ),
         private=("MachineName", "user names inside Message", "profile paths inside Message", "CPER bytes in binary Properties"),
     )

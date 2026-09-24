@@ -131,8 +131,8 @@ def test_object_warning_extraction_and_builder_changes_preserve_the_bridge_paylo
 
 def test_spec_coerces_defaults_types_and_choices():
     spec = REGISTRY["events"]
-    assert spec.coerce({}) == {"log": "System", "levels": [1, 2], "count": 50, "since": "", "before": ""}
-    assert spec.coerce({"levels": "1,2,3", "count": "5", "log": "Application"}) == {"log": "Application", "levels": [1, 2, 3], "count": 5, "since": "", "before": ""}
+    assert spec.coerce({}) == {"log": "System", "levels": [1, 2], "count": 50, "since": "", "before": "", "order": "newest"}
+    assert spec.coerce({"levels": "1,2,3", "count": "5", "log": "Application"}) == {"log": "Application", "levels": [1, 2, 3], "count": 5, "since": "", "before": "", "order": "newest"}
     with pytest.raises(ValueError):
         spec.coerce({"log": "Security"})
     with pytest.raises(ValueError):
@@ -260,7 +260,7 @@ def test_take_events_through_a_fake_bridge():
     bridge = FakeBridge(log_collector_result([{"RecordId": 1, "Id": 41}], limit=3))
     r = asyncio.run(take("events", bridge, {"count": "3"}))
     assert r.outcome == "ok" and r.count == 1
-    assert r.params == {"log": "System", "levels": [1, 2], "count": 3, "since": "", "before": ""}
+    assert r.params == {"log": "System", "levels": [1, 2], "count": 3, "since": "", "before": "", "order": "newest"}
     assert "-MaxEvents 4" in bridge.scripts[0]
 
 
@@ -283,6 +283,40 @@ def test_a_time_window_reports_an_exact_record_cutoff_and_retains_only_the_reque
     assert empty.outcome == "empty" and empty.section("collection").data["returned"] == 0 and empty.section("collection").data["truncated"] is False
     failed = asyncio.run(take("events", FakeBridge(BridgeResult("timeout")), {"count": 3, "since": "boot"}))
     assert failed.count is None and failed.sections == []
+
+
+def test_oldest_system_events_keep_the_first_rows_and_bound_later_reach():
+    moment = "2026-09-20T10:00:00.1234567Z"
+    rows = [
+        {"RecordId": 10, "TimeCreated": moment},
+        {"RecordId": 11, "TimeCreated": "2026-09-20T10:00:00.1234568Z"},
+    ]
+    result = log_collector_result(rows, limit=2, window_start=moment, queried_at="2026-09-21T00:00:00.0000000Z")
+    result.items[0].update(truncated=True, probe_time="2026-09-20T10:00:00.1234569Z")
+    reading = asyncio.run(take("events", FakeBridge(result), {"since": moment, "levels": [], "order": "oldest", "count": 2}))
+    assert reading.outcome == "ok" and reading.section("records").data == rows
+    assert reading.section("collection").data["order"] == "oldest"
+    reach = reading.section("coverage").data
+    assert reach["covered_from"] == moment and reach["covered_from_inclusive"] is True
+    assert reach["covered_until"] == "2026-09-20T10:00:00.1234569Z" and reach["complete"] is False
+    assert reach["returned_time_ordered"] is True
+    assert "-Oldest" in reading.method["query"] and "Level=" not in reading.method["query"]
+    assert any("later matching records" in warning for warning in reading.warnings)
+
+
+def test_oldest_system_events_keep_inverted_rows_without_claiming_time_reach():
+    moment = "2026-09-20T10:00:00.0000000Z"
+    rows = [
+        {"RecordId": 10, "TimeCreated": "2026-09-20T10:00:02.0000000Z"},
+        {"RecordId": 11, "TimeCreated": "2026-09-20T10:00:01.0000000Z"},
+    ]
+    result = log_collector_result(rows, limit=2, window_start=moment)
+    result.items[0]["probe_time"] = None
+    reading = asyncio.run(take("events", FakeBridge(result), {"since": moment, "levels": [], "order": "oldest", "count": 2}))
+    assert reading.section("records").data == rows
+    assert reading.section("coverage").data["returned_time_ordered"] is False
+    assert reading.section("coverage").data["covered_until"] is None
+    assert any("System record times moved backward" in warning for warning in reading.warnings)
 
 
 def test_take_record_reverses_to_oldest_first_and_rejects_bad_timestamps():

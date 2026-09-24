@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.9.5] - 2026-09-24
+
+### Changed
+- `events` now accepts `order=oldest` with an explicit ISO `since` moment. It returns the earliest matching System or Application records with exact seven-digit time filtering before its row cap. The extra matching row defines an exclusive later reach; requested bounds, the host clock, returned times and probe must check out before that reach can be claimed. Default newest-first calls remain available.
+- Record now shows the first System records timestamped at or after a held moment below its progressive before frame. The sides have separate outcomes and reach, a visible boundary, a phone-friendly jump control, complete raw rows and independent Stack actions. Widening keeps open rows and keyboard place; a failed retake labels and keeps the last observed answer. The Log view's “Every level” control now requests every level, including any records outside levels 1–4.
+- [Agent-answer measurements](docs/measurements/agent-answers.md) now distinguish serialized answer size from a synthetic Claude Code 2.1.280 client probe. This client chose structured content and saved a complete oversized result behind a path; other clients and versions remain unmeasured.
+
+### Limits
+- Oldest-first reach assumes no clock inversion among unreturned records. Returned inversions remove the contiguous time claim without erasing raw rows. A time-based split can miss a later-written record whose timestamp moved backward. A large System log or another machine may have different query cost; the after frame starts with 25 rows and can be widened to 2,000.
+
 ## [1.9.4] - 2026-09-24
 
 ### Changed

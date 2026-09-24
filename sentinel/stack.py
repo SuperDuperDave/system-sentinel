@@ -712,7 +712,11 @@ def _log_handoff(envelope: dict[str, Any], records: list[dict[str, Any]], *, sel
     if compact:
         if selected:
             lines.append("")
-        order = "oldest first; every row is strictly before the requested moment" if envelope.get("reading") == "record" else "newest first"
+        if envelope.get("reading") == "record":
+            order = "oldest first; every row is strictly before the requested moment"
+        else:
+            collection = named.get("collection", {}).get("data")
+            order = "oldest first" if isinstance(collection, dict) and collection.get("order") == "oldest" else "newest first"
         lines += [f"Returned rows are {order}.", "", *_log_summary(records, fallback_log=_known_log(envelope))]
         if not selected and context:
             lines += ["", *_json_block(context)]

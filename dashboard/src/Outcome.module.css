@@ -19,7 +19,7 @@
   white-space: nowrap;
 }
 .action:hover { border-color: var(--muted); }
-.action:disabled { color: var(--muted); cursor: default; }
+.action:disabled, .action[aria-disabled='true'] { color: var(--muted); cursor: default; }
 .warnings { list-style: none; margin: 4px 0 0; padding: 0; }
 .warning {
   display: flex;

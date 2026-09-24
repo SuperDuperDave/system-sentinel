@@ -109,6 +109,44 @@ function Get-WinEvent {
 
 
 @pytest.mark.host
+def test_native_system_moment_split_keeps_exact_boundary_only_on_the_after_side(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(sentinel.bridge, "POOL_SIZE", 0)
+    fake = r"""
+$boundary = [datetimeoffset]::Parse('2026-09-22T00:00:00.1234567Z', [cultureinfo]::InvariantCulture).UtcDateTime
+function Get-WinEvent {
+    [CmdletBinding()]
+    param([xml]$FilterXml, [string]$ListLog, [string]$LogName, [int]$MaxEvents, [switch]$Oldest)
+    if ($ListLog) { [pscustomobject]@{ IsEnabled=$true; LogMode='Circular' }; return }
+    if ($LogName) { [pscustomobject]@{ TimeCreated=$boundary.AddDays(-1) }; return }
+    $times = @($boundary.AddTicks(-1), $boundary, $boundary.AddTicks(1), $boundary.AddTicks(2))
+    if (-not $Oldest) { [array]::Reverse($times) }
+    foreach ($at in $times) {
+        [pscustomobject]@{
+            RecordId=($at.Ticks - $boundary.Ticks + 100); Id=1; Level=4; LevelDisplayName='Information'
+            ProviderName='Synthetic'; ProviderId=$null; Version=1; MachineName='SYNTHETIC'
+            TaskDisplayName=$null; TimeCreated=$at; Message='Synthetic'; Properties=@()
+        }
+    }
+}
+"""
+    bridge = real_bridge_or_skip()
+    moment = "2026-09-22T00:00:00.1234567Z"
+    scripts = (
+        (record_script("System", moment, 1), [99], False, False),
+        (events_script("System", [], 1, moment, order="oldest"), [100], True, True),
+    )
+    for culture in ("fi-FI", "th-TH"):
+        locale = f"[Threading.Thread]::CurrentThread.CurrentCulture = [cultureinfo]::GetCultureInfo('{culture}')\n"
+        for script, ids, oldest, truncated in scripts:
+            result = bridge.run(locale + fake + script, depth=8)
+            assert result.outcome == "ok" and len(result.items) == 1, result.error
+            answer = result.items[0]
+            assert answer["outcome"] == "ok" and answer["truncated"] is truncated
+            assert [row["RecordId"] for row in answer["records"]] == ids
+            assert ("probe_time" in answer) is oldest
+
+
+@pytest.mark.host
 def test_native_exact_pipeline_keeps_absence_partial_work_and_failure_distinct(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(sentinel.bridge, "POOL_SIZE", 0)
     fake = r"""

@@ -1,6 +1,6 @@
 # Agent answer size
 
-The reading envelope carries exact source evidence, its limits, and the collection method. An MCP reading returns that envelope as both JSON text and structured content. This table measures the serialized result, not what a particular client places in a model's context. Client handling of large answers has not been established; these numbers are a shape baseline, not a client limit or a diagnosis of truncation.
+The reading envelope carries exact source evidence, its limits, and the collection method. An MCP reading returns that envelope as both JSON text and structured content. This table measures the serialized result, not what a particular client places in a model's context. These numbers are a shape baseline, not a client limit or a diagnosis of truncation.
 
 Regenerate from public synthetic inputs in a source checkout with test dependencies installed. The command needs the repository root on Python's import path because the synthetic bridge is in `tests/`:
 
@@ -24,4 +24,17 @@ Measured with source version 1.9.4:
 
 For the heavy row, raw `Message` values account for 1,064,000 serialized bytes and raw `Properties` values for 2,056,000. Those fields dominate the 3,429,868-byte sections payload; the 4,588-byte method is a small part of this case. MCP result bytes include the text and structured representations plus their JSON wrapper, so they must not be interpreted as model-context bytes. The source can be requested with smaller counts or a narrower window; the raw answer itself is still complete for the request made.
 
-The envelope now places outcome, count, errors, warnings and redaction notes ahead of sections and method in text. That preserves the useful prefix of a long answer when someone reads it from the top, but does not reduce its size or establish how an agent client handles a long result. Before changing the raw or derived evidence contract, measure client behavior with known-size synthetic answers, including whether it rejects, truncates or passes each representation to the model. A projection must keep source coverage and omission explicit and preserve the alignment between raw records, decoded entries and cross-references.
+The envelope now places outcome, count, errors, warnings and redaction notes ahead of sections and method in text and structured content. That preserves the useful prefix of a long answer when someone reads it from the top, but does not reduce its size. A projection must keep source coverage and omission explicit and preserve the alignment between raw records, decoded entries and cross-references.
+
+## Claude Code client probe
+
+On 2026-09-24, a local, synthetic stdio MCP server returned a Sentinel-shaped answer to Claude Code 2.1.280. It supplied JSON text and `structuredContent` with different `T_` and `S_` markers; the server logged the SHA-256 of each representation. Each invocation used only this temporary MCP server and its single answer tool. This tested the client path, not System Sentinel's HTTP transport or any machine reading.
+
+| Synthetic case | Text / structured bytes | Claude Code `tool_result` | Verified result |
+| --- | ---: | --- | --- |
+| 8 KiB target, identical representations | 7,688 / 7,688 | Inline, 7,688 bytes | Exact payload hash; early and tail markers present |
+| 64 KiB target, identical representations | 59,175 / 59,175 | 1,744-byte path notice | Saved file hash matched the full payload; early and tail markers present in the file |
+| 8 KiB target, distinct representations | 7,712 / 7,712 | Inline, 7,712 bytes | Hash and `S_` markers matched structured content, not text |
+| 64 KiB target, distinct representations | 59,199 / 59,199 | Path notice | Saved file hash and `S_` markers matched the full structured content, not text |
+
+In these calls, Claude Code selected structured content when both representations differed. At the larger size, the model received a path notice and did not report the evidence markers until it read the saved file. Moving caveats to the front helps inline answers and the saved file, but cannot by itself make an oversized answer visible inline. The result does not establish a universal threshold, behavior of other client versions, or Codex behavior. The source answer remains complete; a future compact agent projection would need an explicit omission count and an exact route back to the full evidence.

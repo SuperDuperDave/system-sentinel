@@ -58,7 +58,7 @@ def test_catalog(client: TestClient):
     names = {r["name"] for r in body["readings"]}
     assert {"health", "events", "record"} <= names
     events = next(r for r in body["readings"] if r["name"] == "events")
-    assert [p["name"] for p in events["params"]] == ["log", "levels", "count", "since", "before"]
+    assert [p["name"] for p in events["params"]] == ["log", "levels", "count", "since", "before", "order"]
     assert events["private"]
 
 
@@ -70,7 +70,7 @@ def test_reading_arrives_redacted_by_default(client: TestClient):
     assert "TESTBOX" not in rec["Message"] and "tester" not in rec["Message"]
     assert r"C:\Users\<user>\x" in rec["Message"]
     assert body["redacted"] == ["host", "user"]
-    assert body["params"] == {"log": "System", "levels": [1, 2], "count": 1, "since": "", "before": ""}
+    assert body["params"] == {"log": "System", "levels": [1, 2], "count": 1, "since": "", "before": "", "order": "newest"}
     assert body["method"]["kind"] == "powershell" and "Get-WinEvent" in body["method"]["query"]
 
 
@@ -86,6 +86,13 @@ def test_bounded_window_reaches_an_agent_through_the_authenticated_route():
     assert body["outcome"] == "empty" and body["params"]["before"] == end
     coverage = next(section["data"] for section in body["sections"] if section["name"] == "coverage")
     assert coverage["complete"] is True and coverage["covered_until"] == end
+
+
+def test_oldest_events_require_an_explicit_start_at_the_http_boundary(client: TestClient):
+    missing = client.get("/api/readings/events?order=oldest", headers=AUTH)
+    boot = client.get("/api/readings/events?order=oldest&since=boot", headers=AUTH)
+    assert missing.status_code == 422 and "since" in missing.text
+    assert boot.status_code == 422 and "since" in boot.text
 
 
 def test_a_failed_relearn_keeps_names_already_learned():

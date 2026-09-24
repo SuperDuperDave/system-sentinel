@@ -180,6 +180,20 @@
 
 /* The frame: what the list is, under the title that says it. */
 .frameLine { margin: 0 0 8px; color: var(--muted); max-width: 78ch; }
+.frameSideTitle { font-size: 19px; margin: 18px 0 8px; }
+.jumpAfter { min-height: 40px; padding: 0 0 2px; color: var(--ink); border-bottom: 1px solid var(--rule); text-align: left; }
+.jumpAfter:hover { border-color: var(--muted); }
+.after { margin: 32px 0 0; padding-top: 14px; border-top: 1px solid var(--rule); scroll-margin-top: 20px; }
+.momentMarker { display: flex; align-items: center; gap: 12px; color: var(--muted); margin-bottom: 20px; font-size: 12px; overflow-wrap: anywhere; }
+.momentMarker::before, .momentMarker::after { content: ''; flex: 1; height: 1px; background: var(--rule); }
+.afterHead { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 20px; }
+.afterHead p, .afterHead h2 { margin: 0 0 4px; }
+.afterHead h2 { font-size: clamp(19px, 2.5vw, 24px); scroll-margin-top: 20px; }
+.afterIntro { max-width: 78ch; margin: 8px 0 12px; color: var(--body); font-size: 13px; line-height: 1.5; }
+.afterStatus { margin: 10px 0; color: var(--muted); font-size: 12px; }
+.afterActions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 20px; margin-top: 6px; }
+.afterActions .more { margin: 0; }
+.afterActions .action[aria-disabled='true'] { color: var(--muted); cursor: default; }
 
 .nearby { margin: 26px 0 0; padding: 18px 20px; border: 1px solid var(--rule); background: var(--surface-raised); }
 .nearbyHead { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 8px 20px; }
