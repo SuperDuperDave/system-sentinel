@@ -183,6 +183,9 @@ def test_persisted_large_record_selection_survives_serving_and_browser_resubmiss
     assert response.status_code == 200
     held = browser_json(response.text)["items"][0]
     assert held["ids"] == [str(FIRST_ID)]
+    composed = client.get("/api/stack/composed", headers=AUTH)
+    assert composed.status_code == 200
+    assert browser_json(composed.text)["stack"]["items"][0]["ids"] == [str(FIRST_ID)]
     assert "reading" not in held and held["provenance"]["reading"] == "faults"
     assert tool(client, "stack_list")["items"][0] == held
     full = browser_json(client.get(f"/api/stack/items/{held['id']}", headers=AUTH).text)

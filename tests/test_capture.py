@@ -67,6 +67,7 @@ def test_a_capture_holds_automatic_readings_the_stack_and_the_handoff(client: Te
     for path, member in listed.items():
         assert member["bytes"] == len(files[path]) > 0
     assert listed["readings/events.json"]["outcome"] == "ok"
+    assert listed["composed.md"]["prompt"]["state"] == "included"
     assert "exact WHEA fields" in listed["readings/whea.json"]["scope"]
     assert json.loads(files["readings/events.json"])["sections"][0]["data"][0]["Id"] == 41
     assert "it froze while idle" in files["composed.md"].decode()
@@ -137,6 +138,23 @@ def test_capture_keeps_machine_readings_when_saved_stack_is_unavailable(client: 
     assert "readings/events.json" in files and path.read_bytes() == b"{broken"
     listed = client.get("/api/captures", headers=AUTH).json()["captures"][0]["manifest"]
     assert set(listed["unavailable"]) == {"stack.json", "composed.md"}
+
+
+def test_capture_keeps_handoff_when_selected_prompt_library_is_damaged(client: TestClient):
+    client.post("/api/stack/items", headers=AUTH, json={"kind": "note", "note": "Keep this evidence"})
+    path = client.app.state.sentinel.prompts.store.path
+    path.write_bytes(b"{broken")
+    response = client.post("/api/captures", headers=AUTH)
+    assert response.status_code == 200
+    files = members(response.content)
+    manifest = json.loads(files["manifest.json"])
+    composed = next(entry for entry in manifest["members"] if entry["path"] == "composed.md")
+    assert composed["prompt"] == {"id": "quantum-diagnostician", "state": "unavailable", "reason": "invalid"}
+    assert "prompt library could not be used (invalid)" in files["composed.md"].decode()
+    assert "Keep this evidence" in files["composed.md"].decode()
+    assert "stack.json" in files and manifest["unavailable"] == []
+    listed = client.get("/api/captures", headers=AUTH).json()["captures"][0]["manifest"]
+    assert listed["prompt_state"] == "unavailable" and path.read_bytes() == b"{broken"
 
 
 def test_captures_are_listed_and_fetched_and_nothing_wanders(client: TestClient):

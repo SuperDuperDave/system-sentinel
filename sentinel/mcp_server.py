@@ -55,7 +55,7 @@ INSTRUCTIONS = (
     "'whea' for a bounded newest-record preview across both WHEA logs, 'whea_window' for one source's exact filing-time window in either direction, and 'whea_record' for one exact retained report's raw fields and decoded detail; 'signals' last. "
     "A burst, a gap or a correlation is a lead, never a diagnosis. "
     "Stack list and change tools return a provenance index; 'stack_item' returns one complete stored item, "
-    "and 'compose' returns the handoff at each item's chosen verbosity. "
+    "and 'compose' returns the handoff at each item's chosen verbosity, with a structured prompt status and same-snapshot Stack index. "
     "The catalog and that handoff are also resources: sentinel://catalog and sentinel://handoff."
 )
 

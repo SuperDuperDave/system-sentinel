@@ -17,7 +17,6 @@ import {
   createCapture,
   getCaptures,
   getPrompts,
-  getStack,
   patchItem,
   patchPrompt,
   patchStack,
@@ -44,6 +43,8 @@ export function Stack() {
   const [captures, setCaptures] = useState<Capture[]>([]);
   const [problem, setProblem] = useState<string | null>(null);
   const [savedContextProblem, setSavedContextProblem] = useState<string | null>(null);
+  const [promptProblem, setPromptProblem] = useState<string | null>(null);
+  const [promptsReady, setPromptsReady] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const setSession = useApp((s) => s.setSession);
 
@@ -64,8 +65,8 @@ export function Stack() {
   const refresh = useCallback(
     async () => {
       try {
-        const [state, text] = await Promise.all([getStack(), composedText()]);
-        setStack(state);
+        const text = await composedText();
+        setStack(text.stack);
         setHandoff(text);
         setSavedContextProblem(null);
       } catch (err: unknown) {
@@ -78,7 +79,19 @@ export function Stack() {
     [setSession],
   );
 
-  const refreshPrompts = useCallback(() => guard(async () => setPrompts(await getPrompts())), [guard]);
+  const refreshPrompts = useCallback(async () => {
+    try {
+      const current = await getPrompts();
+      setPrompts(current);
+      setPromptProblem(null);
+    } catch (err: unknown) {
+      if (err instanceof Unauthorized) return setSession('closed');
+      setPrompts([]);
+      setPromptProblem(err instanceof Error ? err.message : String(err));
+    } finally {
+      setPromptsReady(true);
+    }
+  }, [setSession]);
   const refreshCaptures = useCallback(() => guard(async () => setCaptures(await getCaptures())), [guard]);
 
   useEffect(() => {
@@ -102,7 +115,10 @@ export function Stack() {
   const choose = (change_: { prompt_id?: string | null; system_prompt?: boolean }) => guard(async () => { await patchStack(change_); await refresh(); });
 
   const items = stack?.items ?? [];
-  const leading = prompts.find((p) => p.id === stack?.prompt_id) ?? null;
+  const promptLabel = handoff?.prompt.state === 'included' ? 'prompt included in handoff'
+    : handoff?.prompt.state === 'off' ? 'prompt off'
+      : handoff?.prompt.state === 'missing' ? 'chosen prompt missing'
+        : handoff?.prompt.state === 'unavailable' ? 'prompt library unavailable' : 'no prompt selected';
 
   return (
     <section>
@@ -112,11 +128,11 @@ export function Stack() {
       {stack ? (
         <p className={`${styles.state} readout`}>
           {items.length === 0 ? 'Nothing on the stack' : `${items.length} ${items.length === 1 ? 'item' : 'items'}`}
-          {stack.system_prompt && leading ? ` · led by ${leading.name}` : ' · no prompt'}
+          {` · ${promptLabel}`}
         </p>
       ) : (
         <p className={`${savedContextProblem ? styles.problem : styles.state} readout`} role={savedContextProblem ? 'alert' : 'status'}>
-          {savedContextProblem ? `Saved Stack or prompt data is unavailable: ${savedContextProblem}` : 'Loading saved context…'}
+          {savedContextProblem ? `Saved Stack data is unavailable: ${savedContextProblem}` : 'Loading saved context…'}
         </p>
       )}
       {problem && !savedContextProblem ? <p className={`${styles.problem} readout`} role="status">{problem}</p> : null}
@@ -155,14 +171,16 @@ export function Stack() {
           />
           <span>Lead the handoff with a prompt</span>
         </label>
-        <Library
+        {promptProblem ? <p className={`${styles.problem} readout`} role="alert">Prompt library unavailable: {promptProblem}. The saved evidence and handoff remain available. <button className={styles.quiet} onClick={() => void refreshPrompts()}>Retry library</button></p> : null}
+        {!promptsReady && !promptProblem ? <p className={`${styles.state} readout`} role="status">Loading prompt library…</p> : null}
+        {promptsReady && !promptProblem ? <Library
           prompts={prompts}
           chosen={stack?.prompt_id ?? null}
           onChoose={(id) => choose({ prompt_id: id })}
           onSave={(id, fields) => guard(async () => { await patchPrompt(id, fields); await refreshPrompts(); await refresh(); })}
-          onAdd={(fields) => guard(async () => { await addPrompt(fields); await refreshPrompts(); })}
+          onAdd={(fields) => guard(async () => { await addPrompt(fields); await refreshPrompts(); await refresh(); })}
           onDelete={(id) => guard(async () => { await removePrompt(id); await refreshPrompts(); await refresh(); })}
-        />
+        /> : null}
       </div>
 
       <div className={styles.block}>
@@ -398,6 +416,7 @@ function Captures({ captures, onTaken, guard }: { captures: Capture[]; onTaken: 
                     <span className={c.manifest.unredacted ? styles.captureUnredacted : undefined}>{c.manifest.unredacted ? 'Manifest: unredacted · review before sharing' : 'Manifest: redacted'}</span>
                     <span>{c.manifest.readings} {c.manifest.readings === 1 ? 'reading' : 'readings'} · {Object.entries(c.manifest.outcomes).map(([outcome, count]) => `${count} ${captureOutcome(outcome)}`).join(' · ')}</span>
                     {c.manifest.unavailable?.length ? <span>Saved context unavailable in this capture: {c.manifest.unavailable.join(', ')}. See its manifest.</span> : null}
+                    {c.manifest.prompt_state === 'missing' || c.manifest.prompt_state === 'unavailable' ? <span>Prompt not included in handoff: {c.manifest.prompt_state}. See its manifest.</span> : null}
                   </>
                 ) : <span>Manifest {captureManifestState(c.manifest?.status)} · privacy and reading outcomes unknown</span>}
               </span>

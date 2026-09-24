@@ -97,12 +97,9 @@ async def create(bridge: Bridge, stack: Stack, prompts: Prompts, redactor: Redac
                 unavailable.append({"member": STACK_MEMBER, "reason": "saved Stack data unavailable"})
 
             if not unavailable:
-                try:
-                    composed = compose(stack, prompts, redactor, stack_state=snapshot)
-                    removed.update(composed["redacted"])
-                    members.append({"path": COMPOSED_MEMBER, "items": composed["items"], "bytes": _write(archive, COMPOSED_MEMBER, composed["text"])})
-                except StoreUnavailable:
-                    unavailable.append({"member": COMPOSED_MEMBER, "reason": "saved Stack or prompt data unavailable"})
+                composed = compose(stack, prompts, redactor, stack_state=snapshot)
+                removed.update(composed["redacted"])
+                members.append({"path": COMPOSED_MEMBER, "items": composed["items"], "prompt": composed["prompt"], "bytes": _write(archive, COMPOSED_MEMBER, composed["text"])})
             else:
                 unavailable.append({"member": COMPOSED_MEMBER, "reason": "saved Stack data unavailable"})
 
@@ -221,6 +218,9 @@ def _manifest_summary(path: Path) -> dict[str, Any]:
     if len(unavailable_names) != len(set(unavailable_names)) or set(unavailable_names) & {entry.get("path") for entry in members if isinstance(entry, dict)}:
         return {"status": "unreadable"}
     counts = Counter(row["outcome"] for row in rows)
+    handoff = next((entry for entry in members if isinstance(entry, dict) and entry.get("path") == COMPOSED_MEMBER), None)
+    prompt = handoff.get("prompt") if handoff else None
+    prompt_state = prompt.get("state") if isinstance(prompt, dict) else None
     return {
         "status": "read",
         "captured_at": captured_at,
@@ -228,6 +228,7 @@ def _manifest_summary(path: Path) -> dict[str, Any]:
         "readings": readings,
         "omitted": len(omitted_names),
         "unavailable": unavailable_names,
+        "prompt_state": prompt_state if prompt_state in ("included", "off", "none", "missing", "unavailable") else None,
         "outcomes": {outcome: counts[outcome] for outcome in OUTCOMES if counts[outcome]},
     }
 

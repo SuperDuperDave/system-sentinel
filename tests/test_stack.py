@@ -670,10 +670,49 @@ def test_unreadable_prompt_library_is_reported_and_never_reseeded(client: TestCl
     for method, route, body in (
         ("get", "/api/prompts", None),
         ("post", "/api/prompts", {"name": "New prompt"}),
-        ("get", "/api/stack/composed", None),
     ):
         response = client.request(method, route, headers=AUTH, json=body)
         assert response.status_code == 503 and path.read_bytes() == b"{broken"
+    composed = client.get("/api/stack/composed", headers=AUTH)
+    assert composed.status_code == 200
+    assert composed.json()["prompt"] == {"id": "quantum-diagnostician", "state": "unavailable", "reason": "invalid"}
+    assert "prompt library could not be used (invalid)" in composed.json()["text"]
+    assert composed.json()["stack"]["items"] == [] and path.read_bytes() == b"{broken"
+
+
+def test_missing_selected_prompt_is_explicit_in_handoff_and_mcp(client: TestClient):
+    add(client, kind="note", note="Keep this evidence")
+    client.patch("/api/stack", headers=AUTH, json={"prompt_id": "does-not-exist"})
+    body = client.get("/api/stack/composed", headers=AUTH).json()
+    assert body["prompt"] == {"id": "does-not-exist", "state": "missing", "reason": None}
+    assert "chosen prompt no longer exists" in body["text"] and "Keep this evidence" in body["text"]
+    assert len(body["stack"]["items"]) == 1
+    answer = call(client, "compose")
+    assert answer["structuredContent"]["prompt"] == body["prompt"]
+    assert "chosen prompt no longer exists" in answer["content"][0]["text"]
+    resource = asyncio.run(client.app.state.mcp_surface.read_resource(None, types.ReadResourceRequestParams(uri="sentinel://handoff")))
+    assert "chosen prompt no longer exists" in resource.contents[0].text
+
+
+def test_composed_index_and_text_share_one_snapshot(client: TestClient, monkeypatch: pytest.MonkeyPatch):
+    stack = client.app.state.sentinel.stack
+    add(client, kind="note", note="Earlier evidence")
+    original_state = stack.state
+    calls = 0
+
+    def edit_after_snapshot():
+        nonlocal calls
+        calls += 1
+        snapshot = original_state()
+        stack.add(Item(id="later", added_at="2026-09-24T00:00:01Z", kind="note", title="Later", note="Later evidence"))
+        return snapshot
+
+    monkeypatch.setattr(stack, "state", edit_after_snapshot)
+    body = client.get("/api/stack/composed", headers=AUTH).json()
+    assert calls == 1
+    assert [item["note"] for item in body["stack"]["items"]] == ["Earlier evidence"]
+    assert "Earlier evidence" in body["text"] and "Later evidence" not in body["text"]
+    assert len(original_state()["items"]) == 2
 
 
 def test_mcp_resources_name_unavailable_saved_context(client: TestClient):
@@ -1100,7 +1139,12 @@ def test_which_prompt_leads_the_handoff(client: TestClient):
     assert state["prompt_id"] == "rma-prosecutor" and state["system_prompt"] is True
     state = client.patch("/api/stack", headers=AUTH, json={"system_prompt": False}).json()
     assert state["prompt_id"] == "rma-prosecutor" and state["system_prompt"] is False
-    assert "RMA EVIDENCE REPORT" not in client.get("/api/stack/composed", headers=AUTH).json()["text"]
+    off = client.get("/api/stack/composed", headers=AUTH).json()
+    assert "RMA EVIDENCE REPORT" not in off["text"]
+    assert off["prompt"] == {"id": "rma-prosecutor", "state": "off", "reason": None}
+    client.patch("/api/stack", headers=AUTH, json={"prompt_id": None, "system_prompt": True})
+    none = client.get("/api/stack/composed", headers=AUTH).json()
+    assert none["prompt"] == {"id": None, "state": "none", "reason": None}
 
 
 def test_the_prompt_library_ships_with_six_and_takes_more(client: TestClient):
@@ -1384,6 +1428,9 @@ def test_the_composed_handoff(client: TestClient):
     body = client.get("/api/stack/composed", headers=AUTH).json()
     text = body["text"]
     assert body["items"] == 3 and body["redacted"] == ["host", "user"]
+    assert body["prompt"] == {"id": "quantum-diagnostician", "state": "included", "reason": None}
+    assert body["stack"] == client.get("/api/stack", headers=AUTH).json()
+    assert "TESTBOX" not in json.dumps(body["stack"])
 
     assert text.startswith("# System Sentinel handoff")
     assert text.index("QUANTUM DIAGNOSTICIAN") < text.index(f"## 1. {summary['title']}") < text.index("## 2.") < text.index("## 3.")

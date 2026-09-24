@@ -461,9 +461,9 @@ def create_app(state: State | None = None, mcp: bool = True) -> FastAPI:
         return guarded(index_state(remaining))
 
     @app.get("/api/stack/composed", tags=["stack"])
-    def stack_composed(unredacted: bool = False) -> dict[str, Any]:
+    def stack_composed(unredacted: bool = False) -> Response:
         """The handoff as Markdown: the prompt, then the evidence by rank, each with its provenance."""
-        return compose(state.stack, state.prompts, None if unredacted else state.redactor)
+        return JSONResponse(json_safe_integers(compose(state.stack, state.prompts, None if unredacted else state.redactor)))
 
     @app.get("/api/prompts", tags=["stack"])
     def prompts_list() -> dict[str, Any]:

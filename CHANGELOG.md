@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.9.8] - 2026-09-24
+
+### Changed
+- A composed handoff now reports whether its selected prompt was included, turned off, absent, missing, or unavailable. Missing and unreadable selected prompts leave a clear notice in the Markdown while the saved Stack evidence remains readable. HTTP and MCP receive a compact Stack index from the same saved snapshot as that text, so clients can display one consistent investigation.
+- The Stack screen refreshes its evidence and handoff from that one response. A failed prompt-library read is shown at the library without hiding readable evidence or suggesting that no prompt was chosen. Captures retain `composed.md` when only the selected prompt fails; their manifest and bounded listing state its condition.
+
+### Limits
+- Prompt resolution follows the saved Stack snapshot and may observe a later library edit; the returned status states what was actually included. A damaged Stack remains unavailable until its saved file is repaired.
+
 ## [1.9.7] - 2026-09-24
 
 ### Fixed

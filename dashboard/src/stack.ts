@@ -29,6 +29,7 @@ export interface StackState {
   items: StackItem[];
   prompt_id: string | null;
   system_prompt: boolean;
+  redacted?: string[];
 }
 
 export interface Prompt {
@@ -51,6 +52,8 @@ export interface Composed {
   text: string;
   items: number;
   redacted: string[];
+  prompt: { id: string | null; state: 'included' | 'off' | 'none' | 'missing' | 'unavailable'; reason: string | null };
+  stack: StackState;
 }
 
 /** One capture on disk. The tool never deletes them. */
@@ -60,7 +63,7 @@ export interface Capture {
   /** File modification time. The manifest's captured_at is the original capture time when readable. */
   created_at: string;
   manifest?:
-    | { status: 'read'; captured_at: string; unredacted: boolean; readings: number; outcomes: Record<string, number>; unavailable?: string[] }
+    | { status: 'read'; captured_at: string; unredacted: boolean; readings: number; outcomes: Record<string, number>; unavailable?: string[]; prompt_state?: Composed['prompt']['state'] | null }
     | { status: 'missing' | 'unreadable' | 'limit' };
 }
 

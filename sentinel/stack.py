@@ -517,18 +517,45 @@ def compose(
     text, and a handoff that rewrote what they wrote would be lying about one of the two.
     """
     state = stack.state() if stack_state is None else stack_state
-    prompt = prompts.get(state.get("prompt_id")) if state.get("system_prompt") else None
+    prompt_id = state.get("prompt_id")
+    prompt: dict[str, Any] | None = None
+    prompt_state = "off" if not state.get("system_prompt") else "none"
+    prompt_reason: str | None = None
+    if state.get("system_prompt") and prompt_id:
+        try:
+            prompt = prompts.get(prompt_id)
+        except StoreUnavailable as exc:
+            prompt_state, prompt_reason = "unavailable", exc.reason
+        else:
+            prompt_state = "included" if prompt is not None else "missing"
+    prompt_status = {"id": prompt_id, "state": prompt_state, "reason": prompt_reason}
     items = state["items"]
-    removed: list[str] = []
+    index = index_state(state)
+    removed: set[str] = set()
     if redactor is not None:
-        items, removed = redactor.redact(items)
-    return {"text": render(prompt, items), "items": len(items), "redacted": removed}
+        items, item_removed = redactor.redact(items)
+        index, index_removed = redactor.redact(index)
+        index["redacted"] = index_removed
+        safe_id, id_removed = redactor.redact(prompt_id)
+        prompt_status["id"] = safe_id
+        removed.update((*item_removed, *index_removed, *id_removed))
+    return {
+        "text": render(prompt, items, prompt_status),
+        "items": len(items),
+        "redacted": sorted(removed),
+        "prompt": prompt_status,
+        "stack": index,
+    }
 
 
-def render(prompt: dict[str, Any] | None, items: list[dict[str, Any]]) -> str:
+def render(prompt: dict[str, Any] | None, items: list[dict[str, Any]], prompt_status: dict[str, Any] | None = None) -> str:
     lines = ["# System Sentinel handoff", ""]
     if prompt:
         lines += [f"## Prompt: {prompt.get('name', '')}".rstrip(), "", (prompt.get("content") or "").strip(), ""]
+    elif prompt_status and prompt_status["state"] == "missing":
+        lines += ["## Prompt: not included", "", "The chosen prompt no longer exists in the library. The saved evidence remains below.", ""]
+    elif prompt_status and prompt_status["state"] == "unavailable":
+        lines += ["## Prompt: not included", "", f"The prompt library could not be used ({prompt_status['reason']}). The saved evidence remains below.", ""]
     ordered = sorted(items, key=lambda i: (int(i.get("rank") or 3), i.get("added_at") or ""))
     for position, item in enumerate(ordered, start=1):
         lines += _item_lines(position, item)
