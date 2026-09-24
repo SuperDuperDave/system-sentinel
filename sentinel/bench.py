@@ -1,8 +1,8 @@
 """The bench: what a reading costs on this machine, measured rather than claimed.
 
 ``system-sentinel bench`` takes every automatically selectable reading N times through the real bridge and
-reports the distribution of each envelope's own ``took_ms`` — the number the caller waited for,
-not a stopwatch held around a different piece of code. It only ever takes readings, so it reads
+reports the distribution of each envelope's own ``took_ms`` — the completed reading wall time,
+including Sentinel's own waits. The separate empty-script floor is bridge time. It only takes readings, so it reads
 the machine and never writes to it.
 
 A reading that was not observed is reported with its outcome and no time. A failure is not a
@@ -66,10 +66,14 @@ TABLE_HEAD = "| Reading | Runs | Min (ms) | Median (ms) | p95 (ms) | Outcome |\n
 
 PREAMBLE = """# Reading latency
 
-What each reading costs on the machine it was taken on, from `system-sentinel bench`. Every number
-is the envelope's own `took_ms` — what the caller waited for — over the runs the section names. A
-reading that was not observed carries its outcome instead of a time, because a failure is not a
-measurement. Min, median and p95 are nearest-rank over the observed runs: nothing is interpolated,
+Historical `system-sentinel bench` measurements from the version named in each section. Every reading row
+is that version's envelope `took_ms` over the runs the section names. Starting in v1.9.14, it is
+the completed reading wall time, including Sentinel's own waits. Earlier rows have mixed meanings:
+most copied bridge time, some included local composition, and Signals reported only its slowest
+input. Do not compare old and new reading rows directly; the empty-script bridge floor keeps its
+bridge-level definition. Regenerate both transport sections on a representative host for current
+capacity decisions. A reading that was not observed carries its outcome instead of a time, because
+a failure is not a measurement. Min, median and p95 are nearest-rank over the observed runs: nothing is interpolated,
 so a number never implies a sample that was not taken.
 
 Regenerate it on the machine, one run per transport:
@@ -83,6 +87,8 @@ The second run does not erase the first: a run rewrites its own transport's sect
 other one through. The transport a section names is the one that carried its questions: `bench`
 sets the pool's size before the first question and reads back what the bridge did with it, so a
 question that fell back to a launch is counted on the line rather than hidden in the numbers.
+The empty-script bridge floor is timed inside the bridge, so subtracting it from a reading row
+does not isolate Windows query time. Redaction and API/MCP response encoding are outside these rows.
 
 A default run takes each reading that needs no exact file or event selection in turn, the heavy readings included, so their costs add up.
 `--readings a,b` narrows it when only some are in question; a selection-dependent reading named without a reference is marked not taken. `--runs N` buys a

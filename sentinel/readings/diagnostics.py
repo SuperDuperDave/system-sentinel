@@ -1218,7 +1218,6 @@ async def take_signals(bridge: Bridge, params: dict[str, Any]) -> Reading:
         params=params,
         outcome="ok" if (observed and signals) else ("empty" if observed else "unavailable"),
         method={"kind": "readings", "readings": input_sources},
-        took_ms=max((r.took_ms for r in readings.values() if r is not None), default=0),
         count=len(signals),
     )
     # Nothing was observed, so nothing here is a finding: the section stays empty and the

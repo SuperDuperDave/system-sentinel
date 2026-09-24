@@ -15,8 +15,9 @@ import asyncio
 import inspect
 import math
 import textwrap
+import time
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Any, Literal
 
@@ -49,6 +50,7 @@ class Reading:
     sections: list[Section] = field(default_factory=list)
     asked_at: str = field(default_factory=lambda: _now())
     took_ms: int = 0
+    """Completed reading wall time at the request boundary; direct taker values are provisional."""
     count: int | None = None
     error: dict[str, Any] | None = None
     warnings: list[str] = field(default_factory=list)
@@ -203,15 +205,19 @@ async def take(name: str, bridge: Bridge, raw_params: dict[str, Any] | None = No
     """Take a reading by name. Unknown names and bad parameters raise ``KeyError``/``ValueError``.
 
     A synchronous taker runs in a worker thread: the bridge blocks on a process, and the
-    server must keep answering other clients while a slow query runs.
+    server must keep answering other clients while a slow query runs. The returned reading's
+    duration includes waiting for that worker and composing its evidence. A shallow copy leaves
+    the taker's own ``took_ms`` untouched; its evidence containers remain shared.
     """
+    started = time.perf_counter()
     spec = REGISTRY[name]
     params = spec.coerce(raw_params or {})
     # Which of the two a taker is decides where it runs; what it hands back decides whether there is
     # anything left to await. Asking the value rather than the function is also what lets a type
     # checker follow this.
     taken = spec.take(bridge, params) if inspect.iscoroutinefunction(spec.take) else await asyncio.to_thread(spec.take, bridge, params)
-    return await taken if inspect.isawaitable(taken) else taken
+    reading = await taken if inspect.isawaitable(taken) else taken
+    return replace(reading, took_ms=int((time.perf_counter() - started) * 1000))
 
 
 def from_bridge(

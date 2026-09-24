@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.9.14] - 2026-09-24
+
+### Fixed
+- A reading's `took_ms` now measures elapsed time from entering Sentinel's reading boundary through completing its evidence. It includes worker and bridge waits, composition, and all Signals scheduling waves. Health failures no longer appear to take zero milliseconds, and CLI `check` uses the same timing path. Dump inspection by reference includes both fresh reads and reference matching.
+- The API and MCP schema now describe `asked_at` as the envelope's host-clock stamp, rather than the start of a machine query. Signals' method keeps each input's own duration; the parent duration includes time inputs spent waiting for a Signals lane.
+
+### Limits
+- Reading duration excludes request routing before the reading boundary and redaction or response encoding after it. The empty-script benchmark floor remains bridge-level time, so subtracting it from a reading duration does not isolate Windows execution. Earlier benchmark rows and saved Stack readings carry mixed timing meanings; old Stack envelopes have no version field, while capture manifests do. No new public stage-timing field is added until wait, launch, query, decode and composition stages can be measured consistently.
+
 ## [1.9.13] - 2026-09-24
 
 ### Fixed

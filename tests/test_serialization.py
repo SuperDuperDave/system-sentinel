@@ -6,6 +6,7 @@ import asyncio
 import io
 import json
 import re
+import time
 import zipfile
 from copy import deepcopy
 from dataclasses import replace
@@ -152,6 +153,19 @@ def test_cli_check_prints_exact_integers_and_keeps_observation_exit_code(monkeyp
     assert output["outcome"] == outcome
     assert section(output, "counters") == {"first": str(FIRST_ID), "second": str(SECOND_ID), "available": True}
     assert reading.to_dict() == original and type(payload["first"]) is int
+
+
+def test_cli_check_measures_a_failed_health_reading(monkeypatch, capsys):
+    bridge = object()
+
+    def slow_failure(_bridge, _params):
+        time.sleep(0.06)
+        return Reading("health", {}, "unavailable", {"kind": "synthetic"}, took_ms=0)
+
+    monkeypatch.setattr(cli.Bridge, "locate", staticmethod(lambda: bridge))
+    monkeypatch.setitem(REGISTRY, "health", replace(REGISTRY["health"], take=slow_failure))
+    assert cli.main(["check"]) == 1
+    assert browser_json(capsys.readouterr().out)["took_ms"] >= 50
 
 
 @pytest.mark.parametrize("unredacted", [False, True])

@@ -104,10 +104,10 @@ def _serve(host: str, port: int, reload: bool) -> int:
 
 def _check() -> int:
     from . import readings  # noqa: F401
-    from .reading import REGISTRY
+    from .reading import take
 
     bridge = Bridge.locate()
-    reading = REGISTRY["health"].take(bridge, {})
+    reading = asyncio.run(take("health", bridge))
     print(json.dumps(json_safe_integers(reading.to_dict()), indent=1))
     return 0 if reading.observed else 1
 

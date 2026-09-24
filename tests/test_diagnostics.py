@@ -8,13 +8,14 @@ machine (a root port with two endpoints under it and a disabled device) are not 
 
 import asyncio
 import threading
+import time
 
 import pytest
 
 import sentinel.bridge as bridge_module
 from sentinel import readings  # noqa: F401  (registers the catalog)
 from sentinel.bridge import Bridge, BridgeResult, Pool
-from sentinel.reading import REGISTRY, from_bridge, take
+from sentinel.reading import REGISTRY, Reading, from_bridge, take
 from sentinel.readings import diagnostics as diagnostics_module
 from sentinel.readings.diagnostics import (
     CONSTRAINTS_SCRIPT,
@@ -915,6 +916,37 @@ def test_signals_takes_every_input_and_carries_their_provenance():
     assert [(s.name, s.cls) for s in reading.sections] == [("signals", "inferred")]
     assert reading.section("signals").basis
     assert reading.outcome in ("ok", "empty")
+
+
+def test_signals_took_ms_includes_its_input_lanes(monkeypatch):
+    async def slow_input(name, _bridge, _params):
+        await asyncio.sleep(0.06)
+        return Reading(name, {}, "empty", {"kind": "synthetic"}, took_ms=7), None
+
+    monkeypatch.setattr(diagnostics_module, "_take_input", slow_input)
+    monkeypatch.setattr(bridge_module, "POOL_SIZE", 2)  # one Signals lane: seven waves
+    sequential = asyncio.run(take("signals", Bridge(exe=None), {}))
+    assert sequential.took_ms >= 360
+    assert all(item["took_ms"] == 7 for item in sequential.method["readings"])
+
+    monkeypatch.setattr(bridge_module, "POOL_SIZE", 0)  # no session pool: all inputs can start
+    parallel = asyncio.run(take("signals", Bridge(exe=None), {}))
+    assert parallel.took_ms >= 50
+
+
+def test_signals_real_inputs_report_their_own_wall_time(monkeypatch):
+    bridge = payload_bridge()
+    run = bridge.run
+
+    def slow_run(script, *, timeout=60, depth=6):
+        time.sleep(0.06)
+        return run(script, timeout=timeout, depth=depth)
+
+    monkeypatch.setattr(bridge, "run", slow_run)
+    reading = asyncio.run(take("signals", bridge, {}))
+    observed = [item for item in reading.method["readings"] if item["outcome"] in ("ok", "empty")]
+    assert len(observed) >= 5
+    assert all(item["took_ms"] >= 50 for item in observed)
 
 
 def test_one_signals_reading_leaves_a_bridge_session_for_a_concurrent_cheap_question(monkeypatch):

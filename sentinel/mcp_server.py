@@ -91,8 +91,8 @@ ENVELOPE_SCHEMA: dict[str, Any] = {
     "properties": {
         "reading": {"type": "string", "description": "The reading's name in the catalog."},
         "params": {"type": "object", "description": "What was asked for, after the catalog's defaults and coercion."},
-        "asked_at": {"type": "string", "description": "When the question was put to the machine, UTC."},
-        "took_ms": {"type": "integer", "description": "How long the answer took."},
+        "asked_at": {"type": "string", "description": "Stamped when the reading was composed near its answer, UTC by this computer's clock; not when collection began."},
+        "took_ms": {"type": "integer", "description": "Milliseconds from Sentinel accepting the reading to its completed evidence, including Sentinel's own waiting. Excludes redaction and response encoding."},
         "outcome": {
             "type": "string",
             "enum": ["ok", "empty", "failed", "unavailable", "denied", "timeout"],

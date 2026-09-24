@@ -7,6 +7,7 @@ import base64
 import io
 import json
 import struct
+import time
 import zipfile
 from copy import deepcopy
 
@@ -117,7 +118,7 @@ def test_default_redacted_inventory_reference_can_be_inspected_by_either_client(
     assert inspected["params"] == {"path": "", "ref": selected["ref"]}
     assert section(inspected, "inspection")["data"]["exception"]["name"] == "access violation"
     assert section(inspected, "selection")["data"] == {"ref": selected["ref"], "source": "application"}
-    assert inspected["took_ms"] == 12
+    assert inspected["took_ms"] >= 0
     assert len(bridge.scripts) == 2 and bridge.scripts[0].strip() == ALL_DUMPS_SCRIPT.strip()
     assert f"$selected = '{PATH}'" in bridge.scripts[1]
     assert "[IO.File]::Open($file.path" in bridge.scripts[1]
@@ -126,6 +127,24 @@ def test_default_redacted_inventory_reference_can_be_inspected_by_either_client(
     assert len(inspected["method"]["queries"]) == 2
     assert_private_values_absent(inspected, state)
     assert (bridge.inventory, bridge.inspection) == original
+
+
+def test_dump_reference_timing_includes_both_reads_and_reference_matching(machine, monkeypatch):
+    state, bridge = machine
+    selected = reference(state)
+    original_run = bridge.run
+
+    def slow_run(script, *, timeout=60, depth=6):
+        time.sleep(0.03)
+        return original_run(script, timeout=timeout, depth=depth)
+
+    monkeypatch.setattr(bridge, "run", slow_run)
+    inspected = take(state, "dump_header", ref=selected)
+    assert inspected.outcome == "ok" and inspected.took_ms >= 55
+
+    bridge.inventory = dump_inventory([], application=True)
+    missing = take(state, "dump_header", ref=selected)
+    assert missing.outcome == "empty" and missing.took_ms >= 25
 
 
 @pytest.mark.parametrize("invalid", ["neither", "both", "malformed", "retired", "redacted_path"])

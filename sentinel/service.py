@@ -12,6 +12,8 @@ import hmac
 import ntpath
 import re
 import secrets
+import time
+from dataclasses import replace
 from typing import Any
 
 from .bridge import Bridge
@@ -48,18 +50,23 @@ class ReadingService:
         return ALL_LOCATION_IDS[index]
 
     async def take(self, name: str, raw_params: dict[str, Any] | None = None) -> Reading:
+        """Measure through reference resolution and service-added evidence, not just the taker."""
+        started = time.perf_counter()
         if name == "dump_header":
             params = REGISTRY[name].coerce(raw_params or {})
             validate_selection(params)
             if params["ref"]:
-                return await self._inspect(params)
-        reading = await take(name, self.bridge, raw_params)
-        if name == "dumps":
-            files = reading.section("files")
-            if files is not None:
-                targets = [{"file_index": index, "source": file["source"], "ref": self._reference(file["source"], file["path"])} for index, file in enumerate(files.data)]
-                reading.sections.append(Section("inspection_targets", "derived", targets, REFERENCE_BASIS))
-        return reading
+                reading = await self._inspect(params)
+            else:
+                reading = await take(name, self.bridge, raw_params)
+        else:
+            reading = await take(name, self.bridge, raw_params)
+            if name == "dumps":
+                files = reading.section("files")
+                if files is not None:
+                    targets = [{"file_index": index, "source": file["source"], "ref": self._reference(file["source"], file["path"])} for index, file in enumerate(files.data)]
+                    reading.sections.append(Section("inspection_targets", "derived", targets, REFERENCE_BASIS))
+        return replace(reading, took_ms=int((time.perf_counter() - started) * 1000))
 
     async def _inspect(self, params: dict[str, Any]) -> Reading:
         reference = params["ref"]
@@ -81,7 +88,6 @@ class ReadingService:
             return reading
         reading = await take("dump_header", self.bridge, {"path": match["path"]})
         reading.params = params
-        reading.took_ms += listing.took_ms
         reading.method = {"kind": "powershell", "queries": [listing.method["query"], reading.method["query"]]}
         reading.warnings = list(dict.fromkeys([*listing.warnings, *reading.warnings]))
         reading.sections.append(Section("selection", "derived", {"ref": reference, "source": source_id}, REFERENCE_BASIS))

@@ -2,12 +2,15 @@
 
 import asyncio
 import dataclasses
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
 from sentinel import readings  # noqa: F401
-from sentinel.bridge import BridgeResult
-from sentinel.reading import REGISTRY, Param, Section, Spec, from_bridge, from_object, take
+from sentinel.bridge import Bridge, BridgeResult
+from sentinel.reading import REGISTRY, Param, Reading, Section, Spec, from_bridge, from_object, take
 from sentinel.readings.events import _utc_stamp, events_script, record_script, since_clause
 from sentinel.stack import _outcome_text
 from tests.conftest import FakeBridge, log_collector_result
@@ -21,6 +24,68 @@ def test_ok_reading_has_one_raw_section_and_a_count():
     assert d["method"] == {"kind": "powershell", "query": "Get-WinEvent"}
     assert d["error"] is None and d["redacted"] == []
     assert d["asked_at"].endswith("Z")
+
+
+def test_take_measures_composition_instead_of_trusting_an_inner_time(monkeypatch):
+    def compose(_bridge, _params):
+        time.sleep(0.06)
+        return Reading("synthetic_timing", {}, "ok", {"kind": "synthetic"}, took_ms=900)
+
+    monkeypatch.setitem(REGISTRY, "synthetic_timing", Spec("synthetic_timing", "", ("raw",), compose))
+    reading = asyncio.run(take("synthetic_timing", Bridge(exe=None)))
+    assert 50 <= reading.took_ms < 900
+
+
+def test_take_includes_work_returned_as_an_awaitable_by_a_sync_taker(monkeypatch):
+    def start(_bridge, _params):
+        async def finish():
+            await asyncio.sleep(0.06)
+            return Reading("synthetic_awaitable", {}, "ok", {"kind": "synthetic"}, took_ms=1)
+
+        return finish()
+
+    monkeypatch.setitem(REGISTRY, "synthetic_awaitable", Spec("synthetic_awaitable", "", ("raw",), start))
+    reading = asyncio.run(take("synthetic_awaitable", Bridge(exe=None)))
+    assert reading.took_ms >= 50
+
+
+def test_take_includes_waiting_for_a_worker_thread(monkeypatch):
+    monkeypatch.setitem(REGISTRY, "synthetic_queue", Spec(
+        "synthetic_queue", "", ("raw",),
+        lambda _bridge, _params: Reading("synthetic_queue", {}, "ok", {"kind": "synthetic"}),
+    ))
+
+    async def exercise():
+        occupied = threading.Event()
+        release = threading.Event()
+        with ThreadPoolExecutor(max_workers=1) as workers:
+            loop = asyncio.get_running_loop()
+            loop.set_default_executor(workers)
+
+            def block():
+                occupied.set()
+                assert release.wait(5)
+
+            blocker = loop.run_in_executor(None, block)
+            assert occupied.wait(2)
+            pending = asyncio.create_task(take("synthetic_queue", Bridge(exe=None)))
+            await asyncio.sleep(0.08)
+            release.set()
+            reading = await pending
+            await blocker
+            return reading
+
+    assert asyncio.run(exercise()).took_ms >= 70
+
+
+def test_health_failure_reports_the_time_spent_trying(monkeypatch):
+    def delayed_failure(_bridge, _script, *, timeout=60, depth=6):
+        time.sleep(0.06)
+        return BridgeResult("unavailable", took_ms=0, error="synthetic bridge refusal")
+
+    monkeypatch.setattr(Bridge, "run", delayed_failure)
+    reading = asyncio.run(take("health", Bridge(exe="synthetic")))
+    assert reading.outcome == "unavailable" and reading.took_ms >= 50
 
 
 def test_empty_reading_is_distinguishable_from_failure():
