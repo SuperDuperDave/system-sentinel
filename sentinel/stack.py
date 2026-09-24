@@ -18,6 +18,7 @@ import os
 import re
 import threading
 import uuid
+from _thread import LockType
 from collections import Counter
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -48,6 +49,24 @@ SUMMARY_CRASH_ISSUES = 10
 SUMMARY_CRASH_STOPS = 20  # Today's crash.MAX_STOPS; excess saved stops get an explicit omitted count.
 LOG_READINGS = ("events", "record")
 STOP_REF_LOGS = {"start": "System", "power_41": "System", "eventlog_6008": "System", "wer_1001": "System"}
+
+_LOCAL_LOCKS_GUARD = threading.Lock()
+_LOCAL_LOCKS: dict[str, LockType] = {}
+
+
+def _local_lock(path: Path) -> LockType:
+    """Queue this process's readers and writers of one file before the bounded OS lock.
+
+    The registry has only the Stack and prompt paths in a running app. The file lock
+    remains authoritative across processes.
+    """
+    key = os.path.normcase(os.path.abspath(path))
+    with _LOCAL_LOCKS_GUARD:
+        lock = _LOCAL_LOCKS.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _LOCAL_LOCKS[key] = lock
+        return lock
 
 
 class Duplicate(Exception):
@@ -142,7 +161,7 @@ class Store:
     def __init__(self, path: Path, empty: dict[str, Any]):
         self.path = path
         self._empty = empty
-        self._lock = threading.Lock()
+        self._lock = _local_lock(path)
 
     def read(self) -> dict[str, Any]:
         try:

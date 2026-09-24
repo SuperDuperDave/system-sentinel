@@ -20,7 +20,7 @@ from sentinel.reading import take
 from sentinel.readings.crash import STOPS_BASIS
 from sentinel.readings.event_coverage import LOG_WINDOW_COVERAGE_BASIS
 from sentinel.readings.events import RECORD_COVERAGE_BASIS
-from sentinel.stack import PRESET_PROMPTS, STOP_REF_LOGS, Item, Prompts, Stack, _item_lines
+from sentinel.stack import PRESET_PROMPTS, STOP_REF_LOGS, Item, Prompts, Stack, StoreUnavailable, _item_lines
 from tests.conftest import FakeBridge, LogBridge, identity_result, log_collector_result
 from tests.test_crash import collection_for, faults_fixture, payload
 from tests.test_crash import crash as take_crash_fixture
@@ -771,6 +771,48 @@ def test_a_stack_reader_holds_the_same_lock_as_a_writer(tmp_path):
         reading.result(timeout=5)
         writing.result(timeout=5)
     assert {item["id"] for item in writer.state()["items"]} == {"first", "second"}
+
+
+def test_separate_stores_queue_before_the_bounded_file_lock(tmp_path, monkeypatch: pytest.MonkeyPatch):
+    from sentinel import stack as stack_module
+    from sentinel.performance import locked as file_locked
+
+    path = tmp_path / "stack.json"
+    first, second = Stack(path), Stack(path)
+    assert Stack(tmp_path / "child" / ".." / "stack.json").store._lock is first.store._lock
+    monkeypatch.setattr(stack_module, "locked", lambda file: file_locked(file, timeout=0.05))
+    entered, release = Event(), Event()
+
+    def hold_first_store():
+        with first.store.transaction():
+            entered.set()
+            assert release.wait(5)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        held = pool.submit(hold_first_store)
+        assert entered.wait(5)
+        waiting = pool.submit(second.state)
+        try:
+            time.sleep(0.15)
+            assert not waiting.done()
+        finally:
+            release.set()
+        held.result(timeout=5)
+        assert waiting.result(timeout=5)["items"] == []
+
+
+def test_local_queue_still_respects_a_separate_file_lock_holder(tmp_path, monkeypatch: pytest.MonkeyPatch):
+    from sentinel import stack as stack_module
+    from sentinel.performance import locked as file_locked
+
+    path = tmp_path / "stack.json"
+    Stack(path).add(Item(id="saved", added_at="2026-09-24T00:00:00Z", kind="note", title="saved", note="saved"))
+    original = path.read_bytes()
+    monkeypatch.setattr(stack_module, "locked", lambda file: file_locked(file, timeout=0.05))
+    with file_locked(tmp_path / "stack.json.lock"):
+        with pytest.raises(StoreUnavailable):
+            Stack(path).add(Item(id="one", added_at="2026-09-24T00:00:00Z", kind="note", title="one", note="one"))
+    assert path.read_bytes() == original
 
 
 def test_remove_answer_is_the_state_its_transaction_wrote(client: TestClient, monkeypatch: pytest.MonkeyPatch):

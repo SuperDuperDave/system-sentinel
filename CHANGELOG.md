@@ -5,6 +5,7 @@
 ### Fixed
 - A capture now renders `composed.md` from the same saved Stack snapshot written as `stack.json`. An edit arriving between those steps can no longer make one ZIP contain two different versions of the investigation.
 - Stack remove and clear now return the exact index state their own transaction wrote on both HTTP and MCP. A second client's immediate edit cannot appear in that mutation's answer, and the routes avoid an unnecessary full-file reread.
+- Separate Stack and prompt instances in one process now share a local queue per saved file before taking the bounded OS lock. The running server already used one instance per file; this prevents spurious timeouts for other same-process callers while the OS lock still protects separate processes. The change followed an intermittent Windows CI lock-timeout failure that passed on an exact-commit rerun.
 
 ### Measurement and limits
 - [A reproducible synthetic Stack probe](docs/measurements/stack.md) measures direct saved-file reads and edits at several large evidence sizes without opening installed data. No storage migration is made: normal-use size and concurrent lock cost remain unmeasured, and full-file replacement still scales with saved evidence.
