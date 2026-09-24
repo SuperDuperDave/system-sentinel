@@ -10,7 +10,7 @@
 .sources li { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 10px 12px; background: var(--deep); color: var(--body); overflow-wrap: anywhere; }
 .sources strong { color: var(--ink); font-weight: 500; }
 .listLabel { margin: 15px 0 6px; color: var(--muted); }
-.list { max-height: 420px; overflow: auto; margin: 0; padding: 0 12px; list-style: none; background: var(--deep); }
+.list { margin: 0; padding: 0 12px; list-style: none; background: var(--deep); }
 .list li { padding: 12px 0; }
 .list li + li { border-top: 1px solid var(--rule-soft); }
 .itemTop { display: flex; align-items: baseline; justify-content: space-between; gap: 5px 12px; flex-wrap: wrap; }
@@ -26,5 +26,4 @@
 .full { min-width: 0; max-width: 100%; }
 @media (max-width: 700px) {
   .sources { grid-template-columns: minmax(0, 1fr); gap: 3px; }
-  .list { max-height: 320px; }
 }
