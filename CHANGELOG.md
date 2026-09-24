@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.9.2] - 2026-09-24
+
+### Changed
+- Record's optional nearby Kernel-WHEA panel now asks for two exact, independent filing-time windows meeting at the held moment. The newest 250 reports before it and the oldest 250 at or after it keep the nearest evidence visible even when later traffic would have filled the former single 500-report cap. Each side shows its own outcome, retention reach, cap and Stack action; the same exact seven-digit moment is the exclusive end of one and inclusive start of the other. Local paging follows the direction, so "older" and "later" mean the correct thing.
+- Opening a report or retaking a side keeps the selected moment and place. A failed retake keeps the previously observed report and marks its reading as held; closing and reopening the panel does not re-query. Browser-valid moment addresses that do not meet the exact Windows timestamp grammar are canonicalized before a query. Agent guidance includes the two-call recipe and its directional coverage limits.
+
+### Limits
+- The two sides remain separate answers; do not combine their coverage into one claim. Each is capped at 250 previews, 500 total, and a truncated side still omits reports farther from the moment. A filing time is not an error-occurrence time. The nearby Application fault panel has its own newest-first 100-record cap and is not yet directional. Dense Kernel-WHEA query cost and prevalence are unmeasured.
+
 ## [1.9.1] - 2026-09-24
 
 ### Fixed

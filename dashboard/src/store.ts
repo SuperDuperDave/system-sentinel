@@ -47,8 +47,11 @@ function navigationFromAddress(): { view: ViewId; moment: string | null } {
 
 function qualifiedMoment(value: string): string | null {
   const parsed = Date.parse(value);
-  if (Number.isNaN(parsed)) return null;
-  return /(?:Z|[+-]\d{2}:\d{2})$/i.test(value) ? value : new Date(parsed).toISOString();
+  if (!Number.isFinite(parsed) || parsed < Date.UTC(1601, 0, 1)) return null;
+  // The exact Windows window accepts seconds and at most seven fractional digits. Keep those
+  // digits when the address already qualifies; canonicalize browser-only forms before a take.
+  return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,7})?(?:Z|[+-]\d{2}:\d{2})$/.test(value)
+    ? value : new Date(parsed).toISOString();
 }
 
 function writeAddress(view: ViewId, moment: string | null) {

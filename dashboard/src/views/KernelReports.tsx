@@ -21,13 +21,16 @@ interface WindowIdentity {
 export function reportsFromWindow(reading: Reading | null): KernelReport[] {
   const rows = part<EventRecord[]>(reading, 'records') ?? [];
   const identities = part<WindowIdentity[]>(reading, 'identity') ?? [];
+  const oldestFirst = part<{ order?: string }>(reading, 'collection')?.order === 'oldest';
   const byId = new Map(identities.map((identity) => [String(identity.RecordId), identity]));
   return rows.map((row) => {
     const identity = byId.get(String(row.RecordId));
     return { record_id: row.RecordId, reported_at: row.TimeCreated,
       header: identity?.cper ? { severity: identity.cper.severity, previous_session: identity.cper.previous_session } : null,
       header_error: identity?.error ?? null };
-  }).sort((a, b) => (b.reported_at ?? '').localeCompare(a.reported_at ?? '') || Number(b.record_id) - Number(a.record_id));
+  }).sort((a, b) => oldestFirst
+    ? (a.reported_at ?? '').localeCompare(b.reported_at ?? '') || Number(a.record_id) - Number(b.record_id)
+    : (b.reported_at ?? '').localeCompare(a.reported_at ?? '') || Number(b.record_id) - Number(a.record_id));
 }
 
 export interface ReportRange { from: string; to: string }
@@ -37,6 +40,7 @@ export interface ReportSource {
   limit: number;
   truncated: boolean | null;
   stopped: { kind: string; detail: string } | null;
+  order?: 'newest' | 'oldest';
   log_enabled: boolean | null;
   log_mode?: string | null;
   log_state?: string | null;
@@ -67,11 +71,12 @@ export function KernelReports({ reading, reports, range, source, reach, inspect 
   inspect: (report: KernelReport) => ReactNode;
 }) {
   const rangeKey = range ? `${range.from}/${range.to}` : 'all';
-  const [page, setPage] = useState<{ reading: Reading; rangeKey: string; limit: number } | null>(null);
-  const [opened, setOpened] = useState<{ reading: Reading; rangeKey: string; id: string | null } | null>(null);
+  const scope = JSON.stringify([reading.reading, reading.params.source, reading.params.since, reading.params.before, rangeKey]);
+  const [page, setPage] = useState<{ scope: string; limit: number } | null>(null);
+  const [opened, setOpened] = useState<{ scope: string; ref: string | null } | null>(null);
   const list = useRef<HTMLDivElement>(null);
   const focusNew = useRef<string | null>(null);
-  const limit = page?.reading === reading && page.rangeKey === rangeKey ? page.limit : PAGE;
+  const limit = page?.scope === scope ? page.limit : PAGE;
   const matching = useMemo(() => {
     if (!range) return reports;
     const from = Date.parse(range.from);
@@ -82,14 +87,17 @@ export function KernelReports({ reading, reports, range, source, reach, inspect 
     });
   }, [reports, range]);
   const visible = matching.slice(0, limit);
-  const openId = opened?.reading === reading && opened.rangeKey === rangeKey && visible.some((report) => String(report.record_id) === opened.id) ? opened.id : null;
+  const reportRef = (report: KernelReport) => `${reading.params.source}:${report.record_id}:${report.reported_at}`;
+  const openReport = opened?.scope === scope ? visible.find((report) => reportRef(report) === opened.ref) : null;
+  const openId = openReport ? String(openReport.record_id) : null;
   const next = Math.min(matching.length, MAX_VISIBLE, limit + PAGE);
+  const direction = source?.order === 'oldest' ? 'later' : 'older';
 
   useLayoutEffect(() => {
     const id = focusNew.current;
     focusNew.current = null;
     if (id) list.current?.querySelector<HTMLButtonElement>(`button[data-row-id="${id}"]`)?.focus();
-  }, [limit, rangeKey, reading]);
+  }, [limit, scope, reading]);
 
   return (
     <div className={styles.reportList} ref={list}>
@@ -104,7 +112,10 @@ export function KernelReports({ reading, reports, range, source, reach, inspect 
             items={rows}
             idOf={(report) => String(report.record_id)}
             openId={openId}
-            onOpenChange={(id) => setOpened({ reading, rangeKey, id: id === null ? null : String(id) })}
+            onOpenChange={(id) => {
+              const selected = visible.find((report) => String(report.record_id) === String(id));
+              setOpened({ scope, ref: selected ? reportRef(selected) : null });
+            }}
             canInspect={(report) => report.reported_at !== null && Number.isFinite(Date.parse(report.reported_at))}
             layout={styles.reportRow}
             cells={(report) => {
@@ -126,11 +137,11 @@ export function KernelReports({ reading, reports, range, source, reach, inspect 
         <button className={styles.exactRaw} type="button" onClick={() => {
           const firstNew = matching.slice(limit, next).find((report) => report.reported_at && Number.isFinite(Date.parse(report.reported_at)));
           focusNew.current = firstNew ? String(firstNew.record_id) : null;
-          setPage({ reading, rangeKey, limit: next });
-        }}>Show {next - limit} older returned reports</button>
+          setPage({ scope, limit: next });
+        }}>Show {next - limit} {direction} returned reports</button>
       ) : null}
       {matching.length > MAX_VISIBLE && visible.length >= MAX_VISIBLE ? <p className={`${styles.reportListStatus} readout`}>This view shows at most {MAX_VISIBLE} returned reports. Select a time stretch or a shorter window to inspect another part; the full returned reading is available in the API and Stack.</p> : null}
-      {source?.truncated ? <p className={`${styles.reportListStatus} readout`}>The query reached its {source.limit.toLocaleString()}-report limit. Older reports in this window were not returned.</p> : null}
+      {source?.truncated ? <p className={`${styles.reportListStatus} readout`}>The query reached its {source.limit.toLocaleString()}-report limit. {direction === 'later' ? 'Later' : 'Older'} reports in this window were not returned.</p> : null}
       {source?.stopped ? <p className={`${styles.reportListStatus} readout`}>The query stopped after {source.returned.toLocaleString()} returned reports: {source.stopped.detail}</p> : null}
       {source?.log_enabled === false ? <p className={`${styles.reportListStatus} readout`}>This Windows channel is disabled; new reports are not being recorded there.</p> : null}
       {reach?.complete !== true ? <p className={`${styles.reportListStatus} readout`}>The requested time span is not fully established{reach?.covered_from ? `; observed channel reach begins at ${new Date(reach.covered_from).toLocaleString()}` : ''}{reach?.covered_until ? ` and ends at ${new Date(reach.covered_until).toLocaleString()}` : ''}.</p> : null}

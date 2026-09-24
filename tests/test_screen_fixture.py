@@ -48,6 +48,9 @@ def test_screen_fixture_answers_current_record_and_nearby_source_contracts():
     assert reports.section("coverage").data["kernel_whea"]["complete"] is True
     assert report_window.outcome == "ok" and [row["RecordId"] for row in report_window.section("records").data] == [75]
     assert report_window.section("coverage").data["complete"] is True
+    window_collection = report_window.section("collection").data
+    assert window_collection["observed_end"].endswith("+00:00") and window_collection["window_end"].endswith("Z")
+    assert datetime.fromisoformat(window_collection["observed_end"]) == datetime.fromisoformat(window_collection["window_end"].replace("Z", "+00:00"))
     assert whea.outcome == "ok" and whea.section("decoded") is None
     selected = whea.section("records").data[0]
     assert "RawData" not in selected and "Properties" not in selected
@@ -57,3 +60,34 @@ def test_screen_fixture_answers_current_record_and_nearby_source_contracts():
     assert storms.section("buckets").data["total"] == storms.count
     assert storms.section("status") is None
     assert storms.section("coverage").data["system"]["covered_until"] == storms.section("collection").data["window_end"]
+
+
+def test_screen_fixture_can_show_both_sides_when_later_reports_fill_the_cap(monkeypatch):
+    path = Path(__file__).parents[1] / "docs" / "screens" / "fixtures" / "fixture-server.py"
+    spec = importlib.util.spec_from_file_location("sentinel_screen_fixture_crowded", path)
+    assert spec and spec.loader
+    fixture = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(fixture)
+    moment = datetime.fromtimestamp(fixture.WHEA_ANCHOR - 90 * 60, UTC)
+    base = fixture.kernel_whea_records(fixture.WHEA_ANCHOR)[0]
+    def stamp(at: datetime) -> str:
+        return at.isoformat(timespec="microseconds").replace("+00:00", "Z")
+
+    earlier = [{**base, "RecordId": index, "TimeCreated": stamp(moment - timedelta(seconds=offset))}
+               for index, offset in ((1, 2), (2, 1), (3, 0.1))]
+    later = [{**base, "RecordId": 1000 + index, "TimeCreated": stamp(moment + timedelta(seconds=index / 10))}
+             for index in range(600)]
+    rows = sorted([*earlier, *later], key=lambda row: row["TimeCreated"], reverse=True)
+    monkeypatch.setattr(fixture, "kernel_whea_records", lambda now: rows)
+    common = {"source": "kernel_whea", "count": 250}
+    before = asyncio.run(take("whea_window", fixture.FixtureBridge(), {
+        **common, "since": stamp(moment - timedelta(hours=1)), "before": stamp(moment), "order": "newest",
+    }))
+    after = asyncio.run(take("whea_window", fixture.FixtureBridge(), {
+        **common, "since": stamp(moment), "before": stamp(moment + timedelta(hours=1)), "order": "oldest",
+    }))
+    assert before.outcome == "ok" and {row["RecordId"] for row in before.section("records").data} == {1, 2, 3}
+    assert before.section("coverage").data["complete"] is True
+    assert after.outcome == "ok" and [row["RecordId"] for row in after.section("records").data] == list(range(1000, 1250))
+    assert after.section("collection").data["truncated"] is True
+    assert after.section("coverage").data["covered_until"] == after.section("collection").data["probe_time"]

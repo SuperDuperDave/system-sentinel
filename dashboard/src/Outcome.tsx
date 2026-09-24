@@ -26,7 +26,7 @@ export function OutcomeLine<T>({ taken, noun = 'records', singular, emptyText }:
   const r = taken.reading;
 
   if (taken.state === 'lost') {
-    return <p className={`${styles.line} readout`}><Glyph kind="warn" /> The dashboard could not reach the API: {taken.problem}. <button className={styles.action} onClick={taken.retake}>Try again</button></p>;
+    return <p className={`${styles.line} readout`}><Glyph kind="warn" /> The dashboard could not get this reading: {taken.problem}. <button className={styles.action} onClick={taken.retake}>Try again</button></p>;
   }
   if (!r) {
     return <p className={`${styles.line} readout`}>{taken.state === 'taking' ? 'Taking the reading…' : ''}</p>;

@@ -187,6 +187,9 @@
 .nearbyHead h2 { margin: 0; font-size: clamp(19px, 2.5vw, 24px); }
 .nearbyIntro { margin: 10px 0 0; max-width: 80ch; color: var(--body); font-size: 13px; line-height: 1.5; }
 .nearbyReach, .nearbyCount { margin: 12px 0; color: var(--muted); font-size: 12px; }
+.kernelSide { margin-top: 24px; }
+.kernelSide + .kernelSide { margin-top: 32px; }
+.kernelSide h3 { margin: 0 0 8px; font-size: 18px; line-height: 1.3; }
 .nearbyList { margin: 12px 0; padding: 0; list-style: none; }
 .nearbyList li { border-top: 1px solid var(--rule-soft); }
 .nearbyList summary { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 4px 16px; min-height: 44px; align-items: center; cursor: pointer; color: var(--ink); }

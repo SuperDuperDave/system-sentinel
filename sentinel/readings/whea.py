@@ -1722,7 +1722,9 @@ register(
             "Choose newest or oldest to keep the reports nearest that side when count is reached. The answer "
             "preserves Windows' seven-digit event time, reports that log's own retained reach and query cap, and "
             "returns rows in ascending time for reading. A pre-query host clock limits future reach; previous-session "
-            "CPER flags mean report time need not be error time. Take whea_record with source and RecordId for one "
+            "CPER flags mean report time need not be error time. Around a selected moment, take newest over the hour "
+            "before it and oldest over the hour after it, sharing that exact moment as the exclusive before end and "
+            "inclusive after start; inspect each side's coverage separately. Take whea_record with source and RecordId for one "
             "exact retained row, then compare TimeCreated. No full binary payload, decoded detail, cross-log group "
             "or signature is collected here."
         ),

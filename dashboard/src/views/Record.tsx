@@ -208,17 +208,9 @@ function FaultWindow({ moment }: { moment: string }) {
 /** The report channel can retain evidence after the System log has rotated away. */
 function KernelReportWindow({ moment }: { moment: string }) {
   const [open, setOpen] = useState(false);
-  const since = new Date(Date.parse(moment) - 60 * 60 * 1000).toISOString();
-  const before = new Date(Date.parse(moment) + 60 * 60 * 1000).toISOString();
-  const taken = useReading('whea_window', { source: 'kernel_whea', since, before, order: 'newest', count: 500 }, open);
-  const reports = reportsFromWindow(taken.reading);
-  const collection = part<ReportSource & { window_start: string; window_end: string; queried_at: string }>(taken.reading, 'collection');
-  const reach = part<ReportReach>(taken.reading, 'coverage');
-  const bounds = collection?.window_start && collection.window_end
-    ? `${WINDOW_STAMP.format(new Date(collection.window_start))} to ${WINDOW_STAMP.format(new Date(collection.window_end))}` : null;
-  const futureEnd = collection?.queried_at ? Date.parse(before) > Date.parse(collection.queried_at) : false;
-  const reachText = nearbyReachText(reach ? { ...reach, covered_until: reach.covered_until ?? null } : null, collection ?? null, collection?.window_end ?? before, 'Kernel-WHEA channel');
-  const answered = taken.reading?.outcome === 'ok' || taken.reading?.outcome === 'empty';
+  const [asked, setAsked] = useState(false);
+  const outerStart = new Date(Date.parse(moment) - 60 * 60 * 1000).toISOString();
+  const outerEnd = new Date(Date.parse(moment) + 60 * 60 * 1000).toISOString();
 
   return <section className={styles.nearby} aria-labelledby="nearby-kernel-reports-title">
     <div className={styles.nearbyHead}>
@@ -226,20 +218,52 @@ function KernelReportWindow({ moment }: { moment: string }) {
         <p className="label">Kernel-WHEA channel · separate source</p>
         <h2 id="nearby-kernel-reports-title" className="display">Hardware error reports near this moment</h2>
       </div>
-      <button className={styles.action} onClick={() => setOpen((value) => !value)} aria-expanded={open} aria-controls="nearby-kernel-reports-body">
+      <button className={styles.action} onClick={() => { setAsked(true); setOpen((value) => !value); }} aria-expanded={open} aria-controls="nearby-kernel-reports-body">
         {open ? 'Hide hardware reports' : 'Read nearby hardware reports'}
       </button>
     </div>
     <p className={styles.nearbyIntro}>Report times say when Windows filed each report, not necessarily when the error occurred. Opened from a restart, this window can include reports filed as Windows started again; a later restart can fall outside it. A nearby report is a lead to inspect.</p>
     <div id="nearby-kernel-reports-body" hidden={!open}>
-      <OutcomeLine taken={taken} noun="Kernel-WHEA reports" singular="Kernel-WHEA report" emptyText="No Kernel-WHEA report returned from the queried channel window" />
-      {answered && bounds ? <p className={`${styles.nearbyReach} readout`}>{reachText} · queried {bounds}{futureEnd ? ' · requested end is after the machine’s query time' : ''}</p> : null}
-      {taken.reading && observed(taken.reading) ? <AddToStack item={{ kind: 'reading', envelope: taken.reading, title: `Kernel-WHEA reports near ${moment}` }} label="Stack this reading" /> : null}
-      {taken.reading && observed(taken.reading) && reports.length ? <KernelReports
-        reading={taken.reading} reports={reports} range={null} source={collection ?? null} reach={reach}
-        inspect={(report) => <ReportDetail report={report} showMomentLink={false} />}
-      /> : null}
+      <p className={`${styles.nearbyReach} readout`}>Two separate channel reads meet at {clock.format(new Date(moment))}. Each keeps the reports nearest this moment; each has its own coverage and limit.</p>
+      <KernelReportSide moment={moment} since={outerStart} before={moment} order="newest" asked={asked} />
+      <KernelReportSide moment={moment} since={moment} before={outerEnd} order="oldest" asked={asked} />
     </div>
+  </section>;
+}
+
+function useHeld<T>(taken: Taken<T>): Reading<T> | null {
+  const [held, setHeld] = useState<Reading<T> | null>(null);
+  useEffect(() => { if (observed(taken.reading)) setHeld(taken.reading); }, [taken.reading]);
+  return observed(taken.reading) ? taken.reading : held;
+}
+
+function KernelReportSide({ moment, since, before, order, asked }: {
+  moment: string; since: string; before: string; order: 'newest' | 'oldest'; asked: boolean;
+}) {
+  const earlier = order === 'newest';
+  const taken = useReading('whea_window', { source: 'kernel_whea', since, before, order, count: 250 }, asked);
+  const shown = useHeld(taken);
+  const reports = reportsFromWindow(shown);
+  const collection = part<ReportSource & { window_start: string; window_end: string; observed_end: string }>(shown, 'collection');
+  const reach = part<ReportReach>(shown, 'coverage');
+  const bounds = collection?.window_start && collection.window_end
+    ? `${WINDOW_STAMP.format(new Date(collection.window_start))} to ${WINDOW_STAMP.format(new Date(collection.window_end))}` : null;
+  const futureEnd = !!collection?.observed_end && Date.parse(collection.observed_end) < Date.parse(collection.window_end);
+  const reachText = nearbyReachText(reach ? { ...reach, covered_until: reach.covered_until ?? null } : null, collection ?? null, collection?.window_end ?? before, 'Kernel-WHEA channel');
+  const answered = shown?.outcome === 'ok' || shown?.outcome === 'empty';
+  const stale = shown !== null && shown !== taken.reading;
+
+  return <section className={styles.kernelSide} aria-labelledby={`kernel-${order}-title`}>
+    <h3 id={`kernel-${order}-title`} className="display">{earlier ? 'Before this moment · nearest first' : 'At or after this moment · nearest first'}</h3>
+    <OutcomeLine taken={taken} noun="Kernel-WHEA reports" singular="Kernel-WHEA report"
+      emptyText={`No Kernel-WHEA report returned ${earlier ? 'before' : 'at or after'} this moment in the queried channel window`} />
+    {stale ? <p className={`${styles.nearbyReach} readout`} role="status">Showing the reading taken at {clock.format(new Date(shown.asked_at))}; {taken.state === 'taking' ? 'another take is in progress.' : 'the last completed take did not observe the machine.'}</p> : null}
+    {answered && bounds ? <p className={`${styles.nearbyReach} readout`}>{reachText} · queried {bounds}{futureEnd ? ' · requested end is after the machine’s query time' : ''}</p> : null}
+    {shown && observed(shown) ? <AddToStack item={{ kind: 'reading', envelope: shown, title: `Kernel-WHEA reports ${earlier ? 'before' : 'at or after'} ${moment}` }} label={stale ? 'Stack this held reading' : 'Stack this reading'} /> : null}
+    {shown && observed(shown) && reports.length ? <KernelReports
+      reading={shown} reports={reports} range={null} source={collection ?? null} reach={reach}
+      inspect={(report) => <ReportDetail report={report} showMomentLink={false} />}
+    /> : null}
   </section>;
 }
 

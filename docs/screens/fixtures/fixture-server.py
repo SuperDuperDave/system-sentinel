@@ -306,11 +306,14 @@ def answer_whea_window(script: str) -> BridgeResult:
     name = re.search(r"source = Read-WheaSource '(system|kernel_whea)'", script).group(1)
     since = re.search(r"\$from = \[datetimeoffset\]::Parse\('([^']+)'", script).group(1)
     before = re.search(r"\$requestedUntil = \[datetimeoffset\]::Parse\('([^']+)'", script).group(1)
-    cap = int(re.search(r"source = Read-WheaSource '[^']+' '[^']+' \$select (\d+)", script).group(1))
+    request = re.search(r"source = Read-WheaSource '[^']+' '[^']+' \$select (\d+)( -oldest)? -windowed", script)
+    assert request, "the WHEA window fixture needs an explicit count and direction"
+    cap, oldest_first = int(request.group(1)), bool(request.group(2))
     queried = _powershell_stamp(time.time())
     observed = min(_parse_stamp(before), _parse_stamp(queried))
     rows = whea_records(WHEA_ANCHOR) if name == "system" else kernel_whea_records(WHEA_ANCHOR)
     matching = [row for row in rows if _parse_stamp(since) <= _parse_stamp(row["TimeCreated"]) < observed]
+    matching.sort(key=lambda row: _parse_stamp(row["TimeCreated"]), reverse=not oldest_first)
     selected = [_whea_preview(row) for row in matching[:cap]]
     log = "System" if name == "system" else "Microsoft-Windows-Kernel-WHEA/Errors"
     source = {
@@ -320,8 +323,12 @@ def answer_whea_window(script: str) -> BridgeResult:
         "log_enabled": True, "log_mode": "Circular", "log_state": "ok", "log_error": None,
         "log_oldest": _powershell_stamp(_parse_stamp(since) - 86400), "oldest_state": "ok", "oldest_error": None,
     }
-    return BridgeResult("ok", items=[{"queried_at": queried, "window_start": since, "window_end": before,
-                                       "observed_end": _powershell_stamp(observed), "source": source}], took_ms=24)
+    # These are DateTimeOffset.ToString('o') echoes, unlike event TimeCreated's UTC Z stamp.
+    def as_offset(stamp: str) -> str:
+        return stamp.replace("Z", "+00:00")
+    return BridgeResult("ok", items=[{"queried_at": as_offset(queried), "window_start": as_offset(since),
+                                       "window_end": as_offset(before),
+                                       "observed_end": as_offset(_powershell_stamp(observed)), "source": source}], took_ms=24)
 
 
 def answer_whea_reports(script: str) -> BridgeResult:
