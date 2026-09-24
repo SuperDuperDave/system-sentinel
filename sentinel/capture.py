@@ -89,6 +89,7 @@ async def create(bridge: Bridge, stack: Stack, prompts: Prompts, redactor: Redac
             if redactor is not None:
                 body, taken_out = redactor.redact(body)
                 body["redacted"] = taken_out
+                body["redaction_gaps"] = redactor.gaps()
                 removed.update(taken_out)
             member = READINGS_MEMBER.format(name=name)
             entry = {"path": member, "reading": name, "outcome": body["outcome"], "took_ms": body["took_ms"], "bytes": _write(archive, member, json.dumps(json_safe_integers(body), ensure_ascii=False, indent=1))}
@@ -133,6 +134,7 @@ def _finish(
                 if redactor is not None:
                     archive_state, taken_out = redactor.redact(snapshot)
                     removed.update(taken_out)
+                    archive_state["redaction_gaps"] = redactor.gaps()
                 members.append({"path": STACK_MEMBER, "items": len(archive_state.get("items") or []), "bytes": _write(archive, STACK_MEMBER, json.dumps(json_safe_integers(archive_state), ensure_ascii=False, indent=1))})
             except StoreUnavailable:
                 unavailable.append({"member": STACK_MEMBER, "reason": "saved Stack data unavailable"})
@@ -155,6 +157,8 @@ def _finish(
                 "unavailable": unavailable,
                 "members": members,
             }
+            if redactor is not None:
+                manifest["redaction_gaps"] = redactor.gaps()
             if reason and redactor is None:
                 manifest["reason"] = reason
             _write(archive, MANIFEST_MEMBER, json.dumps(json_safe_integers(manifest), ensure_ascii=False, indent=1))
@@ -261,11 +265,14 @@ def _manifest_summary(path: Path) -> dict[str, Any]:
     unavailable_names = [entry["member"] for entry in unavailable]
     if len(unavailable_names) != len(set(unavailable_names)) or set(unavailable_names) & {entry.get("path") for entry in members if isinstance(entry, dict)}:
         return {"status": "unreadable"}
+    gaps = manifest.get("redaction_gaps")
+    if gaps is not None and (not isinstance(gaps, list) or any(type(gap) is not str or gap not in ("host", "user") for gap in gaps) or len(gaps) != len(set(gaps))):
+        return {"status": "unreadable"}
     counts = Counter(row["outcome"] for row in rows)
     handoff = next((entry for entry in members if isinstance(entry, dict) and entry.get("path") == COMPOSED_MEMBER), None)
     prompt = handoff.get("prompt") if handoff else None
     prompt_state = prompt.get("state") if isinstance(prompt, dict) else None
-    return {
+    summary = {
         "status": "read",
         "captured_at": captured_at,
         "unredacted": unredacted,
@@ -275,6 +282,9 @@ def _manifest_summary(path: Path) -> dict[str, Any]:
         "prompt_state": prompt_state if prompt_state in ("included", "off", "none", "missing", "unavailable") else None,
         "outcomes": {outcome: counts[outcome] for outcome in OUTCOMES if counts[outcome]},
     }
+    if gaps is not None:
+        summary["redaction_gaps"] = gaps
+    return summary
 
 
 def find(name: str) -> Path | None:

@@ -510,7 +510,8 @@ def test_stack_index_keeps_provenance_without_looking_like_a_partial_reading(cli
     note = add(client, kind="note", note="Compare the two stops")
     expected = {"id", "added_at", "kind", "title", "rank", "verbosity", "ids", "note", "provenance"}
     for item in (reading, note):
-        assert set(item) == expected | {"redacted"}
+        assert set(item) == expected | {"redacted", "redaction_gaps"}
+        assert item["redaction_gaps"] == []
         assert "reading" not in item and "sections" not in item and "method" not in item
     saved = full_item(client, reading["id"])["reading"]
     assert reading["provenance"] == {"reading": "events", "params": saved["params"],
@@ -518,7 +519,7 @@ def test_stack_index_keeps_provenance_without_looking_like_a_partial_reading(cli
                                      "origin": "taken", "sentinel_version": __version__}
     assert note["provenance"] is None
     listed = client.get("/api/stack", headers=AUTH).json()
-    assert listed["items"] == [{key: value for key, value in item.items() if key != "redacted"} for item in (reading, note)]
+    assert listed["items"] == [{key: value for key, value in item.items() if key not in ("redacted", "redaction_gaps")} for item in (reading, note)]
     assert full_item(client, reading["id"])["reading"]["sections"]
     assert client.get("/api/stack/items/nope", headers=AUTH).status_code == 404
 

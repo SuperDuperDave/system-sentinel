@@ -37,7 +37,7 @@ from starlette.applications import Starlette
 
 from . import __version__, capture, readings  # noqa: F401  (readings registers the catalog)
 from .reading import REGISTRY, Spec
-from .redact import Redactor
+from .redact import RedactionWithheld, Redactor
 from .serialization import json_safe_integers
 from .stack import Duplicate, StoreUnavailable, compose, index_entry, index_state, new_item
 
@@ -58,6 +58,7 @@ INSTRUCTIONS = (
     "'faults' for what went wrong while it kept running, 'storms' for System WHEA report traffic, "
     "'whea' for a bounded newest-record preview across both WHEA logs, 'whea_window' for one source's exact filing-time window in either direction, and 'whea_record' for one exact retained report's raw fields and decoded detail; 'signals' last. "
     "A burst, a gap or a correlation is a lead, never a diagnosis. "
+    "If your client stores a large answer in a file and shows its path, read that file before drawing conclusions from the evidence. "
     "Stack list and change tools return a provenance index; 'stack_item' returns one complete stored item, "
     "and 'compose' returns the handoff at each item's chosen verbosity, with a structured prompt status and same-snapshot Stack index. "
     "The catalog and that handoff are also resources: sentinel://catalog and sentinel://handoff."
@@ -122,6 +123,7 @@ ENVELOPE_SCHEMA: dict[str, Any] = {
         "error": {"type": ["object", "null"], "description": "Why the machine was not observed. Null when it was."},
         "warnings": {"type": "array", "items": {"type": "string"}, "description": "What the tool noticed and did not let stop the reading."},
         "redacted": {"type": "array", "items": {"type": "string"}, "description": "What the redaction removed, by name."},
+        "redaction_gaps": {"type": "array", "items": {"type": "string", "enum": ["host", "user"]}, "description": "Names this policy cannot replace by value in free text. Empty when both names can be replaced; absent from older saved envelopes. Other unknown identifiers may still remain."},
     },
     "required": ["reading", "asked_at", "took_ms", "outcome", "method", "sections", "warnings", "redacted"],
 }
@@ -520,7 +522,10 @@ class Surface:
             return _refused(NEEDS_REASON)
         tool = ROUTE_TOOLS.get(params.name)
         if tool is not None:
-            redactor = None if unredacted else await self.state.redaction()
+            try:
+                redactor = None if unredacted or not tool.carries_machine_data else await self.state.redaction()
+            except RedactionWithheld as exc:
+                return _refused(f"redaction_withheld: {exc.detail} Retry in about {exc.retry_after} seconds; pass unredacted with a reason to proceed now.")
             if params.name == "capture_create" and reason:
                 # The capture outlives this tool result; keep the stated reason inside its ZIP.
                 arguments["reason"] = reason
@@ -547,7 +552,10 @@ class Surface:
             reading = await self.state.readings.take(reading_name, arguments)
         except ValueError as exc:
             return _refused(str(exc))
-        policy = None if unredacted else await self.state.redaction()
+        try:
+            policy = None if unredacted else await self.state.redaction()
+        except RedactionWithheld as exc:
+            return _refused(f"redaction_withheld: {exc.detail} Retry in about {exc.retry_after} seconds; pass unredacted with a reason to proceed now.")
         body = await asyncio.to_thread(lambda: reading.to_dict() if policy is None else policy.attach(reading.to_dict()))
         return _answer(_warned(body, reason))
 
@@ -586,6 +594,8 @@ class Surface:
             try:
                 policy = await self.state.redaction()
                 text = (await asyncio.to_thread(compose, self.state.stack, self.state.prompts, policy))["text"]
+            except RedactionWithheld as exc:
+                raise MCPError(types.INTERNAL_ERROR, f"redaction_withheld: {exc.detail} Retry in about {exc.retry_after} seconds; call the compose tool with unredacted and a reason to proceed now.") from exc
             except StoreUnavailable as exc:
                 raise MCPError(types.INTERNAL_ERROR, f"{exc.reason}: {exc}") from exc
             return _resource(uri, "text/markdown", text)

@@ -127,7 +127,8 @@ curl -H "Authorization: Bearer $TOKEN" \
       ]
     }
   ],
-  "redacted": ["host", "user"]
+  "redacted": ["host", "user"],
+  "redaction_gaps": []
 }
 ```
 

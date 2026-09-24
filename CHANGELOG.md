@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.9.18] - 2026-09-24
+
+### Improved
+- Redacted answers now carry `redaction_gaps`: an empty list when this policy can replace both learned computer and user names by value, or the names it could not replace when either is missing or too short. Field-name masking still runs. Stack handoffs put a plain-language note before evidence when there is a gap; capture readings, the manifest and the bounded capture listing carry the same disclosure. Older saved material without this field has unknown gap status.
+- Identity retries use a monotonic interval and retry when either the host or user name is missing. A backward wall-clock change no longer delays an attempt. The one shared lookup still protects concurrent callers.
+- An unexpected identity-lookup exception still withholds redacted answers before saved edits. HTTP now explains that refusal with a fixed `503 redaction_withheld` body and `Retry-After`; MCP tools give an actionable refusal. A connected record stream sends `withheld` and a heartbeat, keeps its cursor, and retries on the same connection. A startup exception leaves the server available for the safe refusal and explicit unredacted path rather than preventing startup. The Health reading turns its own identity-question exception into a sanitized failed outcome for that explicit path. The dashboard Live readout names the refusal and its retry time.
+- The synthetic agent-answer measurement now covers observed Crash and every Signals input, runs its default path in CI, and records exact and sequential Claude Code client probes. All eight default synthetic answers reached Claude Code 2.1.280 inline in the measured session; that observation is scoped to this client and these shapes.
+
+### Limits
+- A routine unavailable identity lookup still permits best-effort redacted answers. `redaction_gaps` tells when known host or user names cannot be replaced inside free text; it does not guarantee removal of every unknown identifier. An unexpected exception remains fail-closed while the policy lacks a name. A capture or handoff from an older version may not record gap status. Remembering names across restarts and a broader free-text masking policy require separate review.
+- Client delivery for larger counts, other Claude Code versions and other MCP clients remains unmeasured; a generated 59 KiB payload reached the measured client as a saved-file notice. The full source evidence remains available.
+
 ## [1.9.17] - 2026-09-24
 
 ### Improved

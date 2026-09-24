@@ -5,7 +5,19 @@ import string
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from sentinel.redact import PLACEHOLDER_CPER, Identity, redact
+from sentinel.redact import PLACEHOLDER_CPER, Identity, Redactor, redact
+
+
+def test_redacted_answers_disclose_names_the_policy_cannot_mask_by_value():
+    payload = {"MachineName": "TESTBOX", "Message": "TESTBOX\\al signed in"}
+    unknown = Redactor().attach(payload)
+    assert unknown["MachineName"] == "<host>" and unknown["Message"] == payload["Message"]
+    assert unknown["redaction_gaps"] == ["host", "user"]
+    short_user = Redactor(Identity(host="TESTBOX", user="al")).attach(payload)
+    assert short_user["Message"] == "<host>\\al signed in"
+    assert short_user["redaction_gaps"] == ["user"]
+    complete = Redactor(Identity(host="TESTBOX", user="alice")).attach(payload)
+    assert complete["redaction_gaps"] == []
 
 
 def test_serial_fields_by_name():
@@ -118,7 +130,7 @@ def test_attach_records_what_was_removed_on_the_object():
     from sentinel.redact import Redactor
 
     body = Redactor().attach({"MachineName": "X-1", "plain": 1})
-    assert body == {"MachineName": "<host>", "plain": 1, "redacted": ["host"]}
+    assert body == {"MachineName": "<host>", "plain": 1, "redacted": ["host"], "redaction_gaps": ["host", "user"]}
     assert Redactor().attach(["a"]) == ["a"]
 
 

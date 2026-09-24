@@ -13,7 +13,7 @@ import uvicorn
 
 from sentinel.app import State, create_app
 from sentinel.bridge import BridgeResult
-from sentinel.redact import Identity, Redactor
+from sentinel.redact import Identity, RedactionWithheld, Redactor
 from sentinel.stream import LOGS, PRESETS, Stream, poll_script, stream_report
 from tests.conftest import FakeBridge, identity_result, real_bridge_or_skip
 
@@ -118,6 +118,38 @@ def test_records_are_redacted_like_every_other_response():
     assert got[1][1]["redacted"] == ["host"]
 
 
+def test_identity_refusal_keeps_the_stream_and_its_cursor_for_the_recovered_policy():
+    record = {**RECORD, "Message": "TESTBOX signed in tester"}
+    bridge = stream_bridge(poll=BridgeResult("ok", items=[{"log": "System", "record": record}], took_ms=1))
+    attempts = 0
+
+    def current_policy() -> Redactor:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise RedactionWithheld(12)
+        return Redactor(Identity(host="TESTBOX", user="tester"))
+
+    stream = Stream(bridge, current_policy, interval=0)
+    stream.cursors = {"System": 307403, "Application": 4908829}
+    got = asyncio.run(take_frames(stream, polls=2))
+    assert [name for name, _ in got] == ["withheld", "heartbeat", "record", "heartbeat"]
+    assert got[0][1]["error"] == "redaction_withheld" and got[0][1]["retry_after"] == 12
+    assert got[1][1]["cursors"]["System"] == 307403
+    assert got[2][1]["record"]["Message"] == "<host> signed in <user>"
+    assert got[3][1]["cursors"]["System"] == 307404
+
+
+def test_stream_announces_a_startup_identity_refusal_after_its_cursor_snapshot():
+    def withheld() -> Redactor:
+        raise RedactionWithheld(30)
+
+    stream = Stream(stream_bridge(), withheld, interval=0)
+    got = asyncio.run(take_frames(stream, polls=1))
+    assert [name for name, _ in got] == ["withheld", "heartbeat"]
+    assert got[1][1]["cursors"] == {"System": 307403, "Application": 4908829}
+
+
 def test_a_connected_stream_uses_identity_learned_after_it_connected():
     record = {**RECORD, "Message": "TESTBOX signed in tester"}
     bridge = stream_bridge(poll=BridgeResult("ok", items=[{"log": "System", "record": record}], took_ms=9))
@@ -128,7 +160,7 @@ def test_a_connected_stream_uses_identity_learned_after_it_connected():
     stream = Stream(bridge, lambda: state.redactor, interval=0)
     assert stream.start_cursors().observed
     bridge.by_marker["$env:COMPUTERNAME"] = identity_result("TESTBOX", "tester")
-    state._learned_at = time.time() - 61  # The connected stream outlived the retry interval.
+    state._learned_at = time.monotonic() - 61  # The connected stream outlived the retry interval.
     result, records = stream.poll()
     assert result.observed and len(records) == 1
     assert state.identity.host == "TESTBOX"
@@ -151,7 +183,7 @@ def test_a_connected_stream_redacts_bridge_errors_with_the_current_identity():
     current["policy"] = Redactor(Identity(host="TESTBOX", user="tester"))
     loop_thread = threading.get_ident()
     got = asyncio.run(take_frames(stream, polls=1))
-    assert got[0] == ("bridge", {"outcome": "failed", "error": "<host> refused <user>", "redacted": ["host", "user"]})
+    assert got[0] == ("bridge", {"outcome": "failed", "error": "<host> refused <user>", "redacted": ["host", "user"], "redaction_gaps": []})
     assert resolved_on and all(thread != loop_thread for thread in resolved_on)
 
 
@@ -250,7 +282,7 @@ def test_the_route_updates_redaction_on_an_already_connected_stream():
                 block = []
                 if name == "heartbeat" and not learned:
                     bridge.by_marker["$env:COMPUTERNAME"] = identity_result("TESTBOX", "tester")
-                    state._learned_at = time.time() - 61
+                    state._learned_at = time.monotonic() - 61
                     learned = True
                 if name == "record":
                     assert data["record"]["Message"] == "<host> signed in <user>"

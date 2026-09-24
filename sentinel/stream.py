@@ -30,7 +30,7 @@ from .bridge import Bridge, BridgeResult
 # One projection for every log reading: a record that arrives on the stream and a record read
 # by `events` are the same shape, field for field.
 from .readings.events import RECORD_SELECT, winevent
-from .redact import Redactor
+from .redact import RedactionWithheld, Redactor
 from .serialization import json_safe_integers
 
 POLL_SECONDS = 5.0
@@ -164,22 +164,33 @@ class Stream:
             while True:
                 if disconnected is not None and await disconnected():
                     return
-                if self.ready:
-                    result, records = await asyncio.to_thread(self.poll)
-                    for record in records:
-                        yield frame("record", record)
-                else:
-                    result = await asyncio.to_thread(self.start_cursors)
-                    if result.observed and not self.ready:
-                        yield frame("bridge", {"outcome": "failed", "error": "the logs did not report where they are; the stream has nothing to be new against"})
-                if not result.observed:
-                    # The error text is PowerShell's own and can quote a path or a name: it leaves redacted too.
-                    detail = {"outcome": result.outcome, "error": result.error or ""}
-                    redactor = await asyncio.to_thread(self._current_redactor)
-                    yield frame("bridge", redactor.attach(detail) if redactor is not None else detail)
-                yield frame("heartbeat", {"at": _now(), "cursors": dict(self.cursors)})
-                # While the machine is not answering, every poll costs the bridge's full retries: ask less often.
-                await asyncio.sleep(self.interval if result.observed else self.interval * 4)
+                try:
+                    if self.ready:
+                        result, records = await asyncio.to_thread(self.poll)
+                        for record in records:
+                            yield frame("record", record)
+                    else:
+                        result = await asyncio.to_thread(self.start_cursors)
+                        if result.observed and not self.ready:
+                            yield frame("bridge", {"outcome": "failed", "error": "the logs did not report where they are; the stream has nothing to be new against"})
+                        if result.observed and self.ready:
+                            # The cursor snapshot has no private record text, but a startup
+                            # refusal must be visible before the first heartbeat.
+                            await asyncio.to_thread(self._current_redactor)
+                    if not result.observed:
+                        # The error text is PowerShell's own and can quote a path or a name: it leaves redacted too.
+                        detail = {"outcome": result.outcome, "error": result.error or ""}
+                        redactor = await asyncio.to_thread(self._current_redactor)
+                        yield frame("bridge", redactor.attach(detail) if redactor is not None else detail)
+                    yield frame("heartbeat", {"at": _now(), "cursors": dict(self.cursors)})
+                    # While the machine is not answering, every poll costs the bridge's full retries: ask less often.
+                    await asyncio.sleep(self.interval if result.observed else self.interval * 4)
+                except RedactionWithheld as exc:
+                    # A refused poll has not advanced any cursor. Keep the connection so the next
+                    # successful poll can deliver those records under the recovered policy.
+                    yield frame("withheld", exc.to_dict())
+                    yield frame("heartbeat", {"at": _now(), "cursors": dict(self.cursors)})
+                    await asyncio.sleep(self.interval * 4)
         except (asyncio.CancelledError, GeneratorExit):
             return
         finally:

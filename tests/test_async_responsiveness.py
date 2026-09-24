@@ -11,7 +11,9 @@ import httpx
 import pytest
 from mcp import types
 from mcp.server.subscriptions import ResourceUpdated
+from mcp.shared.exceptions import MCPError
 
+from sentinel import capture
 from sentinel.app import State, create_app
 from sentinel.bridge import BridgeResult
 from sentinel.mcp_server import HANDOFF_URI, Surface
@@ -44,12 +46,15 @@ class CrashedIdentity(FakeBridge):
         super().__init__()
         self.lookups = 0
         self.fail = True
+        self.unavailable = False
 
     def run(self, script: str, *, timeout: float = 60, depth: int = 6) -> BridgeResult:
         if "$env:COMPUTERNAME" in script:
             self.lookups += 1
             if self.fail:
-                raise RuntimeError("synthetic identity failure")
+                raise RuntimeError(r"TESTBOX tester C:\Users\tester synthetic identity failure")
+            if self.unavailable:
+                return BridgeResult("unavailable", error="synthetic bridge unavailable")
             return identity_result("TESTBOX", "tester")
         return super().run(script, timeout=timeout, depth=depth)
 
@@ -170,11 +175,17 @@ def test_crashed_identity_lookup_refuses_before_an_edit_and_retries_after_interv
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app, raise_app_exceptions=False), base_url="http://test") as client:
             for expected_lookups in (1, 1):
                 response = await client.post("/api/stack/items", json={"kind": "note", "note": "TESTBOX should not be saved"}, headers=AUTH)
-                assert response.status_code == 500 and "TESTBOX" not in response.text
+                assert response.status_code == 503 and "TESTBOX" not in response.text and "tester" not in response.text
+                assert response.json() == {
+                    "error": "redaction_withheld", "reason": "identity_lookup_failed",
+                    "detail": "Sentinel could not look up this computer's names, so it cannot mask them inside message text. Redacted answers are withheld until the next lookup. Where a request offers an explicit unredacted option, it can bypass this refusal but may expose real values.",
+                    "retry_after": int(response.headers["Retry-After"]),
+                }
+                assert 1 <= int(response.headers["Retry-After"]) <= 60
                 assert state.stack.state()["items"] == [] and bridge.lookups == expected_lookups
-            state._learned_at = 0  # an expired refusal permits another bounded attempt
+            state._learned_at = time.monotonic() - 61  # an expired refusal permits another bounded attempt
             retry = await client.post("/api/stack/items", json={"kind": "note", "note": "TESTBOX should not be saved"}, headers=AUTH)
-            assert retry.status_code == 500 and bridge.lookups == 2 and state.stack.state()["items"] == []
+            assert retry.status_code == 503 and bridge.lookups == 2 and state.stack.state()["items"] == []
 
     asyncio.run(run())
     bridge.fail = False
@@ -215,11 +226,91 @@ def test_crashed_identity_lookup_refuses_all_sync_edits_before_writing(monkeypat
             )
             for verb, path, data in edits:
                 response = await client.request(verb, path, json=data, headers=AUTH)
-                assert response.status_code == 500, (path, response.text)
+                assert response.status_code == 503 and response.json()["error"] == "redaction_withheld", (path, response.text)
+                assert "TESTBOX" not in response.text and "tester" not in response.text
                 assert (stack_path.read_bytes(), settings_path.read_bytes(), samples[0].read_bytes()) == original
                 assert not status_path.exists()
                 assert state.stack.state()["items"][0]["id"] == "seed"
             assert bridge.lookups == 1
+
+    asyncio.run(run())
+
+
+def test_refusal_covers_redacted_reading_handoff_and_capture_without_writing_a_zip(monkeypatch, tmp_path):
+    monkeypatch.setenv("SYSTEM_SENTINEL_HOME", str(tmp_path))
+    bridge = CrashedIdentity()
+    state = State(bridge=bridge, token=TOKEN)
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=create_app(state, mcp=False)), base_url="http://test") as client:
+            for method, path in (("GET", "/api/readings/events"), ("GET", "/api/stack/composed"), ("POST", "/api/captures")):
+                response = await client.request(method, path, headers=AUTH)
+                assert response.status_code == 503 and response.json()["error"] == "redaction_withheld"
+                assert response.headers["Retry-After"]
+                assert "TESTBOX" not in response.text and "tester" not in response.text
+            assert bridge.lookups == 1
+
+    asyncio.run(run())
+    assert capture.listing() == [] and state.stack.state()["items"] == []
+
+
+def test_a_later_routine_unavailable_lookup_lifts_the_exception_refusal(monkeypatch, tmp_path):
+    monkeypatch.setenv("SYSTEM_SENTINEL_HOME", str(tmp_path))
+    bridge = CrashedIdentity()
+    state = State(bridge=bridge, token=TOKEN)
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=create_app(state, mcp=False)), base_url="http://test") as client:
+            refused = await client.post("/api/stack/items", json={"kind": "note", "note": "TESTBOX tester"}, headers=AUTH)
+            assert refused.status_code == 503 and state.stack.state()["items"] == []
+            bridge.fail = False
+            bridge.unavailable = True
+            state._learned_at = time.monotonic() - 61
+            served = await client.post("/api/stack/items", json={"kind": "note", "note": "TESTBOX tester"}, headers=AUTH)
+            assert served.status_code == 201 and served.json()["redaction_gaps"] == ["host", "user"]
+            assert served.json()["note"] == "TESTBOX tester"
+            assert bridge.lookups == 2
+
+    asyncio.run(run())
+
+
+def test_a_crashed_startup_explains_redaction_refusal_without_exposing_the_exception(monkeypatch, tmp_path):
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("SYSTEM_SENTINEL_HOME", str(tmp_path))
+    bridge = CrashedIdentity()
+    with TestClient(create_app(State(bridge=bridge, token=TOKEN), mcp=False)) as client:
+        refused = client.get("/api/stack", headers=AUTH)
+        assert refused.status_code == 503 and refused.json()["error"] == "redaction_withheld"
+        assert "TESTBOX" not in refused.text and "tester" not in refused.text
+        assert client.get("/api/readings", headers=AUTH).status_code == 200
+        assert client.get("/api/readings/events?unredacted=true", headers=AUTH).status_code == 200
+        health = client.get("/api/readings/health?unredacted=true", headers=AUTH)
+        assert health.status_code == 200 and health.json()["outcome"] == "failed"
+        assert "internal error" in health.json()["error"]["detail"]
+        assert "TESTBOX" not in health.text and "tester" not in health.text
+
+
+def test_mcp_names_a_redaction_refusal_and_preserves_the_explicit_unredacted_path(monkeypatch, tmp_path):
+    monkeypatch.setenv("SYSTEM_SENTINEL_HOME", str(tmp_path))
+    state = State(bridge=CrashedIdentity(), token=TOKEN)
+    surface = Surface(state)
+
+    async def run():
+        for name in ("stack_list", "events"):
+            refused = await surface.call_tool(None, types.CallToolRequestParams(name=name, arguments={}))
+            assert refused.is_error and "redaction_withheld" in refused.content[0].text
+            assert "unredacted with a reason" in refused.content[0].text
+            assert "TESTBOX" not in refused.content[0].text and "tester" not in refused.content[0].text
+            given = await surface.call_tool(None, types.CallToolRequestParams(name=name, arguments={"unredacted": True, "reason": "inspect synthetic failure"}))
+            assert not given.is_error
+        for name in ("prompts_list", "capture_list"):
+            available = await surface.call_tool(None, types.CallToolRequestParams(name=name, arguments={}))
+            assert not available.is_error
+        edit = await surface.call_tool(None, types.CallToolRequestParams(name="stack_add", arguments={"kind": "note", "note": "TESTBOX tester"}))
+        assert edit.is_error and state.stack.state()["items"] == []
+        with pytest.raises(MCPError, match="redaction_withheld"):
+            await surface.read_resource(None, types.ReadResourceRequestParams(uri=HANDOFF_URI))
 
     asyncio.run(run())
 
@@ -239,7 +330,7 @@ def test_saved_stack_work_in_async_http_and_mcp_keeps_loop_free(monkeypatch, tmp
     monkeypatch.setenv("SYSTEM_SENTINEL_HOME", str(tmp_path))
     state = State(bridge=FakeBridge(), token=TOKEN)
     state._redactor = Redactor(Identity(host="TESTBOX", user="tester"))
-    state._learned_at = time.time()
+    state._learned_at = time.monotonic()
     state.stack.add(Item(id="seed", added_at="2026-09-24T00:00:00Z", kind="note", title="TESTBOX", note="TESTBOX tester"))
     surface = Surface(state)
     app = create_app(state, mcp=False)
@@ -292,7 +383,7 @@ def test_prompt_library_reads_in_async_mcp_keep_loop_free(monkeypatch, tmp_path)
     monkeypatch.setenv("SYSTEM_SENTINEL_HOME", str(tmp_path))
     state = State(bridge=FakeBridge(), token=TOKEN)
     state._redactor = Redactor(Identity(host="TESTBOX", user="tester"))
-    state._learned_at = time.time()
+    state._learned_at = time.monotonic()
     surface = Surface(state)
     state.prompts.all()  # seed before the gate
     entered, release = threading.Event(), threading.Event()
@@ -330,7 +421,7 @@ def test_mcp_stack_read_waiting_on_another_edit_keeps_loop_free(monkeypatch, tmp
     monkeypatch.setenv("SYSTEM_SENTINEL_HOME", str(tmp_path))
     state = State(bridge=FakeBridge(), token=TOKEN)
     state._redactor = Redactor(Identity(host="TESTBOX", user="tester"))
-    state._learned_at = time.time()
+    state._learned_at = time.monotonic()
     surface = Surface(state)
     holder_entered, request_entered, release = threading.Event(), threading.Event(), threading.Event()
     original_state = state.stack.state
@@ -375,7 +466,7 @@ def test_cancelled_saved_edit_still_notifies_subscribers(monkeypatch, tmp_path, 
     monkeypatch.setenv("SYSTEM_SENTINEL_HOME", str(tmp_path))
     state = State(bridge=FakeBridge(), token=TOKEN)
     state._redactor = Redactor(Identity(host="TESTBOX", user="tester"))
-    state._learned_at = time.time()
+    state._learned_at = time.monotonic()
     state.stack.add(Item(id="seed", added_at="2026-09-24T00:00:00Z", kind="note", title="Seed", note="keep"))
     app = create_app(state)
     surface = app.state.mcp_surface
@@ -439,7 +530,7 @@ def test_notification_failure_does_not_report_a_saved_edit_as_failed(monkeypatch
     monkeypatch.setenv("SYSTEM_SENTINEL_HOME", str(tmp_path))
     state = State(bridge=FakeBridge(), token=TOKEN)
     state._redactor = Redactor(Identity(host="TESTBOX", user="tester"))
-    state._learned_at = time.time()
+    state._learned_at = time.monotonic()
     state.stack.add(Item(id="seed", added_at="2026-09-24T00:00:00Z", kind="note", title="Seed", note="keep"))
     app = create_app(state)
     surface = app.state.mcp_surface

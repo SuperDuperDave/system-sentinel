@@ -34,6 +34,22 @@ PLACEHOLDER_MAC = "<mac>"
 PLACEHOLDER_ADDRESS = "<address>"
 PLACEHOLDER_CPER = "<cper bytes withheld; request unredacted for exact payload>"
 
+
+class RedactionWithheld(RuntimeError):
+    """A name lookup raised while value masking was incomplete; no redacted evidence leaves."""
+
+    detail = (
+        "Sentinel could not look up this computer's names, so it cannot mask them inside message text. "
+        "Redacted answers are withheld until the next lookup. Where a request offers an explicit unredacted option, it can bypass this refusal but may expose real values."
+    )
+
+    def __init__(self, retry_after: int):
+        self.retry_after = retry_after
+        super().__init__(self.detail)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"error": "redaction_withheld", "reason": "identity_lookup_failed", "detail": self.detail, "retry_after": self.retry_after}
+
 # Fields whose values identify the physical part, the machine, the person or the network,
 # not the machine's state. Matched on the field name, case-insensitively.
 # PlatformId and FRUId are the stable machine and part identifiers a decoded CPER record carries.
@@ -82,6 +98,10 @@ class Redactor:
             if len(name) >= 3
         ]
 
+    def gaps(self) -> list[str]:
+        """Names that cannot be replaced by value in free text with this policy."""
+        return [kind for kind, name in (("host", self.identity.host), ("user", self.identity.user)) if not name or len(name) < 3]
+
     def redact(self, value: Any) -> tuple[Any, list[str]]:
         removed: set[str] = set()
         out = self._walk(value, removed, key=None)
@@ -92,6 +112,7 @@ class Redactor:
         body, removed = self.redact(payload)
         if isinstance(body, dict):
             body["redacted"] = removed
+            body["redaction_gaps"] = self.gaps()
         return body
 
     def _walk(self, value: Any, removed: set[str], key: str | None) -> Any:

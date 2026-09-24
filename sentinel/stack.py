@@ -543,24 +543,32 @@ def compose(
     items = state["items"]
     index = index_state(state)
     removed: set[str] = set()
+    gaps = redactor.gaps() if redactor is not None else []
     if redactor is not None:
         items, item_removed = redactor.redact(items)
         index, index_removed = redactor.redact(index)
         index["redacted"] = index_removed
+        index["redaction_gaps"] = gaps
         safe_id, id_removed = redactor.redact(prompt_id)
         prompt_status["id"] = safe_id
         removed.update((*item_removed, *index_removed, *id_removed))
-    return {
-        "text": render(prompt, items, prompt_status),
+    result = {
+        "text": render(prompt, items, prompt_status, redaction_gaps=gaps),
         "items": len(items),
         "redacted": sorted(removed),
         "prompt": prompt_status,
         "stack": index,
     }
+    if redactor is not None:
+        result["redaction_gaps"] = gaps
+    return result
 
 
-def render(prompt: dict[str, Any] | None, items: list[dict[str, Any]], prompt_status: dict[str, Any] | None = None) -> str:
+def render(prompt: dict[str, Any] | None, items: list[dict[str, Any]], prompt_status: dict[str, Any] | None = None, *, redaction_gaps: list[str] | None = None) -> str:
     lines = ["# System Sentinel handoff", ""]
+    if redaction_gaps:
+        names = " and ".join(f"{kind} names" for kind in redaction_gaps)
+        lines += [f"> Redaction note: Sentinel could not mask {names} by value inside source text. Those names may remain; review before sharing.", ""]
     if prompt:
         lines += [f"## Prompt: {prompt.get('name', '')}".rstrip(), "", (prompt.get("content") or "").strip(), ""]
     elif prompt_status and prompt_status["state"] == "missing":

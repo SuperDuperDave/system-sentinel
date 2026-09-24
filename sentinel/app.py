@@ -10,6 +10,7 @@ import asyncio
 import contextlib
 import ipaddress
 import logging
+import math
 import threading
 import time
 from collections.abc import AsyncIterator, Callable
@@ -31,7 +32,7 @@ from .link import qr_svg, reach, sign_in_link
 from .performance import KEEP_DAYS, MAX_INTERVAL, MIN_INTERVAL, PerformanceCollector, PerformanceStore
 from .reading import REGISTRY
 from .readings.health import learn_identity
-from .redact import Identity, Redactor
+from .redact import Identity, RedactionWithheld, Redactor
 from .serialization import json_safe_integers
 from .service import ReadingService
 from .stack import Duplicate, Prompts, Stack, StoreUnavailable, compose, index_entry, index_state, new_item
@@ -168,7 +169,7 @@ class State:
     def learn(self) -> None:
         """Ask the machine its names. Field-name redaction never depends on this; replacing the
         names inside message text does, so an answer that did not come is asked for again later."""
-        self._learned_at = time.time()
+        self._learned_at = time.monotonic()
         learned, facts = learn_identity(self.bridge)
         previous = self.identity
         # One policy owns the identity. A later failed lookup must not erase names already learned.
@@ -177,28 +178,36 @@ class State:
         else:
             identity = Identity(host=previous.host or learned.host, user=previous.user or learned.user)
         self._redactor = Redactor(identity)
+        with self._relearn_lock:
+            self._relearn_error = None
+
+    def _withheld(self) -> RedactionWithheld:
+        remaining = RELEARN_SECONDS - (time.monotonic() - self._learned_at) if self._learned_at is not None else RELEARN_SECONDS
+        return RedactionWithheld(max(1, min(math.ceil(RELEARN_SECONDS), math.ceil(remaining))))
 
     def _pending_relearn(self) -> Future[None] | None:
         """One identity attempt for all callers; a failed attempt is not a weaker policy."""
         with self._relearn_lock:
             if self._relearning is not None:
                 return self._relearning
-            due = self.identity.host is None and (self._learned_at is None or time.time() - self._learned_at > RELEARN_SECONDS)
+            unknown_name = self.identity.host is None or self.identity.user is None
+            due = unknown_name and (self._learned_at is None or time.monotonic() - self._learned_at > RELEARN_SECONDS)
             if not due:
-                if self._relearn_error is not None and self.identity.host is None:
-                    raise RuntimeError("identity lookup failed; redacted answer withheld") from self._relearn_error
+                if self._relearn_error is not None and unknown_name:
+                    raise self._withheld() from self._relearn_error
                 return None
-            self._learned_at = time.time()
+            self._learned_at = time.monotonic()
             pending: Future[None] = Future()
             pending.set_running_or_notify_cancel()
             self._relearning = pending
             try:
                 threading.Thread(target=self._complete_relearn, args=(pending,), name="sentinel-identity-relearn", daemon=True).start()
             except BaseException as exc:
-                failure = RuntimeError("identity lookup failed; redacted answer withheld")
+                logger.exception("identity retry could not start")
+                failure = self._withheld()
                 failure.__cause__ = exc
                 self._relearning = None
-                self._relearn_error = failure
+                self._relearn_error = exc
                 pending.set_exception(failure)
             return pending
 
@@ -206,14 +215,13 @@ class State:
         try:
             self.learn()
         except BaseException as exc:
-            failure = RuntimeError("identity lookup failed; redacted answer withheld")
+            logger.exception("identity retry failed")
+            failure = self._withheld()
             failure.__cause__ = exc
             with self._relearn_lock:
-                self._relearn_error = failure
+                self._relearn_error = exc
             pending.set_exception(failure)
         else:
-            with self._relearn_lock:
-                self._relearn_error = None
             pending.set_result(None)
         finally:
             with self._relearn_lock:
@@ -257,7 +265,13 @@ def create_app(state: State | None = None, mcp: bool = True) -> FastAPI:
 
     @contextlib.asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        state.learn()
+        try:
+            state.learn()
+        except Exception as exc:
+            # Start with the prior policy. Redacted routes with missing names still refuse;
+            # the fixed refusal body can explain the problem without exposing the exception.
+            logger.exception("startup identity lookup failed")
+            state._relearn_error = exc
         if state.performance_collector is not None:
             state.performance_collector.start()
         try:
@@ -292,6 +306,10 @@ def create_app(state: State | None = None, mcp: bool = True) -> FastAPI:
     @app.exception_handler(StoreUnavailable)
     async def saved_context_unavailable(_request: Request, exc: StoreUnavailable) -> JSONResponse:
         return JSONResponse({"error": "saved_context_unavailable", "reason": exc.reason, "detail": str(exc)}, status_code=503)
+
+    @app.exception_handler(RedactionWithheld)
+    async def redaction_withheld(_request: Request, exc: RedactionWithheld) -> JSONResponse:
+        return JSONResponse(exc.to_dict(), status_code=503, headers={"Retry-After": str(exc.retry_after)})
 
     def handoff_changed_from_route() -> None:
         # FastAPI runs synchronous routes in a worker thread. Publish on the server's event loop

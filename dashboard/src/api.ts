@@ -23,6 +23,8 @@ export interface Reading<T = unknown> {
   asked_at: string;
   took_ms: number;
   outcome: Outcome;
+  /** Names Sentinel could not mask by value in free text; an empty list still does not promise that unknown identifiers were removed. */
+  redaction_gaps?: ('host' | 'user')[];
   /** One query, several, or (for an inferred reading) the readings it drew on and what each answered. */
   method: { kind: string; query?: string; queries?: string[]; readings?: unknown; source?: string };
   count: number | null;
@@ -103,7 +105,7 @@ export class Unauthorized extends Error {
 }
 
 export class HttpError extends Error {
-  constructor(readonly status: number, detail: string) {
+  constructor(readonly status: number, detail: string, readonly code?: string, readonly retryAfter?: number) {
     super(`${status}: ${detail}`);
   }
 }
@@ -122,13 +124,17 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (res.status === 401) throw new Unauthorized();
   if (!res.ok) {
     let detail = res.statusText;
+    let code: string | undefined;
+    let retryAfter: number | undefined;
     try {
       const body = await res.json();
       detail = body.detail ?? body.error ?? detail;
+      if (typeof body.error === 'string') code = body.error;
+      if (Number.isInteger(body.retry_after) && body.retry_after > 0) retryAfter = body.retry_after;
     } catch {
       /* the status is the message */
     }
-    throw new HttpError(res.status, detail);
+    throw new HttpError(res.status, detail, code, retryAfter);
   }
   return (await res.json()) as T;
 }

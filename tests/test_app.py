@@ -1,11 +1,12 @@
 """The boundary: the token guards every /api and /mcp route; readings arrive redacted unless asked by name."""
 
 import json
+import time
 
 import pytest
 from fastapi.testclient import TestClient
 
-from sentinel.app import State, create_app
+from sentinel.app import RELEARN_SECONDS, State, create_app
 from sentinel.bridge import Bridge, BridgeResult
 from sentinel.readings import health
 from tests.conftest import FakeBridge, LogBridge, identity_result, log_collector_result
@@ -103,6 +104,19 @@ def test_a_failed_relearn_keeps_names_already_learned():
     state.learn()
     assert state.identity.host == "TESTBOX"
     assert state.redactor.attach({"Message": "TESTBOX signed in tester"})["Message"] == "<host> signed in <user>"
+
+
+def test_a_missing_user_is_relearned_after_the_monotonic_interval(monkeypatch: pytest.MonkeyPatch):
+    bridge = FakeBridge(by_marker={"$env:COMPUTERNAME": identity_result("TESTBOX", "")})
+    state = State(bridge=bridge, token=TOKEN)
+    state.learn()
+    assert state.identity.host == "TESTBOX" and state.identity.user is None
+
+    bridge.by_marker["$env:COMPUTERNAME"] = identity_result("TESTBOX", "tester")
+    state._learned_at = time.monotonic() - RELEARN_SECONDS - 1
+    monkeypatch.setattr(time, "time", lambda: -1_000_000.0)  # A backward wall-clock step cannot delay retry.
+    assert state.redactor.identity.user == "tester"
+    assert state.redactor.attach({"Message": "tester signed in"})["Message"] == "<user> signed in"
 
 
 def test_native_windows_identity_fallback_keeps_the_bridge_failure_visible(monkeypatch: pytest.MonkeyPatch):

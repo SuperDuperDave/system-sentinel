@@ -19,6 +19,7 @@ from sentinel.bridge import BridgeResult
 from sentinel.capture import MAX_LIST_MANIFEST_BYTES, STALE_PENDING_SECONDS, listing
 from sentinel.paths import captures_dir
 from sentinel.reading import REGISTRY, Reading
+from sentinel.redact import Redactor
 from sentinel.stack import Item, Prompts, Stack
 from tests.conftest import FakeBridge, LogBridge, identity_result, real_bridge_or_skip
 from tests.test_stack import EVENTS
@@ -117,6 +118,25 @@ def test_a_capture_is_redacted_unless_asked_by_name(client: TestClient):
     listed = {capture["name"]: capture["manifest"] for capture in client.get("/api/captures", headers=AUTH).json()["captures"]}
     assert listed[redacted_response.headers["X-Capture-Name"]]["unredacted"] is False
     assert listed[unredacted_response.headers["X-Capture-Name"]]["unredacted"] is True
+
+
+def test_a_capture_marks_the_free_text_gap_when_machine_names_are_unknown(client: TestClient):
+    state = client.app.state.sentinel
+    state._redactor = Redactor()  # The identity lookup returned unavailable; named fields still mask.
+    state._learned_at = time.monotonic()
+
+    response = client.post("/api/captures", headers=AUTH)
+    assert response.status_code == 200
+    files = members(response.content)
+    manifest = json.loads(files["manifest.json"])
+    event = json.loads(files["readings/events.json"])
+    assert manifest["redaction_gaps"] == ["host", "user"]
+    assert event["redaction_gaps"] == ["host", "user"]
+    assert event["sections"][0]["data"][0]["MachineName"] == "<host>"
+    assert "TESTBOX" in event["sections"][0]["data"][0]["Message"]
+    assert "Redaction note" in files["composed.md"].decode().splitlines()[2]
+    listed = {item["name"]: item["manifest"] for item in client.get("/api/captures", headers=AUTH).json()["captures"]}
+    assert listed[response.headers["X-Capture-Name"]]["redaction_gaps"] == ["host", "user"]
 
 
 def test_a_reading_that_cannot_be_taken_is_written_with_its_outcome(client: TestClient):
@@ -479,6 +499,7 @@ def test_listing_counts_omissions_without_echoing_untrusted_manifest_strings():
         "capture-20260920T000011Z.zip": ({**base, "omitted": [{"reading": "PRIVATE-HOST", "reason": "future reason"}]}, "read", 1),
         "capture-20260920T000012Z.zip": ({**base, "omitted": [{"reading": "whea_record"}]}, "unreadable", None),
         "capture-20260920T000013Z.zip": ({**base, "readings": 1, "members": [{"reading": "whea_record", "outcome": "ok"}], "omitted": [{"reading": "whea_record", "reason": "requires an exact selection"}]}, "unreadable", None),
+        "capture-20260920T000014Z.zip": ({**base, "redaction_gaps": [{"host": "PRIVATE-HOST"}]}, "unreadable", None),
     }
     for name, (manifest, _, _) in cases.items():
         with zipfile.ZipFile(captures_dir() / name, "w", zipfile.ZIP_DEFLATED) as archive:

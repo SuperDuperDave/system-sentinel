@@ -95,6 +95,22 @@ def rpc(client: TestClient, method: str, params: dict | None = None, request_id:
     return response.json()
 
 
+def test_wire_refusal_does_not_send_the_identity_exception_to_an_agent():
+    class CrashedIdentity(FakeBridge):
+        def run(self, script: str, *, timeout: float = 60, depth: int = 6) -> BridgeResult:
+            if "$env:COMPUTERNAME" in script:
+                raise RuntimeError(r"TESTBOX tester C:\Users\tester synthetic failure")
+            return BridgeResult("ok", items=[EVENT], took_ms=5)
+
+    with TestClient(create_app(State(bridge=CrashedIdentity(), token=TOKEN))) as client:
+        tool = rpc(client, "tools/call", {"name": "events", "arguments": {"count": 1}})["result"]
+        assert tool["isError"] is True and "redaction_withheld" in tool["content"][0]["text"]
+        resource = rpc(client, "resources/read", {"uri": HANDOFF_URI})["error"]
+        assert "redaction_withheld" in json.dumps(resource)
+        assert "TESTBOX" not in json.dumps(tool) + json.dumps(resource)
+        assert "tester" not in json.dumps(tool) + json.dumps(resource)
+
+
 # --- what a client is told before it calls anything ------------------------------------------
 
 

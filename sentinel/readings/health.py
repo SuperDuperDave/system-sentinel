@@ -6,8 +6,11 @@ redaction can replace those names wherever they appear.
 
 from __future__ import annotations
 
+import logging
 import os
 import sys
+import threading
+import time
 from typing import Any
 
 from ..bridge import Bridge, questions_report, sessions_report
@@ -18,6 +21,21 @@ from ..redact import Identity
 IDENTITY_SCRIPT = "[pscustomobject]@{ host = $env:COMPUTERNAME; user = $env:USERNAME; ps = $PSVersionTable.PSVersion.ToString(); os = [System.Environment]::OSVersion.Version.ToString() }"
 
 DECODER = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools", "DecodeWheaRecord", "DecodeWheaRecord.exe")
+logger = logging.getLogger(__name__)
+IDENTITY_ERROR = "Sentinel's identity question raised an internal error; see the local server log"
+_IDENTITY_LOG_INTERVAL = 300.0
+_identity_log_lock = threading.Lock()
+_last_identity_log: float | None = None
+
+
+def _log_identity_exception() -> None:
+    """Keep a persistent failed Health check from rotating out older local diagnostics."""
+    global _last_identity_log
+    now = time.monotonic()
+    with _identity_log_lock:
+        if _last_identity_log is None or now - _last_identity_log >= _IDENTITY_LOG_INTERVAL:
+            logger.exception("Health identity question failed")
+            _last_identity_log = now
 
 
 def learn_identity(bridge: Bridge) -> tuple[Identity, dict[str, Any]]:
@@ -37,7 +55,11 @@ def take_health(bridge: Bridge, params: dict[str, Any]) -> Reading:
     # stream imports readings.events; import here to avoid a readings package cycle.
     from ..stream import stream_report
 
-    _, facts = learn_identity(bridge)
+    try:
+        _, facts = learn_identity(bridge)
+    except Exception:
+        _log_identity_exception()
+        facts = {"outcome": "failed", "error": IDENTITY_ERROR}
     sessions = sessions_report(bridge)
     data = {
         "bridge": {"available": bridge.available, "exe": bool(bridge.exe), **facts, "sessions": sessions, "questions": questions_report()},

@@ -59,7 +59,12 @@ export function Live() {
         if (!refreshOnVisible) {
           if (error instanceof HttpError) {
             setStatus('issue');
-            setReadout(`bridge · check failed (${error.status})`);
+            if (error.code === 'redaction_withheld') {
+              setReadout(`name lookup failed · redacted answers withheld · retry in ${error.retryAfter ?? 60} s`);
+              delay = Math.max(RETRY_MS, (error.retryAfter ?? 60) * 1_000);
+            } else {
+              setReadout(`bridge · check failed (${error.status})`);
+            }
           } else {
             setStatus('offline');
             setReadout(lastChecked ? `bridge · not checked since ${lastChecked}` : 'bridge · unreachable');
@@ -101,7 +106,7 @@ export function Live() {
       <span
         className={`${styles.word} ${status === 'live' ? styles.lit : styles.dark} readout`}
         role="status"
-        title={status === 'live' ? 'Sentinel returned the latest Health reading; see the readout for the bridge outcome' : status === 'checking' ? 'Checking Sentinel now' : status === 'issue' ? 'The Health check returned an HTTP error; Sentinel or a gateway may have answered' : 'Sentinel did not answer the latest check'}
+        title={status === 'live' ? 'Sentinel returned the latest Health reading; see the readout for the bridge outcome' : status === 'checking' ? 'Checking Sentinel now' : status === 'issue' && readout.startsWith('name lookup failed') ? 'Sentinel withheld redacted data until it can retry learning this computer’s names' : status === 'issue' ? 'The Health check returned an HTTP error; Sentinel or a gateway may have answered' : 'Sentinel did not answer the latest check'}
       >
         {status}
       </span>
