@@ -5,19 +5,20 @@ for field. ``record`` is the composer's most distinctive mechanism: the log does
 not announce a freeze; the next start does, so the records *before* that start
 are what the machine was doing.
 
-Every form of both readings is one ``-FilterXml`` query, so the level and the window are answered
-by the log's own index rather than by a scan; :func:`since_clause` is where a window is turned
-into that index's vocabulary, for this reading and for the others that take one.
+Every form of both readings starts with one ``-FilterXml`` query. A bounded read asks the log's
+index for a broad millisecond range, then filters exact ticks before its row cap; an unbounded
+newest read uses ``-MaxEvents``. :func:`since_clause` remains the legacy millisecond window for
+the separate crash moment collector.
 """
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from ..bridge import Bridge, BridgeResult
 from ..reading import Param, Reading, Section, Spec, from_bridge, register
-from .event_coverage import LOG_METADATA_SCRIPT, LOG_WINDOW_COVERAGE_BASIS, metadata, stamp_key, window_coverage
+from .event_coverage import LOG_METADATA_SCRIPT, LOG_WINDOW_COVERAGE_BASIS, exact_stamp, metadata, stamp_key, window_coverage
 
 LOGS = ("System", "Application")
 MAX_LOG_RECORDS = 2000  # per-request cap for the log and its progressively widened Record frame
@@ -53,8 +54,7 @@ def query_list(log: str, body: str) -> str:
 
 
 def since_clause(since: str) -> tuple[str, str]:
-    """A window as the log's own index answers it: what the script has to work out first, and the
-    XPath clause that uses it.
+    """Legacy millisecond XPath clause for the separate crash moment collector.
 
     ``-FilterHashtable``'s StartTime does not honour a timestamp's Kind — the same instant as UTC
     and as local time returned different counts on this machine on 2026-09-21 — so a window is a
@@ -73,29 +73,51 @@ def since_clause(since: str) -> tuple[str, str]:
         raise ValueError(f"not an ISO timestamp or the word 'boot' ({exc})") from exc
 
 
-def window_clauses(since: str, before: str) -> tuple[str, str, str, str]:
-    """One half-open log window; before is exclusive and requires an explicit time zone."""
+def _xpath_millisecond(stamp: str) -> str:
+    return stamp[:23] + "Z"
+
+
+def _xpath_upper(stamp: str) -> str | None:
+    """A deliberately broad indexed end; exact ticks decide membership below."""
+    floor = datetime.fromisoformat(stamp.replace("Z", "+00:00")).replace(microsecond=int(stamp[20:23]) * 1000)
     try:
-        prelude, clause = since_clause(since)
-        start = "$since" if since.strip().lower() == "boot" else (f"'{_utc_stamp(since)}'" if since.strip() else "$null")
-    except ValueError as exc:
-        raise ValueError(f"parameter 'since': {exc}") from exc
-    end = "$null"
+        return (floor + timedelta(milliseconds=2)).strftime("%Y-%m-%dT%H:%M:%S.%f")[:23] + "Z"
+    except OverflowError:
+        return None  # The exact filter still enforces an end at datetime's upper limit.
+
+
+def window_clauses(since: str, before: str, *, local_before: bool = False) -> tuple[str, str, str, str, str | None, str | None]:
+    """Broad indexed half-open window plus exact .NET ticks for pre-cap filtering."""
+    prelude, clause, start, end = "", "", "$null", "$null"
+    from_ticks: str | None = None
+    until_ticks: str | None = None
+    if since.strip():
+        if since.strip().lower() == "boot":
+            prelude = ("$boot = (Get-CimInstance Win32_OperatingSystem -ErrorAction Stop).LastBootUpTime.ToUniversalTime()\n"
+                       "$boot = $boot.AddTicks(-($boot.Ticks % 10000))\n"
+                       "$since = $boot.ToString('o')\n$fromTicks = $boot.Ticks\n"
+                       "$xpathStart = $boot.ToString('yyyy-MM-ddTHH:mm:ss.fffZ', [Globalization.CultureInfo]::InvariantCulture)\n")
+            start, from_ticks = "$since", "$fromTicks"
+            clause = " and TimeCreated[@SystemTime&gt;='$xpathStart']"
+        else:
+            try:
+                stamp, ticks = exact_stamp(since, "since", naive="local")
+            except ValueError as exc:
+                raise ValueError(f"{exc}; expected an ISO timestamp or 'boot'") from exc
+            start, from_ticks = f"'{stamp}'", str(ticks)
+            clause = f" and TimeCreated[@SystemTime&gt;='{_xpath_millisecond(stamp)}']"
     if before.strip():
         try:
-            parsed = datetime.fromisoformat(before.strip().replace("Z", "+00:00"))
-            if parsed.tzinfo is None:
-                raise ValueError("include Z or a UTC offset")
-            bound = _utc_stamp(before)
+            stamp, ticks = exact_stamp(before, "before", naive="local" if local_before else "reject")
         except ValueError as exc:
-            raise ValueError(f"parameter 'before': not an ISO timestamp with Z or an offset ({exc})") from exc
-        if start != "$null" and start != "$since":
-            start_key, end_key = stamp_key(start.strip("'")), stamp_key(bound)
-            if start_key is not None and end_key is not None and start_key >= end_key:
-                raise ValueError("parameter 'before': must be after the requested start at millisecond precision")
-        clause += f" and TimeCreated[@SystemTime&lt;'{bound}']"
-        end = f"'{bound}'"
-    return prelude, clause, start, end
+            raise ValueError(str(exc)) from exc
+        if from_ticks not in (None, "$fromTicks") and int(from_ticks) >= ticks:
+            raise ValueError("parameter 'before': must be after the requested start at tick precision")
+        end, until_ticks = f"'{stamp}'", str(ticks)
+        upper = _xpath_upper(stamp)
+        if upper is not None:
+            clause += f" and TimeCreated[@SystemTime&lt;'{upper}']"
+    return prelude, clause, start, end, from_ticks, until_ticks
 
 
 def events_query(log: str, levels: list[int], window: str) -> str:
@@ -108,24 +130,35 @@ def events_query(log: str, levels: list[int], window: str) -> str:
 
 
 def events_script(log: str, levels: list[int], count: int, since: str = "", before: str = "") -> str:
-    prelude, window, start, end = window_clauses(since, before)
-    return log_records_script(log, events_query(log, levels, window), count, prelude=prelude, window_start=start, window_end=end)
+    prelude, window, start, end, from_ticks, until_ticks = window_clauses(since, before)
+    return log_records_script(log, events_query(log, levels, window), count, prelude=prelude, window_start=start, window_end=end,
+                              from_ticks=from_ticks, until_ticks=until_ticks)
 
 
 def record_script(log: str, before: str, count: int) -> str:
-    # The filter is XPath on the log itself, so the cost is the log's index, not a scan.
-    body = f"*[System[TimeCreated[@SystemTime&lt;'{_utc_stamp(before)}']]]"
-    return log_records_script(log, query_list(log, body), count, window_end=f"'{_utc_stamp(before)}'")
+    _, window, _, end, _, until_ticks = window_clauses("", before, local_before=True)
+    body = f"*[System[{window.strip().removeprefix('and ').strip()}]]" if window else "*"
+    return log_records_script(log, query_list(log, body), count, window_end=end, until_ticks=until_ticks)
 
 
 def log_records_script(
     log: str, query: str, count: int, *, prelude: str = "", window_start: str = "$null", window_end: str = "$null", projection: str = RECORD_SELECT,
+    from_ticks: str | None = None, until_ticks: str | None = None,
 ) -> str:
     """One object with bounded matching rows and metadata observed after the query.
 
     A clean no-match must still return the object: a pipeline-level ``return`` would otherwise
     hide the log's retention boundary and turn an observed empty query into a missing response.
     """
+    if from_ticks is None and until_ticks is None:
+        query_stage = f"Get-WinEvent -FilterXml ([xml]$xml) -MaxEvents {int(count) + 1} -ErrorAction Stop"
+    else:
+        lower = from_ticks or "0"
+        upper = until_ticks or "[long]::MaxValue"
+        query_stage = ("Get-WinEvent -FilterXml ([xml]$xml) -ErrorAction Stop |\n"
+                       "        Where-Object { $null -eq $_.TimeCreated -or "
+                       f"($_.TimeCreated.ToUniversalTime().Ticks -ge {lower} -and $_.TimeCreated.ToUniversalTime().Ticks -lt {upper}) }} |\n"
+                       f"        Select-Object -First {int(count) + 1}")
     return LOG_METADATA_SCRIPT + prelude + f"""$xml = @"
 {query}
 "@
@@ -133,7 +166,7 @@ $queriedAt = (Get-Date).ToUniversalTime().ToString('o')
 $found = [System.Collections.Generic.List[object]]::new()
 $records = @(); $outcome = 'failed'; $errorText = $null; $truncated = $null; $stopped = $null
 try {{
-    Get-WinEvent -FilterXml ([xml]$xml) -MaxEvents {int(count) + 1} -ErrorAction Stop |
+    {query_stage} |
         & {{ process {{ [void]$found.Add($_) }} }}
     $truncated = $found.Count -gt {int(count)}
 }} catch {{
@@ -188,16 +221,18 @@ def take_events(bridge: Bridge, params: dict[str, Any]) -> Reading:
     has_since = bool(str(params.get("since") or "").strip())
     before = str(params.get("before") or "").strip()
     return from_log_collector("events", params, script, result, params["log"], params["count"], window=has_since,
-                              before=_utc_stamp(before) if before and not has_since else None)
+                              before=exact_stamp(before, "before")[0] if before and not has_since else None)
 
 
 def take_record(bridge: Bridge, params: dict[str, Any]) -> Reading:
     try:
         script = record_script(params["log"], params["before"], params["count"])
     except ValueError as exc:
+        if str(exc).startswith("parameter 'before':"):
+            raise
         raise ValueError(f"parameter 'before': not an ISO timestamp ({exc})") from exc
     result = bridge.run(script, depth=8)
-    reading = from_log_collector("record", params, script, result, params["log"], params["count"], before=_utc_stamp(params["before"]))
+    reading = from_log_collector("record", params, script, result, params["log"], params["count"], before=exact_stamp(params["before"], "before", naive="local")[0])
     records = reading.section("records")
     if records and isinstance(records.data, list):
         records.data.reverse()  # oldest first: the reader follows time forward into the moment
@@ -302,7 +337,7 @@ def from_log_collector(
         elif source["window_end"] is not None and observed_at is None:
             reading.warnings.append("the machine's query time was not reported; the requested window's upper reach is unknown")
         elif source["window_end"] is not None and end_at is not None and observed_at is not None and end_at > observed_at:
-            reading.warnings.append("the requested end is after the machine's query time; records after that time cannot exist yet")
+            reading.warnings.append("the requested end is after the machine's query time; records logged after the query time are outside the covered reach")
         if start_at is not None and observed_at is not None and start_at >= observed_at:
             reading.warnings.append("the requested start is at or after the machine's query time; window completeness cannot yet be established")
         elif source["window_end"] is not None and start_at is not None and end_at is not None and start_at >= end_at:
@@ -345,8 +380,8 @@ register(
             Param("log", "str", "System", "Which log.", choices=LOGS),
             Param("levels", "list[int]", [1, 2], "Levels to include: 1 critical, 2 error, 3 warning, 4 information."),
             Param("count", "int", 50, "How many of the most recent records.", minimum=1, maximum=MAX_LOG_RECORDS),
-            Param("since", "str", "", "ISO timestamp, or 'boot' for Windows' reported kernel-session start. Empty for the most recent records."),
-            Param("before", "str", "", "Exclusive ISO end with Z or an offset. Pair with since for an anchored window; empty uses the query time."),
+            Param("since", "str", "", "Inclusive ISO timestamp, preserving up to seven fractional digits, or 'boot' for Windows' reported kernel-session start. Empty for the most recent records."),
+            Param("before", "str", "", "Exclusive ISO end with Z or an offset, preserving up to seven fractional digits. Pair with since for an anchored window; empty uses the query time."),
         ),
         private=("MachineName", "user names inside Message", "profile paths inside Message", "CPER bytes in binary Properties"),
     )
@@ -359,7 +394,7 @@ register(
         classes=("raw", "derived"),
         take=take_record,
         params=(
-            Param("before", "str", None, "ISO timestamp; the records strictly before it are returned."),
+            Param("before", "str", None, "ISO timestamp with up to seven fractional digits; records strictly before that exact time are returned."),
             Param("count", "int", 50, "How many records before the moment.", minimum=1, maximum=MAX_LOG_RECORDS),
             Param("log", "str", "System", "Which log.", choices=LOGS),
         ),

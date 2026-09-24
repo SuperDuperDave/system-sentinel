@@ -44,7 +44,7 @@ from typing import Any
 
 from ..bridge import WSL_INTEROP_ERRORS, Bridge
 from ..reading import Param, Reading, Section, Spec, from_object, register
-from .event_coverage import COVERAGE_BASIS, LOG_METADATA_SCRIPT, known_stamp_key, stamp_key
+from .event_coverage import COVERAGE_BASIS, LOG_METADATA_SCRIPT, exact_stamp, known_stamp_key, stamp_key
 from .event_coverage import coverage as log_coverage
 from .event_coverage import metadata as log_metadata
 from .events import RECORD_FIELDS
@@ -55,7 +55,6 @@ MAX_WHEA_RECORDS = 500
 MAX_EXACT_BINARY_BYTES = 1024 * 1024
 PREVIEW_MESSAGE_CHARS = 1024
 MAX_RECORD_ID = (1 << 53) - 1  # exact across JSON number clients
-EXACT_WINDOW_STAMP = re.compile(r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,7}))?(Z|[+-]\d{2}:\d{2})", re.ASCII)
 LOG = "System"
 CHANNEL = "Microsoft-Windows-Kernel-WHEA/Errors"
 CHANNEL_PROVIDER = "Microsoft-Windows-Kernel-WHEA"
@@ -236,20 +235,7 @@ def whea_record_script(spec: WheaSource, record_id: int) -> str:
 
 def exact_window_stamp(value: str, label: str) -> str:
     """Keep Windows' seventh fractional digit when normalizing a selected time to UTC."""
-    match = EXACT_WINDOW_STAMP.fullmatch(value.strip())
-    if match is None:
-        raise ValueError(f"parameter {label!r}: expected an ISO timestamp with Z or an offset and at most seven fractional digits")
-    try:
-        parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
-        if parsed.tzinfo is None or parsed.utcoffset() is None:
-            raise ValueError("a time zone is required")
-        utc = parsed.astimezone(UTC)
-    except (ValueError, OverflowError) as exc:
-        raise ValueError(f"parameter {label!r}: invalid timestamp ({exc})") from exc
-    if utc < datetime(1601, 1, 1, tzinfo=UTC):
-        raise ValueError(f"parameter {label!r}: a Windows event-log time must be in 1601 or later")
-    seventh = (match.group(2) or "").ljust(7, "0")[6]
-    return f"{utc.year:04d}-" + utc.strftime("%m-%dT%H:%M:%S.%f") + seventh + "Z"
+    return exact_stamp(value, label, strict=True)[0]
 
 
 def whea_window_script(spec: WheaSource, since: str, before: str, count: int, order: str) -> str:

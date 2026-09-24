@@ -227,8 +227,8 @@ def test_events_since_a_moment_and_since_boot():
     assert "*[System[(Level=1 or Level=2) and TimeCreated[@SystemTime&gt;='2026-09-20T18:04:11.000Z']]]" in s
     boot = events_script("System", [1, 2], 5, "boot")
     assert "$boot = (Get-CimInstance Win32_OperatingSystem" in boot and "AddTicks(-($boot.Ticks % 10000))" in boot
-    assert "TimeCreated[@SystemTime&gt;='$since']" in boot
-    assert '@"' in boot  # an expanding here-string: $since is the machine's answer, not a literal
+    assert "TimeCreated[@SystemTime&gt;='$xpathStart']" in boot and "$fromTicks = $boot.Ticks" in boot
+    assert '@"' in boot  # an expanding here-string: $xpathStart is the machine's answer, not a literal
 
 
 def test_no_level_asked_for_is_every_level():
@@ -252,7 +252,8 @@ def test_record_stamp_is_utc_milliseconds():
 
 def test_record_script_filters_before_the_moment():
     s = record_script("System", "2026-09-20T18:04:11Z", 20)
-    assert "@SystemTime&lt;'2026-09-20T18:04:11.000Z'" in s and "-MaxEvents 21" in s
+    assert "@SystemTime&lt;'2026-09-20T18:04:11.002Z'" in s and "Select-Object -First 21" in s
+    assert "Where-Object" in s and "-MaxEvents 21" not in s
 
 
 def test_take_events_through_a_fake_bridge():
@@ -327,16 +328,17 @@ def test_a_future_start_cannot_establish_a_complete_window_even_when_the_log_is_
 def test_events_exclusive_end_normalizes_offsets_and_refuses_an_empty_window_before_querying():
     script = events_script("System", [1, 2], 5, "2026-09-20T10:00:00+02:00", "2026-09-20T11:00:00+02:00")
     assert "@SystemTime&gt;='2026-09-20T08:00:00.000Z'" in script
-    assert "@SystemTime&lt;'2026-09-20T09:00:00.000Z'" in script
-    assert "window_end = '2026-09-20T09:00:00.000Z'" in script
+    assert "@SystemTime&lt;'2026-09-20T09:00:00.002Z'" in script
+    assert "window_end = '2026-09-20T09:00:00.0000000Z'" in script
     bridge = FakeBridge()
-    for before in ("2026-09-20T08:00:00Z", "2026-09-20T08:00:00.0009Z", "2026-09-20T09:00:00"):
+    for before in ("2026-09-20T08:00:00Z", "2026-09-20T09:00:00"):
         with pytest.raises(ValueError, match="before"):
             asyncio.run(take("events", bridge, {"since": "2026-09-20T08:00:00Z", "before": before}))
+    assert "Select-Object -First 6" in events_script("System", [], 5, "2026-09-20T08:00:00Z", "2026-09-20T08:00:00.0000001Z")
     assert bridge.scripts == []
     boot_script = events_script("System", [], 5, "boot", "2026-09-20T09:00:00Z")
-    assert "Win32_OperatingSystem" in boot_script and "@SystemTime&gt;='$since'" in boot_script
-    assert "@SystemTime&lt;'2026-09-20T09:00:00.000Z'" in boot_script
+    assert "Win32_OperatingSystem" in boot_script and "@SystemTime&gt;='$xpathStart'" in boot_script
+    assert "@SystemTime&lt;'2026-09-20T09:00:00.002Z'" in boot_script
 
 
 def test_window_end_reports_observed_reach_without_completing_unobserved_future():

@@ -11,6 +11,53 @@ from datetime import UTC, datetime
 from typing import Any
 
 METADATA_KEYS = ("log", "log_enabled", "log_mode", "log_state", "log_error", "log_oldest", "oldest_state", "oldest_error")
+_STRICT_STAMP = re.compile(r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,7}))?(Z|[+-]\d{2}:\d{2})", re.ASCII)
+_FRACTION = re.compile(r"[.,](\d+)$", re.ASCII)
+_WINDOWS_EPOCH = datetime(1601, 1, 1, tzinfo=UTC)
+
+
+def exact_stamp(value: str, label: str, *, naive: str = "reject", strict: bool = False) -> tuple[str, int]:
+    """Normalize a Windows Event Log bound without dropping its seventh (100 ns) digit.
+
+    Non-strict callers keep Python's existing ISO input forms, including local times.
+    Strict callers require the documented zoned WHEA-window form.
+    """
+    text = value.strip()
+    match = _STRICT_STAMP.fullmatch(text) if strict else None
+    if strict and match is None:
+        raise ValueError(f"parameter {label!r}: expected an ISO timestamp with Z or an offset and at most seven fractional digits")
+    fraction = match.group(2) if match else None
+    if not strict:
+        # Split the date from the time before looking for a fraction: ISO offsets may themselves
+        # contain fractional seconds, and those must not become a seventh digit of event time.
+        separator = next((i for i, char in enumerate(text) if i >= 7 and char in "Tt "), None)
+        time_text = text[separator + 1:] if separator is not None else (text[10:] if text[4:5] == "-" else text[8:])
+        offset_fraction = re.search(r"[+-]\d{2}(?::?\d{2}){0,2}[.,](\d+)$", time_text)
+        if offset_fraction and len(offset_fraction.group(1)) > 6:
+            raise ValueError(f"parameter {label!r}: sub-microsecond UTC offsets are not supported")
+        time_text = re.split(r"[+-]|Z$", time_text, maxsplit=1)[0]
+        found = _FRACTION.search(time_text)
+        fraction = found.group(1) if found else None
+        if fraction and len(fraction) > 7:
+            raise ValueError(f"parameter {label!r}: at most seven fractional digits are supported")
+        if fraction and len(fraction) == 7 and not re.fullmatch(r"\d{2}:\d{2}:\d{2}\.\d{7}", time_text):
+            raise ValueError(f"parameter {label!r}: use an extended seconds timestamp for seven fractional digits")
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            if naive == "reject":
+                raise ValueError("a time zone is required")
+            parsed = parsed.astimezone()
+        utc = parsed.astimezone(UTC)
+    except (ValueError, OverflowError, OSError) as exc:
+        raise ValueError(f"parameter {label!r}: invalid timestamp ({exc})") from exc
+    if utc < _WINDOWS_EPOCH:
+        raise ValueError(f"parameter {label!r}: a Windows event-log time must be in 1601 or later")
+    seventh = int((fraction or "0").ljust(7, "0")[6])
+    canonical = f"{utc.year:04d}-" + utc.strftime("%m-%dT%H:%M:%S.%f") + str(seventh) + "Z"
+    delta = utc.replace(tzinfo=None) - datetime(1, 1, 1)
+    ticks = (delta.days * 86400 + delta.seconds) * 10_000_000 + delta.microseconds * 10 + seventh
+    return canonical, ticks
 
 # Call after the matching query. A circular log may wrap while that query runs; the oldest record
 # observed afterwards is a conservative bound. Keep the projection narrow: LogFilePath is private.

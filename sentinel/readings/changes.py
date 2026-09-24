@@ -186,7 +186,7 @@ def take_changes(bridge: Bridge, params: dict[str, Any]) -> Reading:
         if query_time is None:
             reading.warnings.append("the machine's query time was not reported; the requested window's upper reach is unknown")
         elif requested_end is not None and requested_end > query_time:
-            reading.warnings.append("the requested end is after the machine's query time; records after that time cannot exist yet")
+            reading.warnings.append("the requested end is after the machine's query time; records logged after the query time are outside the covered reach")
     failures = [name for name in SOURCES if collection[name]["outcome"] not in ("ok", "empty")]
     for name in SOURCES:
         source = collection[name]

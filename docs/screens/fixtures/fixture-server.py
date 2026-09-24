@@ -218,7 +218,9 @@ def answer_log_records(script: str) -> BridgeResult:
     application = "log = 'Application'" in script
     log = "Application" if application else "System"
     all_rows = fault_records(now) if application else system_log_records(now)
-    cap = max(int(value) for value in _MAXEVENTS_RE.findall(script)) - 1
+    counts = [int(value) for value in _MAXEVENTS_RE.findall(script)]
+    exact_cap = re.search(r"Select-Object -First (\d+) \|\s*& \{ process \{ \[void\]\$found.Add", script)
+    cap = int(exact_cap.group(1)) - 1 if exact_cap else max(counts) - 1
     start_match = re.search(r"window_start = ('[^']+'|\$null|\$since)", script)
     end_match = re.search(r"window_end = ('[^']+'|\$null)", script)
     start_text = start_match.group(1).strip("'") if start_match and start_match.group(1) != "$null" else None

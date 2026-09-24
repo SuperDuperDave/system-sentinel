@@ -100,7 +100,9 @@ def collection_for(body: dict[str, Any], count: int = 5, moment: str | None = No
             "log_enabled": True, "log_mode": "Circular", "log_state": "ok", "log_error": None,
             "log_oldest": oldest, "oldest_state": "ok", "oldest_error": None,
         }
-    result["before"] = [{"anchor": row["Anchor"], "at": None, "outcome": "ok", "returned": 1, "error": None} for row in body.get("before", [])]
+    starts = {row["RecordId"]: row["TimeCreated"] for row in body.get("system", [])}
+    result["before"] = [{"anchor": row["Anchor"], "at": starts.get(row["Anchor"]), "outcome": "ok", "returned": 1, "error": None}
+                        for row in body.get("before", []) if row["Anchor"] in starts]
     return result
 
 
@@ -715,11 +717,11 @@ def test_the_faults_query_asks_the_three_selectors_and_the_window():
     assert "TimeCreated[@SystemTime" not in script
 
     at_boot = faults_script(30, "boot")
-    assert "Win32_OperatingSystem" in at_boot and "TimeCreated[@SystemTime&gt;='$since']" in at_boot
+    assert "Win32_OperatingSystem" in at_boot and "TimeCreated[@SystemTime&gt;='$xpathStart']" in at_boot
     assert "TimeCreated[@SystemTime&gt;='2026-09-12T00:00:00.000Z']" in faults_script(30, "2026-09-12T00:00:00Z")
     anchored = faults_script(30, "2026-09-12T00:00:00Z", "2026-09-13T00:00:00Z")
     assert "@SystemTime&gt;='2026-09-12T00:00:00.000Z'" in anchored
-    assert "@SystemTime&lt;'2026-09-13T00:00:00.000Z'" in anchored
+    assert "@SystemTime&lt;'2026-09-13T00:00:00.002Z'" in anchored
 
 
 def test_a_window_that_is_neither_boot_nor_a_timestamp_is_refused():

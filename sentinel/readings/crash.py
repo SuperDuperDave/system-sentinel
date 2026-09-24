@@ -30,7 +30,7 @@ from typing import Any
 from ..bridge import Bridge
 from ..reading import Param, Reading, Section, Spec, from_object, register
 from .dumps import DUMPS_SCRIPT, inventory, missing_file
-from .event_coverage import LOG_METADATA_SCRIPT, stamp_key
+from .event_coverage import LOG_METADATA_SCRIPT, exact_stamp, stamp_key
 from .event_coverage import metadata as log_metadata
 from .events import _utc_stamp, from_log_collector, log_records_script, record_projection, since_clause, window_clauses
 from .fault_process import APPLICATION_ERROR, APPLICATION_ERROR_1000, APPLICATION_HANG, APPLICATION_HANG_1002, process_identity
@@ -585,10 +585,16 @@ foreach ($stop in $announced) {
     $previous_outcome = 'failed'
     $previous_error = $null
     try {
+        $invariant = [Globalization.CultureInfo]::InvariantCulture
+        $boundary = [datetimeoffset]::Parse($moment, $invariant)
+        $boundaryTicks = $boundary.UtcTicks
+        $xpathEnd = $boundary.UtcDateTime.AddMilliseconds(2).ToString('yyyy-MM-ddTHH:mm:ss.fffZ', $invariant)
         $bq = @"
-<QueryList><Query Id='0' Path='System'><Select Path='System'>*[System[TimeCreated[@SystemTime&lt;'$moment']]]</Select></Query></QueryList>
+<QueryList><Query Id='0' Path='System'><Select Path='System'>*[System[TimeCreated[@SystemTime&lt;'$xpathEnd']]]</Select></Query></QueryList>
 "@
-        $previous = @(Get-WinEvent -FilterXml ([xml]$bq) -MaxEvents 1 -ErrorAction Stop |
+        $previous = @(Get-WinEvent -FilterXml ([xml]$bq) -ErrorAction Stop |
+            Where-Object { $null -eq $_.TimeCreated -or $_.TimeCreated.ToUniversalTime().Ticks -lt $boundaryTicks } |
+            Select-Object -First 1 |
             {before_projection})
         $previous_outcome = if ($previous.Count) { 'ok' } else { 'empty' }
     } catch {
@@ -660,8 +666,9 @@ def record_cap(count: int, moment: str | None) -> int:
 
 
 def faults_script(count: int, since: str, before: str = "") -> str:
-    prelude, clause, start, end = window_clauses(since, before)
-    return log_records_script("Application", faults_query(clause), count, prelude=prelude, window_start=start, window_end=end, projection=record_projection("Log = $_.LogName"))
+    prelude, clause, start, end, from_ticks, until_ticks = window_clauses(since, before)
+    return log_records_script("Application", faults_query(clause), count, prelude=prelude, window_start=start, window_end=end,
+                              projection=record_projection("Log = $_.LogName"), from_ticks=from_ticks, until_ticks=until_ticks)
 
 
 # ---------------------------------------------------------------------------
@@ -747,6 +754,11 @@ def compose(payload: dict[str, Any], count: int, moment: str | None) -> dict[str
             source, rows = {"outcome": "failed", "returned": 0, "error": "the collector returned duplicate lookup outcomes for this anchor"}, []
         before.pop(anchor, None)
         source.update(anchor=anchor, at=attempt.get("at"))
+        row_at = stamp_key(rows[0].get("TimeCreated")) if rows else None
+        anchor_at = stamp_key(attempt.get("at"))
+        if rows and (row_at is None or anchor_at is None or row_at >= anchor_at):
+            source, rows = {"outcome": "failed", "returned": 0, "error": "the record before this start was not strictly earlier",
+                            "anchor": anchor, "at": attempt.get("at")}, []
         before_collection[anchor] = source
         if rows:
             before[anchor] = rows[0]
@@ -1223,7 +1235,7 @@ def take_faults(bridge: Bridge, params: dict[str, Any]) -> Reading:
     has_since = bool(str(params.get("since") or "").strip())
     before = str(params.get("before") or "").strip()
     reading = from_log_collector("faults", params, script, bridge.run(script, depth=8), "Application", count, window=has_since,
-                                 before=_utc_stamp(before) if before and not has_since else None)
+                                 before=exact_stamp(before, "before")[0] if before and not has_since else None)
     if not reading.observed:
         return reading
     record_section = reading.section("records")
@@ -1407,8 +1419,8 @@ register(
         take=take_faults,
         params=(
             Param("count", "int", 30, f"How many of the most recent records; 1 to {MAX_FAULTS}.", minimum=1, maximum=MAX_FAULTS),
-            Param("since", "str", "", "ISO timestamp, or 'boot' for Windows' reported kernel-session start. Empty for the most recent records."),
-            Param("before", "str", "", "Exclusive filing-time end with Z or an offset. Pair with since for an anchored window; empty uses the query time."),
+            Param("since", "str", "", "Inclusive ISO timestamp, preserving up to seven fractional digits, or 'boot' for Windows' reported kernel-session start. Empty for the most recent records."),
+            Param("before", "str", "", "Exclusive filing-time end with Z or an offset, preserving up to seven fractional digits. Pair with since for an anchored window; empty uses the query time."),
         ),
         private=("AppPath", "ModulePath", "ExeFileName", "AttachedFiles", "StorePath", "user names inside Message"),
     )

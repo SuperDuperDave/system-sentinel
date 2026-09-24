@@ -244,6 +244,8 @@ class LogBridge(FakeBridge):
             return result
         log = "Application" if log_collector_marker("Application") in script else "System"
         cap = re.search(r"Get-WinEvent -FilterXml \(\[xml\]\$xml\) -MaxEvents (\d+)", script)
+        if cap is None:
+            cap = re.search(r"Select-Object -First (\d+) \|\s*& \{ process \{ \[void\]\$found.Add", script)
         limit = int(cap.group(1)) - 1 if cap else max(1, len(result.items))
         return log_collector_result(result.items, log=log, limit=limit, took_ms=result.took_ms)
 

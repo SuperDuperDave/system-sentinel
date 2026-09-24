@@ -57,6 +57,16 @@ def _body(mode: str, source: str) -> str:
         return failure
     if source == "system" and mode == "duplicate_stop":
         return SYSTEM_STOP + "\nNew-SyntheticCrashEvent -RecordId 102 -Id 41 -Provider 'Microsoft-Windows-Kernel-Power' -Log 'System' -At '2020-01-02T03:04:04Z' -Values @(0,0,0,0,0,$false)"
+    if source == "system" and mode == "submillisecond_stop":
+        return ("New-SyntheticCrashEvent -RecordId 100 -Id 12 -Provider 'Microsoft-Windows-Kernel-General' -Log 'System' "
+                "-At '2020-01-02T03:04:00.0000007Z' -Values @(10,0,0,0,0,0,'2020-01-02T03:04:00Z')\n"
+                "New-SyntheticCrashEvent -RecordId 101 -Id 41 -Provider 'Microsoft-Windows-Kernel-Power' -Log 'System' "
+                "-At '2020-01-02T03:04:03Z' -Values @(0,0,0,0,0,$false)")
+    if source == "before" and mode == "submillisecond_predecessor":
+        return ("New-SyntheticCrashEvent -RecordId 100 -Id 12 -Provider 'Microsoft-Windows-Kernel-General' -Log 'System' "
+                "-At '2020-01-02T03:04:00.0000007Z' -Values @()\n"
+                "New-SyntheticCrashEvent -RecordId 99 -Id 1 -Provider 'synthetic' -Log 'System' "
+                "-At '2020-01-02T03:04:00.0000006Z' -Values @()")
     if source == "system" and mode in ("stop", "partial_failed"):
         return SYSTEM_STOP + (failure if mode == "partial_failed" else "")
     if source == "reports" and mode == "report":
@@ -86,7 +96,7 @@ def _take(monkeypatch: pytest.MonkeyPatch, system: str, reports: str, *, before:
         + _body(system, "system") + "\n}\n"
         "elseif ($log -eq 'Application' -and $text.Contains(\"EventData[Data[@Name='EventName']='BlueScreen']\")) {\n"
         + _body(reports, "reports") + "\n}\n"
-        "elseif ($log -eq 'System' -and $MaxEvents -eq 1 -and $text.Contains(\"TimeCreated[@SystemTime<'\")) {\n"
+        "elseif ($log -eq 'System' -and $text.Contains(\"TimeCreated[@SystemTime<'\")) {\n"
         + _body(before, "before") + "\n}\n"
         "else { throw 'unexpected synthetic crash query' }\n}\n"
         + crash.CRASH_SCRIPT_TEMPLATE + "\n}\n"
@@ -189,3 +199,11 @@ def test_repeated_power_records_query_their_shared_start_only_once(monkeypatch):
     attempts = reading.section("collection").data["before"]
     assert len(attempts) == 1 and attempts[0]["anchor"] == 100
     assert reading.section("stops").data[0]["last_record_collection"]["outcome"] == "empty"
+
+
+def test_last_record_before_start_keeps_a_predecessor_in_the_same_millisecond(monkeypatch):
+    reading = _take(monkeypatch, "submillisecond_stop", "empty", before="submillisecond_predecessor")
+    assert reading.outcome == "ok" and reading.count == 1, (reading.error, reading.warnings)
+    stop = reading.section("stops").data[0]
+    assert stop["last_record_before"]["RecordId"] == 99
+    assert stop["last_record_collection"]["outcome"] == "ok"

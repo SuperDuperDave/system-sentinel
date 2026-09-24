@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.7.0] - 2026-09-24
+
+### Changed
+- `record`, `events` and `faults` now honor Windows' seventh fractional timestamp digit at their selected boundaries. The indexed XPath takes a broad millisecond range; an exact tick filter removes outside rows before the count cap. A record just before a selected event in the same millisecond can now appear in “The record before this,” while a `since` bound excludes earlier rows in that millisecond. Returned collection bounds show the exact normalized UTC time. Ordinary unwindowed newest-record reads retain their existing `-MaxEvents` path.
+- `crash` uses the same exact pre-cap filter when finding the last System event before the next start. Earlier versions could skip a predecessor in the start's millisecond. A row that is not strictly earlier now fails that supporting lookup instead of being presented as the predecessor.
+
+### Compatibility and limits
+- `record.before` and `events`/`faults.since` still accept offset-free timestamps interpreted in the server's local zone; `events`/`faults.before` still requires `Z` or an offset. For these three readings, Windows Event Log times before 1601 and fractions longer than seven digits are now refused instead of being silently rounded. `since=boot` keeps Windows' existing millisecond boot-time bound. An exact boundary does not prove Windows emitted every event or that an event's timestamp reflects when an error occurred. The separate `crash` moment and `changes` window still use their published millisecond boundaries.
+
 ## [1.6.0] - 2026-09-23
 
 ### Added
