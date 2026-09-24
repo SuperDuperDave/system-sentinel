@@ -74,6 +74,41 @@ function Get-WinEvent {
 
 
 @pytest.mark.host
+def test_native_oldest_fault_filter_excludes_preboundary_rows_before_the_cap(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(sentinel.bridge, "POOL_SIZE", 0)
+    fake = r"""
+$boundary = [datetimeoffset]::Parse('2026-09-22T00:00:00.1234567Z', [cultureinfo]::InvariantCulture).UtcDateTime
+$script:seen = 0; $script:oldestAsked = $false
+function Get-WinEvent {
+    [CmdletBinding()]
+    param([xml]$FilterXml, [string]$ListLog, [string]$LogName, [int]$MaxEvents, [switch]$Oldest)
+    if ($ListLog) { [pscustomobject]@{ IsEnabled=$true; LogMode='Circular' }; return }
+    if ($LogName) { [pscustomobject]@{ TimeCreated=$boundary.AddDays(-1) }; return }
+    $script:oldestAsked = [bool]$Oldest
+    foreach ($at in @($boundary.AddTicks(-2), $boundary.AddTicks(-1), $boundary, $boundary.AddTicks(1), $boundary.AddTicks(2))) {
+        $script:seen++
+        [pscustomobject]@{
+            RecordId=$script:seen; Id=1000; Level=2; LevelDisplayName='Error'
+            ProviderName='Application Error'; ProviderId=$null; Version=1; MachineName='SYNTHETIC'
+            TaskDisplayName=$null; TimeCreated=$at; Message='Synthetic'; Properties=@(); LogName='Application'
+        }
+    }
+}
+"""
+    bridge = real_bridge_or_skip()
+    script = faults_script(1, "2026-09-22T00:00:00.1234567Z", "2026-09-22T00:00:01Z", "oldest")
+    for culture in ("fi-FI", "th-TH"):
+        locale = f"[Threading.Thread]::CurrentThread.CurrentCulture = [cultureinfo]::GetCultureInfo('{culture}')\n"
+        result = bridge.run(locale + fake + script + "[pscustomobject]@{ seen=$script:seen; oldest=$script:oldestAsked }\n", depth=8)
+        assert result.outcome == "ok" and len(result.items) == 2, result.error
+        answer, control = result.items
+        assert answer["outcome"] == "ok" and answer["returned"] == 1 and answer["truncated"] is True
+        assert answer["records"][0]["TimeCreated"] == "2026-09-22T00:00:00.1234567Z"
+        assert answer["probe_time"] == "2026-09-22T00:00:00.1234568Z"
+        assert control == {"seen": 4, "oldest": True}
+
+
+@pytest.mark.host
 def test_native_exact_pipeline_keeps_absence_partial_work_and_failure_distinct(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(sentinel.bridge, "POOL_SIZE", 0)
     fake = r"""

@@ -91,3 +91,74 @@ def test_screen_fixture_can_show_both_sides_when_later_reports_fill_the_cap(monk
     assert after.outcome == "ok" and [row["RecordId"] for row in after.section("records").data] == list(range(1000, 1250))
     assert after.section("collection").data["truncated"] is True
     assert after.section("coverage").data["covered_until"] == after.section("collection").data["probe_time"]
+
+
+def test_screen_fixture_keeps_faults_on_both_sides_of_a_crowded_restart(monkeypatch):
+    path = Path(__file__).parents[1] / "docs" / "screens" / "fixtures" / "fixture-server.py"
+    spec = importlib.util.spec_from_file_location("sentinel_screen_fixture_fault_burst", path)
+    assert spec and spec.loader
+    fixture = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(fixture)
+    monkeypatch.setenv("SENTINEL_FIXTURE_CROWDED_FAULTS", "1")
+    moment = fixture._powershell_stamp(datetime.now(UTC).timestamp() - 2900 * 60)
+    center = datetime.fromisoformat(moment.replace("Z", "+00:00"))
+    common = {"count": 50}
+    before = asyncio.run(take("faults", fixture.FixtureBridge(), {
+        **common, "since": fixture._powershell_stamp(center.timestamp() - 3600),
+        "before": moment, "order": "newest",
+    }))
+    after = asyncio.run(take("faults", fixture.FixtureBridge(), {
+        **common, "since": moment, "before": fixture._powershell_stamp(center.timestamp() + 3600),
+        "order": "oldest",
+    }))
+    before_ids = [row["RecordId"] for row in before.section("records").data]
+    after_ids = [row["RecordId"] for row in after.section("records").data]
+    assert {5000, 5001, 5002} <= set(before_ids)
+    assert after_ids == list(range(6000, 6050))
+    assert after.section("collection").data["truncated"] is True
+    assert after.section("coverage").data["covered_until"] == after.section("collection").data["probe_time"]
+
+
+def test_screen_fixture_places_seventh_digit_faults_on_only_one_side(monkeypatch):
+    path = Path(__file__).parents[1] / "docs" / "screens" / "fixtures" / "fixture-server.py"
+    spec = importlib.util.spec_from_file_location("sentinel_screen_fixture_exact_fault", path)
+    assert spec and spec.loader
+    fixture = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(fixture)
+    base = (datetime.now(UTC) - timedelta(minutes=2900)).strftime("%Y-%m-%dT%H:%M:%S")
+    moment = f"{base}.1234567Z"
+    earlier = f"{base}.1234566Z"
+    center = datetime.fromisoformat(moment.replace("Z", "+00:00"))
+    template = next(row for row in fixture.fault_records(datetime.now(UTC).timestamp()) if row["Id"] == 1000)
+    monkeypatch.setattr(fixture, "fault_records", lambda now: [
+        {**template, "RecordId": 9000, "TimeCreated": earlier},
+        {**template, "RecordId": 9001, "TimeCreated": moment},
+    ])
+    before = asyncio.run(take("faults", fixture.FixtureBridge(), {
+        "since": fixture._powershell_stamp((center - timedelta(hours=1)).timestamp()), "before": moment,
+        "order": "newest", "count": 1,
+    }))
+    after = asyncio.run(take("faults", fixture.FixtureBridge(), {
+        "since": moment, "before": fixture._powershell_stamp((center + timedelta(hours=1)).timestamp()),
+        "order": "oldest", "count": 1,
+    }))
+    assert [row["RecordId"] for row in before.section("records").data] == [9000]
+    assert [row["RecordId"] for row in after.section("records").data] == [9001]
+
+
+def test_screen_fixture_keeps_a_report_with_its_two_returned_records(monkeypatch):
+    path = Path(__file__).parents[1] / "docs" / "screens" / "fixtures" / "fixture-server.py"
+    spec = importlib.util.spec_from_file_location("sentinel_screen_fixture_grouped_fault", path)
+    assert spec and spec.loader
+    fixture = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(fixture)
+    monkeypatch.setenv("SENTINEL_FIXTURE_GROUPED_FAULTS", "1")
+    moment = datetime.now(UTC).timestamp() - 2900 * 60
+    reading = asyncio.run(take("faults", fixture.FixtureBridge(), {
+        "since": fixture._powershell_stamp(moment), "before": fixture._powershell_stamp(moment + 3600),
+        "order": "oldest", "count": 50,
+    }))
+    report = next(entry for entry in reading.section("decoded").data if entry.get("report"))
+    assert report["RecordId"] == 7001
+    assert report["report"]["records"] == [7000, 7001]
+    assert [row["RecordId"] for row in reading.section("records").data][:2] == [7000, 7100]

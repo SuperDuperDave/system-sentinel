@@ -18,10 +18,10 @@ const COUNTS = [50, 200, 500];
 const BOOT_COUNT = 500;
 const PAGE = 25;
 const FRAME_LIMIT = 2000;
-const WINDOW_STAMP = new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+const WINDOW_STAMP = new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
 interface NearbyReach { complete: boolean | null; covered_from: string | null; covered_until: string | null }
-interface NearbySource { log_oldest?: string | null; oldest_state?: string | null; log_enabled?: boolean | null }
+interface NearbySource { log_oldest?: string | null; oldest_state?: string | null; log_enabled?: boolean | null; queried_at?: string | null }
 
 /** Retention failure, an old rotated window, and a partly observed window need different words. */
 function nearbyReachText(reach: NearbyReach | null, source: NearbySource | null, end: string, label: string): string {
@@ -160,17 +160,10 @@ function Frame({ moment }: { moment: string }) {
 /** An optional second source beside the System frame, opened only when the person asks for it. */
 function FaultWindow({ moment }: { moment: string }) {
   const [open, setOpen] = useState(false);
-  const [shown, setShown] = useState(10);
+  const [asked, setAsked] = useState(false);
   const at = Date.parse(moment);
-  const since = new Date(at - 60 * 60 * 1000).toISOString();
-  const before = new Date(at + 60 * 60 * 1000).toISOString();
-  const taken = useReading('faults', { since, before, count: 100 }, open);
-  const raw = part<EventRecord[]>(taken.reading, 'records') ?? [];
-  const decoded = part<Fault[]>(taken.reading, 'decoded') ?? [];
-  const reach = part<NearbyReach>(taken.reading, 'coverage');
-  const source = part<NearbySource>(taken.reading, 'collection');
-  const times = new Map(raw.map((row) => [String(row.RecordId), row.TimeCreated]));
-  const reachText = nearbyReachText(reach, source, before, 'Application log');
+  const outerStart = new Date(at - 60 * 60 * 1000).toISOString();
+  const outerEnd = new Date(at + 60 * 60 * 1000).toISOString();
 
   return <section className={styles.nearby} aria-labelledby="nearby-faults-title">
     <div className={styles.nearbyHead}>
@@ -178,31 +171,88 @@ function FaultWindow({ moment }: { moment: string }) {
         <p className="label">Application log · optional second source</p>
         <h2 id="nearby-faults-title" className="display">Fault reports near this moment</h2>
       </div>
-      <button className={styles.action} onClick={() => setOpen((value) => !value)} aria-expanded={open} aria-controls="nearby-faults-body">
+      <button className={styles.action} onClick={() => { setAsked(true); setOpen((value) => !value); }} aria-expanded={open} aria-controls="nearby-faults-body">
         {open ? 'Hide reports' : 'Read nearby reports'}
       </button>
     </div>
-    <p className={styles.nearbyIntro}>Looks for application crashes, hangs and live kernel reports filed from one hour before to one hour after this moment. A nearby report is a lead, not proof of a cause. Reports may be filed after the fault occurred.</p>
+    <p className={styles.nearbyIntro}>Looks for application crashes, hangs and live kernel reports filed near this moment. Each side keeps its nearest records and has its own reach. A nearby report is a lead, not proof of a cause; reports may be filed after the fault occurred. A live kernel report can have records on both sides, so a side only shows the records it returned.</p>
     <div id="nearby-faults-body" hidden={!open}>
-      <OutcomeLine taken={taken} noun="Application-log records" singular="Application-log record" emptyText="No matching fault report returned from the queried Application-log window" />
-      {reach ? <p className={`${styles.nearbyReach} readout`}>{reachText}{reach.covered_until && Date.parse(reach.covered_until) < Date.parse(before) ? ` · observed through ${WINDOW_STAMP.format(new Date(reach.covered_until))}; requested end is after the machine's query time` : ''}</p> : null}
-      {taken.reading && observed(taken.reading) ? <AddToStack item={{ kind: 'reading', envelope: taken.reading, title: `Fault reports near ${moment}` }} label="Stack this reading" /> : null}
-      {decoded.length ? <>
-        <p className={`${styles.nearbyCount} readout`}>{decoded.length} interpreted {decoded.length === 1 ? 'fault' : 'faults'} from {raw.length} returned {raw.length === 1 ? 'record' : 'records'}. A live kernel report can span several records.</p>
-        <ol className={styles.nearbyList}>{decoded.slice(0, shown).map((fault) => {
-          const time = times.get(String(fault.RecordId));
-          const subject = fault.report?.name ?? fault.report?.code ?? (typeof fault.fields.AppName === 'string' ? fault.fields.AppName : null);
-          return <li key={`${fault.Log ?? 'Application'}:${fault.RecordId}`}>
-            <details>
-              <summary><span>{fault.kind}{subject ? ` · ${subject}` : ''}</span><span className="readout">{time ? clock.format(new Date(time)) : 'time unknown'} · #{fault.RecordId}</span></summary>
-              <FaultDetail fault={fault} at={time} envelope={taken.reading} rawRecords={raw} showMomentLink={false} />
-            </details>
-          </li>;
-        })}</ol>
-        {decoded.length > shown ? <button className={styles.action} onClick={() => setShown((value) => value + 10)}>Show 10 more interpreted faults</button> : null}
-      </> : null}
+      <p className={`${styles.nearbyReach} readout`}>Two Application log reads meet at {clock.format(new Date(moment))}; 50 records nearest the moment on each side.</p>
+      <FaultSide moment={moment} since={outerStart} before={moment} order="newest" asked={asked} />
+      <FaultSide moment={moment} since={moment} before={outerEnd} order="oldest" asked={asked} />
     </div>
   </section>;
+}
+
+function FaultSide({ moment, since, before, order, asked }: {
+  moment: string; since: string; before: string; order: 'newest' | 'oldest'; asked: boolean;
+}) {
+  const earlier = order === 'newest';
+  const [limit, setLimit] = useState(10);
+  const taken = useReading('faults', { since, before, order, count: 50 }, asked);
+  const shown = useHeld(taken);
+  const raw = part<EventRecord[]>(shown, 'records') ?? [];
+  const decoded = part<Fault[]>(shown, 'decoded') ?? [];
+  const reach = part<NearbyReach>(shown, 'coverage');
+  const source = part<NearbySource>(shown, 'collection');
+  const times = new Map(raw.map((row) => [String(row.RecordId), row.TimeCreated]));
+  const filingTime = (fault: Fault) => {
+    const representative = times.get(String(fault.RecordId));
+    if (order !== 'oldest' || !fault.report) return representative;
+    const returned = fault.report.records.map((id) => times.get(String(id))).filter((at): at is string => !!at && Number.isFinite(Date.parse(at)));
+    return returned.reduce((first, at) => compareFilingTimes(at, first) < 0 ? at : first, representative ?? returned[0]);
+  };
+  const placed = [...decoded].sort((a, b) => {
+    const at = filingTime(a);
+    const bt = filingTime(b);
+    const aKnown = !!at && Number.isFinite(Date.parse(at));
+    const bKnown = !!bt && Number.isFinite(Date.parse(bt));
+    if (!aKnown || !bKnown) return aKnown ? -1 : bKnown ? 1 : 0;
+    return (earlier ? -1 : 1) * compareFilingTimes(at, bt);
+  });
+  const futureEnd = !!source?.queried_at && Date.parse(before) > Date.parse(source.queried_at);
+  const stale = shown !== null && shown !== taken.reading;
+
+  return <section className={styles.nearbySide} aria-labelledby={`fault-${order}-title`}>
+    <h3 id={`fault-${order}-title`} className="display">{earlier ? 'Before this moment · nearest first' : 'At or after this moment · nearest first'}</h3>
+    <OutcomeLine taken={taken} noun="Application-log records" singular="Application-log record"
+      emptyText={`No matching fault report returned ${earlier ? 'before' : 'at or after'} this moment in the queried Application-log window`} />
+    {stale ? <p className={`${styles.nearbyReach} readout`} role="status">Showing the reading taken at {clock.format(new Date(shown.asked_at))}; {taken.state === 'taking' ? 'another take is in progress.' : 'the last completed take did not observe the machine.'}</p> : null}
+    {stale && shown.warnings.length ? <ul className={`${styles.nearbyWarnings} readout`} aria-label="Limits of the held reading">{shown.warnings.map((warning, index) => <li key={index}>{firstLine(warning)}</li>)}</ul> : null}
+    {reach ? <p className={`${styles.nearbyReach} readout`}>{nearbyReachText(reach, source, before, 'Application log')}{futureEnd ? ` · requested end is after the machine's query time` : ''}</p> : null}
+    {shown && observed(shown) ? <AddToStack item={{ kind: 'reading', envelope: shown, title: `Fault reports ${earlier ? 'before' : 'at or after'} ${moment}` }} label={stale ? 'Stack this held reading' : 'Stack this reading'} /> : null}
+    {placed.length ? <>
+      <p className={`${styles.nearbyCount} readout`}>{decoded.length} interpreted {decoded.length === 1 ? 'fault' : 'faults'} from {raw.length} returned {raw.length === 1 ? 'record' : 'records'}. A live kernel report can span several records.</p>
+      <ol className={styles.nearbyList}>{placed.slice(0, limit).map((fault) => {
+        const time = filingTime(fault);
+        const representativeTime = times.get(String(fault.RecordId));
+        const subject = fault.report?.name ?? fault.report?.code ?? (typeof fault.fields.AppName === 'string' ? fault.fields.AppName : null);
+        const firstOfReport = !earlier && fault.report && fault.report.records.length > 1;
+        const key = fault.report?.id ? `${fault.Log ?? 'Application'}:report:${fault.report.id}` : `${fault.Log ?? 'Application'}:record:${fault.RecordId}`;
+        return <li key={key}>
+          <details>
+            <summary><span>{fault.kind}{subject ? ` · ${subject}` : ''}</span><span className="readout">{time && Number.isFinite(Date.parse(time)) ? clock.format(new Date(time)) : 'time unknown'}{firstOfReport ? ` · first of ${fault.report?.records.length} returned records` : ` · #${fault.RecordId}`}</span></summary>
+            {firstOfReport ? <p className={`${styles.nearbyReach} readout`}>Placed by this side’s first returned record. The detail below comes from its latest returned record, #{fault.RecordId}.</p> : null}
+            <FaultDetail fault={fault} at={representativeTime} envelope={shown} rawRecords={raw} showMomentLink={false} />
+          </details>
+        </li>;
+      })}</ol>
+      {placed.length > limit ? <button className={styles.action} onClick={() => setLimit((value) => value + 10)}>Show 10 more interpreted faults</button> : null}
+    </> : null}
+  </section>;
+}
+
+function compareFilingTimes(a: string | undefined, b: string | undefined): number {
+  if (!a) return b ? 1 : 0;
+  if (!b) return -1;
+  const aMs = Date.parse(a);
+  const bMs = Date.parse(b);
+  if (!Number.isFinite(aMs)) return Number.isFinite(bMs) ? 1 : 0;
+  if (!Number.isFinite(bMs)) return -1;
+  const milliseconds = aMs - bMs;
+  if (milliseconds) return milliseconds;
+  const fraction = (value: string) => Number((value.match(/\.(\d{1,7})(?:Z|[+-]\d{2}:\d{2})$/)?.[1] ?? '').padEnd(7, '0'));
+  return fraction(a) - fraction(b);
 }
 
 /** The report channel can retain evidence after the System log has rotated away. */
@@ -253,7 +303,7 @@ function KernelReportSide({ moment, since, before, order, asked }: {
   const answered = shown?.outcome === 'ok' || shown?.outcome === 'empty';
   const stale = shown !== null && shown !== taken.reading;
 
-  return <section className={styles.kernelSide} aria-labelledby={`kernel-${order}-title`}>
+  return <section className={styles.nearbySide} aria-labelledby={`kernel-${order}-title`}>
     <h3 id={`kernel-${order}-title`} className="display">{earlier ? 'Before this moment · nearest first' : 'At or after this moment · nearest first'}</h3>
     <OutcomeLine taken={taken} noun="Kernel-WHEA reports" singular="Kernel-WHEA report"
       emptyText={`No Kernel-WHEA report returned ${earlier ? 'before' : 'at or after'} this moment in the queried channel window`} />

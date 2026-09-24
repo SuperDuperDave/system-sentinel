@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.9.3] - 2026-09-24
+
+### Changed
+- `faults` now accepts `order=oldest` for an explicit time window. It keeps the earliest matching Application records and uses the extra matching probe for an exclusive later reach when capped. Exact seven-digit bounds, the independently requested window, the host clock, readable row times and returned time order must check out before that reach is claimed. Raw and decoded records remain available when reach is unknown; an unverified empty request cannot masquerade as complete absence. The existing newest-first answer remains the default.
+- Record's optional nearby Application reports now use two independent 50-record reads meeting at the selected moment: newest before and oldest at or after. Each has its own outcome, reach, cap and Stack action. A grouped live-kernel report on the after side is placed by its first returned filing while detail remains tied to the latest returned record. Opening, paging or retaking one side keeps the held frame and any still-returned open fault in place; a failed retake labels and preserves the last observed reading with its warnings. Agents have the same two-call recipe in the API guide.
+
+### Limits
+- These are report-filing-time windows, not proof of when a fault occurred. A live-kernel report can have records on both sides; a decoded entry groups only what that side returned. Directional time reach assumes no clock inversion among unreturned records. The oldest-first query may cost more on a large retained Application log, particularly for a recent moment; the sparse development host does not establish high-volume performance.
+
 ## [1.9.2] - 2026-09-24
 
 ### Changed

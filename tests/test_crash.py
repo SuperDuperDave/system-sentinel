@@ -722,6 +722,15 @@ def test_the_faults_query_asks_the_three_selectors_and_the_window():
     anchored = faults_script(30, "2026-09-12T00:00:00Z", "2026-09-13T00:00:00Z")
     assert "@SystemTime&gt;='2026-09-12T00:00:00.000Z'" in anchored
     assert "@SystemTime&lt;'2026-09-13T00:00:00.002Z'" in anchored
+    oldest = faults_script(30, "2026-09-12T00:00:00.1234567Z", "2026-09-13T00:00:00Z", "oldest")
+    assert "Get-WinEvent -FilterXml ([xml]$xml) -Oldest -ErrorAction Stop" in oldest
+    assert "probe_time =" in oldest
+    assert f" -ge {module.exact_stamp('2026-09-12T00:00:00.1234567Z', 'since')[1]}" in oldest
+    assert " -Oldest -ErrorAction Stop" not in anchored and "probe_time =" not in anchored
+    with pytest.raises(ValueError, match="explicit inclusive timestamp"):
+        faults_script(30, "", order="oldest")
+    with pytest.raises(ValueError, match="explicit inclusive timestamp"):
+        faults_script(30, "boot", order="oldest")
 
 
 def test_a_window_that_is_neither_boot_nor_a_timestamp_is_refused():
@@ -820,6 +829,75 @@ def test_fault_outside_window_row_is_decoded_but_cannot_prove_complete_reach():
     assert reading.section("coverage").data["complete"] is False
 
 
+def test_oldest_fault_window_uses_a_probe_for_exclusive_later_reach():
+    start, end = "2026-09-12T10:00:00.0000000Z", "2026-09-12T12:00:00.0000000Z"
+    times = ["2026-09-12T11:00:00.1234567Z", "2026-09-12T11:00:00.1234568Z"]
+    rows = [{**faults_fixture()[0], "RecordId": 8000 + i, "TimeCreated": at} for i, at in enumerate(times)]
+    result = log_collector_result(rows, log="Application", window_start=start, window_end=end,
+                                  queried_at="2026-09-13T00:00:00.0000000Z", limit=2)
+    result.items[0].update(truncated=True, probe_time="2026-09-12T11:00:00.1234569Z")
+    reading = asyncio.run(take("faults", FakeBridge(result), {"since": start, "before": end, "count": 2, "order": "oldest"}))
+    reach = reading.section("coverage").data
+    assert reading.outcome == "ok" and [row["RecordId"] for row in reading.section("records").data] == [8000, 8001]
+    assert reach["covered_from"] == start and reach["covered_from_inclusive"] is True
+    assert reach["covered_until"] == "2026-09-12T11:00:00.1234569Z" and reach["complete"] is False
+    assert reach["returned_time_ordered"] is True
+    assert any("later matching records" in warning for warning in reading.warnings)
+
+
+@pytest.mark.parametrize("change", [
+    {"probe_time": None},
+    {"probe_time": "2026-09-12T09:59:59.0000000Z"},
+    {"window_end": "2026-09-12T12:00:00.0000001Z"},
+])
+def test_oldest_fault_window_keeps_rows_but_refuses_unverified_reach(change):
+    start, end = "2026-09-12T10:00:00.0000000Z", "2026-09-12T12:00:00.0000000Z"
+    row = {**faults_fixture()[0], "RecordId": 8000, "TimeCreated": "2026-09-12T11:00:00.0000000Z"}
+    result = log_collector_result([row], log="Application", window_start=start, window_end=end,
+                                  queried_at="2026-09-13T00:00:00.0000000Z", limit=1)
+    result.items[0].update(truncated=True, probe_time="2026-09-12T11:00:01.0000000Z")
+    result.items[0].update(change)
+    reading = asyncio.run(take("faults", FakeBridge(result), {"since": start, "before": end, "count": 1, "order": "oldest"}))
+    assert reading.outcome == "ok" and reading.section("records").data == [row]
+    assert reading.section("coverage").data["covered_until"] is None
+    assert reading.section("coverage").data["complete"] is False
+    assert reading.warnings
+
+
+def test_oldest_fault_window_clock_inversion_and_partial_stop_do_not_overclaim():
+    start, end = "2026-09-12T10:00:00.0000000Z", "2026-09-12T12:00:00.0000000Z"
+    first = {**faults_fixture()[0], "RecordId": 8100, "TimeCreated": "2026-09-12T11:00:10.0000000Z"}
+    second = {**faults_fixture()[0], "RecordId": 8101, "TimeCreated": "2026-09-12T11:00:02.0000000Z"}
+    result = log_collector_result([first, second], log="Application", window_start=start, window_end=end,
+                                  queried_at="2026-09-13T00:00:00.0000000Z", limit=2)
+    result.items[0]["probe_time"] = None
+    params = {"since": start, "before": end, "count": 2, "order": "oldest"}
+    inverted = asyncio.run(take("faults", FakeBridge(result), params))
+    assert inverted.section("records").data == [first, second]
+    assert inverted.section("coverage").data["returned_time_ordered"] is False
+    assert inverted.section("coverage").data["covered_until"] is None
+    result.items[0]["records"] = [second, first]
+    result.items[0].update(truncated=None, stopped={"kind": "failed", "detail": "the log stopped"})
+    stopped = asyncio.run(take("faults", FakeBridge(result), params))
+    assert stopped.outcome == "ok" and stopped.section("coverage").data["covered_until"] == first["TimeCreated"]
+    assert stopped.section("coverage").data["complete"] is False
+
+
+def test_oldest_fault_window_future_end_is_incomplete_and_wrong_empty_echo_fails():
+    start, end = "2026-09-12T10:00:00.0000000Z", "2026-09-12T12:00:00.0000000Z"
+    result = log_collector_result([], log="Application", window_start=start, window_end=end,
+                                  queried_at="2026-09-12T11:00:00.0000000Z", limit=2)
+    result.items[0]["probe_time"] = None
+    params = {"since": start, "before": end, "count": 2, "order": "oldest"}
+    reading = asyncio.run(take("faults", FakeBridge(result), params))
+    assert reading.outcome == "empty" and reading.section("coverage").data["covered_until"] == result.items[0]["queried_at"]
+    assert reading.section("coverage").data["complete"] is False
+    result.items[0]["window_end"] = "2026-09-12T12:00:00.0000001Z"
+    wrong = asyncio.run(take("faults", FakeBridge(result), params))
+    assert wrong.outcome == "failed" and wrong.count is None
+    assert wrong.section("coverage").data["covered_until"] is None
+
+
 # ---------------------------------------------------------------- the boundary
 
 
@@ -840,9 +918,16 @@ def test_the_catalog_lists_both_readings_with_their_parameters(client: TestClien
     body = client.get("/api/readings", headers=AUTH).json()
     listed = {r["name"]: r for r in body["readings"]}
     assert [p["name"] for p in listed["crash"]["params"]] == ["count", "moment"]
-    assert [p["name"] for p in listed["faults"]["params"]] == ["count", "since", "before"]
+    assert [p["name"] for p in listed["faults"]["params"]] == ["count", "since", "before", "order"]
     assert listed["crash"]["classes"] == ["raw", "derived"] and listed["faults"]["private"]
     assert REGISTRY["crash"].heavy is False
+
+
+def test_oldest_faults_require_an_explicit_start_at_the_http_boundary(client: TestClient):
+    missing = client.get("/api/readings/faults?order=oldest", headers=AUTH)
+    boot = client.get("/api/readings/faults?order=oldest&since=boot", headers=AUTH)
+    assert missing.status_code == 422 and "since" in missing.text
+    assert boot.status_code == 422 and "since" in boot.text
 
 
 def test_a_count_out_of_range_and_an_unreadable_moment_are_refused_by_the_route(client: TestClient):

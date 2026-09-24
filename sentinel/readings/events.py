@@ -18,7 +18,16 @@ from typing import Any
 
 from ..bridge import Bridge, BridgeResult
 from ..reading import Param, Reading, Section, Spec, from_bridge, register
-from .event_coverage import LOG_METADATA_SCRIPT, LOG_WINDOW_COVERAGE_BASIS, exact_stamp, metadata, stamp_key, window_coverage
+from .event_coverage import (
+    LOG_METADATA_SCRIPT,
+    LOG_WINDOW_COVERAGE_BASIS,
+    directional_reach,
+    exact_stamp,
+    known_stamp_key,
+    metadata,
+    stamp_key,
+    window_coverage,
+)
 
 LOGS = ("System", "Application")
 MAX_LOG_RECORDS = 2000  # per-request cap for the log and its progressively widened Record frame
@@ -143,22 +152,26 @@ def record_script(log: str, before: str, count: int) -> str:
 
 def log_records_script(
     log: str, query: str, count: int, *, prelude: str = "", window_start: str = "$null", window_end: str = "$null", projection: str = RECORD_SELECT,
-    from_ticks: str | None = None, until_ticks: str | None = None,
+    from_ticks: str | None = None, until_ticks: str | None = None, oldest: bool = False,
 ) -> str:
     """One object with bounded matching rows and metadata observed after the query.
 
     A clean no-match must still return the object: a pipeline-level ``return`` would otherwise
     hide the log's retention boundary and turn an observed empty query into a missing response.
     """
+    if oldest and from_ticks is None:
+        raise ValueError("oldest-first log reads require an inclusive start")
     if from_ticks is None and until_ticks is None:
         query_stage = f"Get-WinEvent -FilterXml ([xml]$xml) -MaxEvents {int(count) + 1} -ErrorAction Stop"
     else:
         lower = from_ticks or "0"
         upper = until_ticks or "[long]::MaxValue"
-        query_stage = ("Get-WinEvent -FilterXml ([xml]$xml) -ErrorAction Stop |\n"
+        query_stage = (f"Get-WinEvent -FilterXml ([xml]$xml){' -Oldest' if oldest else ''} -ErrorAction Stop |\n"
                        "        Where-Object { $null -eq $_.TimeCreated -or "
                        f"($_.TimeCreated.ToUniversalTime().Ticks -ge {lower} -and $_.TimeCreated.ToUniversalTime().Ticks -lt {upper}) }} |\n"
                        f"        Select-Object -First {int(count) + 1}")
+    probe = (f"\n    probe_time = $(if ($null -eq $stopped -and $truncated -and $null -ne $found[{int(count)}].TimeCreated) "
+             f"{{ $found[{int(count)}].TimeCreated.ToUniversalTime().ToString('o') }} else {{ $null }})") if oldest else ""
     return LOG_METADATA_SCRIPT + prelude + f"""$xml = @"
 {query}
 "@
@@ -197,7 +210,7 @@ if ($null -eq $errorText) {{
 $meta = Read-LogMetadata '{log}'
 [pscustomobject]@{{
     log = '{log}'; outcome = $outcome; error = $errorText; returned = $records.Count; limit = {int(count)}
-    truncated = $truncated; stopped = $stopped; records = @($records); metadata = $meta
+    truncated = $truncated; stopped = $stopped; records = @($records); metadata = $meta{probe}
     window_start = {window_start}; window_end = {window_end}; queried_at = $queriedAt
 }}
 """
@@ -246,10 +259,66 @@ RECORD_COVERAGE_BASIS = (
     "records still exist; collection.truncated says whether the response stopped at its row limit."
 )
 RECENT_COVERAGE_BASIS = "The oldest retained record was read after the newest-record query. No start was requested, so window completeness does not apply."
+OLDEST_WINDOW_COVERAGE_BASIS = (
+    "An oldest-first read keeps the earliest matching records in record order. A valid extra matching "
+    "probe gives an exclusive upper reach when the cap is reached; a stopped read reaches only to "
+    "the last returned time, exclusive. Exact requested bounds, readable in-window times, the "
+    "host query clock and nondecreasing returned times are required before time reach is claimed. "
+    "The rule still assumes no clock inversion among unreturned records. Complete also requires "
+    "circular retention before the requested start and an end no later than the query clock."
+)
+
+
+def oldest_window_coverage(
+    source: dict[str, Any], rows: list[dict[str, Any]], requested_start: str | None,
+    requested_end: str | None, probe_present: bool,
+) -> tuple[dict[str, Any], str | None]:
+    """Validate the collector before using the shared directional time-reach rule.
+
+    Keep raw rows even when its clock, probe or ordering cannot establish contiguous reach.
+    """
+    reach: dict[str, Any] = {
+        "log": source["log"], "retained_from": source.get("log_oldest"), "covered_from": None,
+        "covered_from_inclusive": None, "covered_until": None, "complete": False,
+        "returned_time_ordered": None,
+    }
+    echoed_start, echoed_end, query = source.get("window_start"), source.get("window_end"), source.get("queried_at")
+    start_key, end_key, query_key = stamp_key(requested_start), stamp_key(requested_end), stamp_key(query)
+    if (start_key is None or query_key is None or (requested_end is not None and end_key is None)
+            or stamp_key(echoed_start) != start_key
+            or (echoed_end is not None if requested_end is None else stamp_key(echoed_end) != end_key)):
+        return reach, "the oldest-first collector did not verify the requested window or host clock"
+    assert isinstance(requested_start, str) and isinstance(query, str)
+    end = requested_end if requested_end is not None else query
+    assert isinstance(end, str)
+    if start_key >= known_stamp_key(end):
+        return reach, "the oldest-first window ends at or before its requested start"
+    observed_end = end if known_stamp_key(end) <= query_key else query
+    observed_key = known_stamp_key(observed_end)
+    probe = source.get("probe_time")
+    if not probe_present or (source["truncated"] is True and
+                             (not isinstance(probe, str) or stamp_key(probe) is None
+                              or not start_key <= known_stamp_key(probe) < known_stamp_key(end))) or (
+                                 source["truncated"] is not True and probe is not None):
+        return reach, "the oldest-first collector omitted or misplaced its cap probe"
+    times = [stamp_key(row.get("TimeCreated")) for row in rows]
+    if any(moment is None for moment in times):
+        return reach, "an oldest-first returned record had no readable time"
+    if any(not start_key <= moment < observed_key for moment in times if moment is not None):
+        return reach, "an oldest-first returned record fell outside the observed requested window"
+    if isinstance(probe, str):
+        times.append(known_stamp_key(probe))
+    ordered = all(left <= right for left, right in zip(times, times[1:], strict=False) if left is not None and right is not None)
+    reach["returned_time_ordered"] = ordered
+    if not ordered:
+        return reach, "returned Application filing times moved backward in log order; contiguous time reach is unknown"
+    validated = directional_reach(source, rows, requested_start, end, observed_end, query, "oldest", probe if isinstance(probe, str) else None, ordered)
+    return {**validated, "returned_time_ordered": ordered}, None
 
 
 def from_log_collector(
     name: str, params: dict[str, Any], script: str, result: BridgeResult, log: str, limit: int, *, window: bool = False, before: str | None = None,
+    order: str = "newest", requested_start: str | None = None, requested_end: str | None = None,
 ) -> Reading:
     """Keep returned evidence even when the independent retention check cannot answer."""
     reading = from_bridge(name, params, script, result, shape="object")
@@ -289,7 +358,8 @@ def from_log_collector(
     reading.sections = [Section("records", "raw", rows)]
     reading.count = len(rows)
     reading.outcome = source_outcome
-    start_key, end_key = stamp_key(payload.get("window_start")), stamp_key(payload.get("window_end"))
+    start_key = stamp_key(requested_start) if order == "oldest" else stamp_key(payload.get("window_start"))
+    end_key = stamp_key(requested_end or payload.get("queried_at")) if order == "oldest" else stamp_key(payload.get("window_end"))
 
     def outside_window(row: dict[str, Any]) -> bool:
         at = stamp_key(row.get("TimeCreated"))
@@ -308,6 +378,9 @@ def from_log_collector(
     valid_meta = meta if isinstance(meta, dict) and meta.get("log") == log else {}
     source.update(metadata(valid_meta))
     source["log"] = log
+    if order == "oldest":
+        source["order"] = order
+        source["probe_time"] = payload.get("probe_time")
     reading.sections.append(Section("collection", "raw", source))
     if not valid_meta:
         reading.warnings.append("the log's retention metadata did not identify the requested source")
@@ -319,19 +392,33 @@ def from_log_collector(
         reading.warnings.append(f"{source['row_issues']['outside_window']} returned record times fell outside the requested window; the raw rows remain visible" +
                                 (" and completeness cannot be established" if window else ""))
     if window and source["truncated"] is True:
-        reading.warnings.append(f"the event query reached its {limit}-record limit; older matching records in the requested window were not returned")
+        direction = "later" if order == "oldest" else "older"
+        reading.warnings.append(f"the event query reached its {limit}-record limit; {direction} matching records in the requested window were not returned")
     if source.get("log_state") == "ok" and source.get("log_enabled") is False:
         reading.warnings.append("the Windows event log is disabled; absence of new records cannot be established")
 
     retained = source.get("log_oldest") if source.get("oldest_state") == "ok" and stamp_key(source.get("log_oldest")) else None
     if window:
         start = source["window_start"]
-        requested_end = source["queried_at"] if source["window_end"] is None else source["window_end"]
-        reach = (window_coverage(source, in_window_rows, start, requested_end, source["queried_at"], end_is_query_time=source["window_end"] is None)
-                 if isinstance(start, str) and isinstance(requested_end, str)
-                 else {"covered_from": None, "covered_from_inclusive": None, "covered_until": None, "complete": None})
-        reading.sections.append(Section("coverage", "derived", {"log": log, "retained_from": retained, **reach}, basis=LOG_WINDOW_COVERAGE_BASIS))
-        start_at, end_at, observed_at, retained_at = stamp_key(start), stamp_key(requested_end), stamp_key(source["queried_at"]), stamp_key(retained)
+        echoed_end = source["queried_at"] if source["window_end"] is None else source["window_end"]
+        issue: str | None = None
+        if order == "oldest":
+            reach, issue = oldest_window_coverage(source, rows, requested_start, requested_end, "probe_time" in payload)
+            if issue:
+                reading.warnings.append(issue)
+                if not rows:
+                    reading.outcome = "failed"
+                    reading.count = None
+                    reading.error = {"kind": "failed", "detail": issue}
+        else:
+            reach = (window_coverage(source, in_window_rows, start, echoed_end, source["queried_at"], end_is_query_time=source["window_end"] is None)
+                     if isinstance(start, str) and isinstance(echoed_end, str)
+                     else {"covered_from": None, "covered_from_inclusive": None, "covered_until": None, "complete": None})
+        reading.sections.append(Section("coverage", "derived", {"log": log, "retained_from": retained, **reach},
+                                        basis=OLDEST_WINDOW_COVERAGE_BASIS if order == "oldest" else LOG_WINDOW_COVERAGE_BASIS))
+        warning_start = requested_start if order == "oldest" else start
+        warning_end = (requested_end or source["queried_at"]) if order == "oldest" else echoed_end
+        start_at, end_at, observed_at, retained_at = stamp_key(warning_start), stamp_key(warning_end), stamp_key(source["queried_at"]), stamp_key(retained)
         if source["window_end"] is not None and end_at is None:
             reading.warnings.append("the requested window end returned by the collector could not be read; upper reach is unknown")
         elif source["window_end"] is not None and observed_at is None:

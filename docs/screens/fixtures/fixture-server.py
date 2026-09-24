@@ -11,6 +11,10 @@ Answers:
   - the System log (``events``, ``record``): docs/screens/fixtures/system-log.json, filtered
     and paged the way Get-WinEvent would be
   - nearby Application faults: tests/fixtures/fault-records.json, placed near the older restart
+    Set SENTINEL_FIXTURE_CROWDED_FAULTS=1 to add a synthetic post-restart crash loop for
+    direction and cap checks without changing the ordinary screenshot fixture.
+    Set SENTINEL_FIXTURE_GROUPED_FAULTS=1 to place a two-record live-kernel report around
+    40 intervening crashes, testing the first filing's visible placement.
   - Memory and Power: synthetic source-outcome examples, optionally with selected source
     failures when ``SENTINEL_FIXTURE_DIAGNOSTIC_FAILURES=1`` is set
   - anything else: empty
@@ -51,6 +55,7 @@ sys.path.insert(0, str(REPO))
 
 from sentinel.app import State, create_app  # noqa: E402
 from sentinel.bridge import BridgeResult  # noqa: E402
+from sentinel.readings.event_coverage import known_stamp_key  # noqa: E402
 
 WHEA_FIXTURE = REPO / "tests" / "fixtures" / "whea-records.json"
 FAULT_FIXTURE = REPO / "tests" / "fixtures" / "fault-records.json"
@@ -193,6 +198,21 @@ def fault_records(now: float) -> list[dict[str, Any]]:
     for index, row in enumerate(rows):
         row["TimeCreated"] = _powershell_stamp(now - (2890 + index * 3) * 60)
         row["MachineName"] = FIXTURE_HOST
+    if os.environ.get("SENTINEL_FIXTURE_GROUPED_FAULTS") == "1":
+        report = next(row for row in rows if row["RecordId"] == 4000)
+        crash = next(row for row in rows if row["Id"] == 1000)
+        held = now - 2900 * 60
+        return ([{**report, "RecordId": 7000, "TimeCreated": _powershell_stamp(held + 3)}]
+                + [{**crash, "RecordId": 7100 + index, "TimeCreated": _powershell_stamp(held + 60 + index * 30)}
+                   for index in range(40)]
+                + [{**report, "RecordId": 7001, "TimeCreated": _powershell_stamp(held + 25 * 60)}])
+    if os.environ.get("SENTINEL_FIXTURE_CROWDED_FAULTS") == "1":
+        base = next(row for row in rows if row["Id"] == 1000)
+        held = now - 2900 * 60
+        rows.extend({**base, "RecordId": 5000 + index, "TimeCreated": _powershell_stamp(held - seconds)}
+                    for index, seconds in enumerate((10, 9, 8)))
+        rows.extend({**base, "RecordId": 6000 + index, "TimeCreated": _powershell_stamp(held + 10 + (index + 1) / 10)}
+                    for index in range(600))
     return rows
 
 
@@ -230,18 +250,23 @@ def answer_log_records(script: str) -> BridgeResult:
     levels = {int(value) for value in _LEVEL_RE.findall(script)}
     matching = [row for row in all_rows if
                 (not levels or row["Level"] in levels)
-                and (start_text is None or _parse_stamp(row["TimeCreated"]) >= _parse_stamp(start_text))
-                and (end_text is None or _parse_stamp(row["TimeCreated"]) < _parse_stamp(end_text))]
+                and (start_text is None or known_stamp_key(row["TimeCreated"]) >= known_stamp_key(start_text))
+                and (end_text is None or known_stamp_key(row["TimeCreated"]) < known_stamp_key(end_text))]
+    oldest_first = "Get-WinEvent -FilterXml ([xml]$xml) -Oldest -ErrorAction Stop" in script
+    matching.sort(key=lambda row: (row["TimeCreated"], row["RecordId"]), reverse=not oldest_first)
     kept = matching[:cap]
     # The Application log also contains older non-fault events outside this selected fixture.
     oldest = _powershell_stamp(now - 5000 * 60) if application else (all_rows[-1]["TimeCreated"] if all_rows else None)
-    return BridgeResult("ok", items=[{
+    answer = {
         "log": log, "outcome": "ok" if kept else "empty", "error": None, "records": kept,
         "returned": len(kept), "limit": cap, "truncated": len(matching) > cap, "stopped": None,
         "window_start": start_text, "window_end": end_text, "queried_at": _powershell_stamp(now),
         "metadata": {"log": log, "log_enabled": True, "log_mode": "Circular", "log_state": "ok", "log_error": None,
                      "log_oldest": oldest, "oldest_state": "ok" if oldest else "empty", "oldest_error": None},
-    }], took_ms=37)
+    }
+    if oldest_first:
+        answer["probe_time"] = matching[cap]["TimeCreated"] if len(matching) > cap else None
+    return BridgeResult("ok", items=[answer], took_ms=37)
 
 
 def answer_whea(script: str) -> BridgeResult:

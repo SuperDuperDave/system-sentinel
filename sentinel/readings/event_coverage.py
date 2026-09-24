@@ -147,6 +147,50 @@ def window_coverage(
     return {**reach, "covered_until": observed_end if reach["covered_from"] is not None else None, "complete": complete}
 
 
+def directional_reach(
+    source: dict[str, Any], rows: list[dict[str, Any]], start: str, end: str, observed_end: str,
+    queried_at: str, order: str, probe_time: str | None, ordered: bool,
+) -> dict[str, Any]:
+    """Bound one log's contiguous directional reach after the caller validates clocks and probe.
+
+    A truncated read without a valid probe would overstate its reach. The caller must verify the
+    requested bounds, readable row times, the probe's presence and placement, and row membership
+    before using this rule. Record order is assumed to agree with event time outside returned rows.
+    """
+    retained = source.get("log_oldest")
+    reach: dict[str, Any] = {
+        "log": source["log"], "retained_from": retained, "covered_from": None,
+        "covered_from_inclusive": None, "covered_until": None, "complete": False,
+    }
+    start_key, end_key = known_stamp_key(start), known_stamp_key(end)
+    observed_key, query_key = known_stamp_key(observed_end), known_stamp_key(queried_at)
+    oldest_key = stamp_key(retained)
+    if (not ordered or start_key >= query_key or source.get("log_state") != "ok"
+            or source.get("log_enabled") is not True or source.get("log_mode") != "Circular"
+            or source.get("oldest_state") != "ok" or oldest_key is None or oldest_key >= observed_key):
+        return reach
+    assert isinstance(retained, str)
+    base = start if oldest_key < start_key else retained
+    from_inclusive = oldest_key < start_key
+    bound = probe_time
+    if bound is None and source.get("stopped") is not None and rows:
+        key = min if order == "newest" else max
+        bound = key((row["TimeCreated"] for row in rows), key=known_stamp_key)
+    if order == "newest" and bound is not None:
+        if known_stamp_key(bound) >= known_stamp_key(base):
+            base = bound
+            from_inclusive = False
+    until = observed_end
+    if order == "oldest" and bound is not None and known_stamp_key(bound) < observed_key:
+        until = bound
+    if known_stamp_key(base) >= known_stamp_key(until):
+        return reach
+    complete = (oldest_key < start_key and source.get("truncated") is False and source.get("stopped") is None
+                and end_key <= query_key)
+    return {**reach, "covered_from": base, "covered_from_inclusive": from_inclusive,
+            "covered_until": until, "complete": complete}
+
+
 def covered_from(source: dict[str, Any], rows: list[dict[str, Any]], start: str, end: str) -> str | None:
     if source.get("log_state") != "ok" or source.get("log_enabled") is not True or source.get("log_mode") != "Circular" or source.get("oldest_state") != "ok":
         return None

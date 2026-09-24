@@ -665,10 +665,15 @@ def record_cap(count: int, moment: str | None) -> int:
     return MOMENT_RECORDS if moment else 12 * count + 24
 
 
-def faults_script(count: int, since: str, before: str = "") -> str:
+def faults_script(count: int, since: str, before: str = "", order: str = "newest") -> str:
+    if order not in ("newest", "oldest"):
+        raise ValueError("parameter 'order': choose newest or oldest")
+    if order == "oldest" and (not since.strip() or since.strip().lower() == "boot"):
+        raise ValueError("parameter 'since': oldest-first faults require an explicit inclusive timestamp")
     prelude, clause, start, end, from_ticks, until_ticks = window_clauses(since, before)
     return log_records_script("Application", faults_query(clause), count, prelude=prelude, window_start=start, window_end=end,
-                              projection=record_projection("Log = $_.LogName"), from_ticks=from_ticks, until_ticks=until_ticks)
+                              projection=record_projection("Log = $_.LogName"), from_ticks=from_ticks, until_ticks=until_ticks,
+                              oldest=order == "oldest")
 
 
 # ---------------------------------------------------------------------------
@@ -1230,12 +1235,16 @@ def take_faults(bridge: Bridge, params: dict[str, Any]) -> Reading:
     count = int(params["count"])
     if not 1 <= count <= MAX_FAULTS:
         raise ValueError(f"parameter 'count': must be between 1 and {MAX_FAULTS}")
-    script = faults_script(count, str(params.get("since") or ""), str(params.get("before") or ""))
+    order = str(params["order"])
+    script = faults_script(count, str(params.get("since") or ""), str(params.get("before") or ""), order)
 
     has_since = bool(str(params.get("since") or "").strip())
     before = str(params.get("before") or "").strip()
     reading = from_log_collector("faults", params, script, bridge.run(script, depth=8), "Application", count, window=has_since,
-                                 before=exact_stamp(before, "before")[0] if before and not has_since else None)
+                                 before=exact_stamp(before, "before")[0] if before and not has_since else None,
+                                 order=order,
+                                 requested_start=exact_stamp(str(params["since"]), "since", naive="local")[0] if order == "oldest" else None,
+                                 requested_end=exact_stamp(before, "before")[0] if order == "oldest" and before else None)
     if not reading.observed:
         return reading
     record_section = reading.section("records")
@@ -1413,14 +1422,16 @@ register(
             "Application-log reports of programs that crashed or hung and Windows Error Reporting entries for "
             "live kernel events, by filing time. Returned records name the application, module and exception "
             "where supported; process ID and creation time carry per-field validity. Retention reach refers "
-            "only to the Application log, not every live kernel event that occurred."
+            "only to the Application log, not every live kernel event that occurred. In a window, order=oldest "
+            "keeps the earliest records and bounds later reach with an extra matching probe."
         ),
         classes=("raw", "derived"),
         take=take_faults,
         params=(
-            Param("count", "int", 30, f"How many of the most recent records; 1 to {MAX_FAULTS}.", minimum=1, maximum=MAX_FAULTS),
+            Param("count", "int", 30, f"How many matching records to keep from the selected end; 1 to {MAX_FAULTS}.", minimum=1, maximum=MAX_FAULTS),
             Param("since", "str", "", "Inclusive ISO timestamp, preserving up to seven fractional digits, or 'boot' for Windows' reported kernel-session start. Empty for the most recent records."),
             Param("before", "str", "", "Exclusive filing-time end with Z or an offset, preserving up to seven fractional digits. Pair with since for an anchored window; empty uses the query time."),
+            Param("order", "str", "newest", "Which end keeps the record cap. Oldest requires an explicit since timestamp.", choices=("newest", "oldest")),
         ),
         private=("AppPath", "ModulePath", "ExeFileName", "AttachedFiles", "StorePath", "user names inside Message"),
     )
