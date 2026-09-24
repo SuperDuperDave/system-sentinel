@@ -1281,6 +1281,7 @@ def compose(records: list[dict[str, Any]], window: Window, params: dict[str, Any
     previous_total = 0
     unreadable_total = 0
     unreadable_reasons = {"no_payload": 0, "short_payload": 0, "invalid_header": 0}
+    severity = {"fatal": 0, "recoverable": 0, "corrected": 0, "informational": 0, "unknown": 0, "unreadable": 0}
     per_bucket: list[dict[str, int]] = [{} for _ in range(window.count)]
     signatures: dict[str, _Signature] = {}
     reports: list[dict[str, Any]] = []
@@ -1292,6 +1293,8 @@ def compose(records: list[dict[str, Any]], window: Window, params: dict[str, Any
             reference.update(event_id=record["Id"], signature_id=None)
             reports.append(reference)
         header = reference["header"] if reference is not None else fixed_cper_header(record.get("HeaderHex"), record.get("PayloadBytes"))[0]
+        level = header["severity"] if header is not None else "unreadable"
+        severity[level if level in severity else "unknown"] += 1
         header_issue = fixed_header_issue(record.get("HeaderHex"), record.get("PayloadBytes")) if header is None else None
         previous_session = header["previous_session"] if header is not None else None
         if previous_session is True:
@@ -1336,14 +1339,18 @@ def compose(records: list[dict[str, Any]], window: Window, params: dict[str, Any
         "header_unreadable_reasons": unreadable_reasons,
         "totals": totals,
         "unknown_buckets": sum(value is None for value in totals),
-        "active": [
-            {"index": i, "start": _stamp(window.start + i * window.bucket_seconds), "total": returned_totals[i], "complete": totals[i] is not None,
-             "previous_session": previous[i], "header_unreadable": unreadable[i], "signatures": per_bucket[i]}
-            for i in range(window.count)
-            if returned_totals[i]
-        ],
+        "severity": severity,
     }
     ranked = sorted(signatures.values(), key=lambda s: (s.count, s.last_seen), reverse=True)
+    active = [i for i, count in enumerate(returned_totals) if count]
+    buckets["returned"] = {"index": active, "count": [returned_totals[i] for i in active],
+                            "previous_session": [previous[i] for i in active],
+                            "header_unreadable": [unreadable[i] for i in active]}
+    signature_index = {sig.id: i for i, sig in enumerate(ranked)}
+    pairs = [(i, signature_index[sig_id], count) for i in active for sig_id, count in per_bucket[i].items()]
+    buckets["signature_pairs"] = {"index": [item[0] for item in pairs],
+                                  "signature": [item[1] for item in pairs],
+                                  "count": [item[2] for item in pairs]}
     sections = []
     if params.get("references") is True:
         sections.append(Section(
@@ -1363,10 +1370,14 @@ def compose(records: list[dict[str, Any]], window: Window, params: dict[str, Any
             basis=(
                 f"placed in-window WHEA-Logger records counted into wall-clock buckets of {window.bucket_seconds} seconds: "
                 "'totals' has null where retained history, an early stop, the record cap or an event with unreadable time cannot establish a whole bucket, "
-                "zero only for an observed quiet bucket, and a count otherwise. 'active' keeps returned "
-                "records even in an incomplete bucket; the final bucket is observed only through collection.window_end. "
+                "zero only for an observed quiet bucket, and a count otherwise. 'returned' keeps sparse parallel "
+                "index, count, previous_session and header_unreadable columns for buckets with returned records, "
+                "even when totals is null. A bucket start is from + index * bucket_seconds, and it is complete "
+                "only when totals[index] is not null. signature_pairs aligns index, signature-list position and count. "
+                "CPER-header severity totals count returned reports, including unplaced ones, not error occurrence times; unknown and unreadable stay distinct. "
+                "The final bucket is observed only through collection.window_end. "
                 "PreviousError and unreadable-header totals include returned rows without readable filing time; "
-                "active buckets and signatures require placed rows. Header bytes are used for derivation and omitted from the reading. "
+                "sparse buckets and signatures require placed rows. Header bytes are used for derivation and omitted from the reading. "
                 "An anchored window has no inferred burst, acceleration or quiet status; its thresholds are not applied."
             ),
         ),
@@ -1589,6 +1600,23 @@ def normalize(message: str) -> str:
     return " ".join(text.split())[:100]
 
 
+def _preview_message(value: str | None) -> tuple[str | None, int | None]:
+    if value is None:
+        return None, None
+    original = _utf16_chars(value)
+    if original <= PREVIEW_MESSAGE_CHARS:
+        return value, original
+    units = 0
+    end = 0
+    for character in value:
+        size = 2 if ord(character) > 0xFFFF else 1
+        if units + size > PREVIEW_MESSAGE_CHARS:
+            break
+        units += size
+        end += 1
+    return value[:end], original
+
+
 def _accumulate(signatures: dict[str, _Signature], record: dict[str, Any], previous_session: bool | None) -> _Signature:
     sig = signature(record)
     held = signatures.setdefault(sig.id, sig)
@@ -1601,12 +1629,14 @@ def _accumulate(signatures: dict[str, _Signature], record: dict[str, Any], previ
     held.first_seen = min(held.first_seen or stamp, stamp)
     if stamp >= held.last_seen:
         held.last_seen = stamp
+        message, message_chars = _preview_message(record.get("Message"))
         held.sample = {
             "RecordId": record.get("RecordId"),
             "TimeCreated": record.get("TimeCreated"),
             "Id": record.get("Id"),
             "LevelDisplayName": record.get("LevelDisplayName"),
-            "Message": record.get("Message"),
+            "Message": message,
+            "MessageChars": message_chars,
             "previous_session": previous_session,
         }
     if isinstance(record.get("Id"), int):

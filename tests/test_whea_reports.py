@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
@@ -41,7 +42,8 @@ def row(record_id: int, at: datetime | None, *, previous: bool = False, valid_he
 
 def reports(rows: list[dict[str, Any]], *, outcome: str | None = None, oldest: datetime | None = None,
             stopped: dict[str, str] | None = None, truncated: bool = False, hours: int = 1,
-            bucket_seconds: int = 60, before: str = "", payload_hook: Callable[[dict[str, Any]], None] | None = None) -> Any:
+            bucket_seconds: int = 60, before: str = "", references: bool = False,
+            payload_hook: Callable[[dict[str, Any]], None] | None = None) -> Any:
     class Bridge:
         def run(self, script: str, *, depth: int = 6) -> BridgeResult:
             width = int(re.search(r"\$bucketTicks = \[long\](\d+)", script).group(1))
@@ -63,7 +65,8 @@ def reports(rows: list[dict[str, Any]], *, outcome: str | None = None, oldest: d
                 payload_hook(payload)
             return BridgeResult("ok", items=[payload])
 
-    return asyncio.run(take("whea_reports", Bridge(), {"hours": hours, "bucket_seconds": bucket_seconds, "before": before}))
+    return asyncio.run(take("whea_reports", Bridge(), {"hours": hours, "bucket_seconds": bucket_seconds,
+                                                       "before": before, "references": references}))
 
 
 def sections(reading: Any) -> dict[str, Any]:
@@ -71,16 +74,60 @@ def sections(reading: Any) -> dict[str, Any]:
 
 
 def test_previous_session_reports_are_counted_by_report_time_without_error_rate_status():
-    reading = reports([row(4, NOW - timedelta(minutes=2), previous=True), row(5, NOW - timedelta(minutes=1))])
+    reading = reports([row(4, NOW - timedelta(minutes=2), previous=True), row(5, NOW - timedelta(minutes=1))], references=True)
     data = sections(reading)
     assert reading.outcome == "ok" and reading.count == 2
     assert data["coverage"]["kernel_whea"]["complete"] is True
     assert data["buckets"]["total"] == 2 and data["buckets"]["previous_session"] == 1
     assert data["buckets"]["header_unreadable"] == 0 and data["buckets"]["unknown_buckets"] == 0
+    assert data["buckets"]["severity"]["fatal"] == 2
+    assert sum(data["buckets"]["severity"].values()) == reading.count
+    assert data["buckets"]["returned"]["count"] == [1, 1]
     assert data["reports"][0]["header"] == {"severity": "fatal", "previous_session": True}
     assert data["reports"][1]["header"]["previous_session"] is False
     assert "status" not in data and "signatures" not in data
     assert "report times" in reading.section("buckets").basis
+
+
+def test_report_references_are_opt_in_without_losing_aggregate_facts():
+    rows = [row(4, NOW - timedelta(minutes=2), previous=True), row(5, NOW - timedelta(minutes=1), valid_header=False)]
+    compact = reports(rows)
+    detailed = reports(rows, references=True)
+    assert compact.section("reports") is None
+    assert detailed.section("reports") is not None and len(detailed.section("reports").data) == 2
+    assert compact.section("buckets").data == detailed.section("buckets").data
+    assert compact.section("buckets").data["severity"] == {
+        "fatal": 1, "recoverable": 0, "corrected": 0, "informational": 0, "unknown": 0, "unreadable": 1,
+    }
+
+
+def test_busy_kernel_timeline_stays_small_by_default_and_quiet_one_does_not_grow_materially():
+    start = int(datetime(2026, 9, 1, tzinfo=UTC).timestamp())
+    window = whea.Window(start, 60, 2000)
+    refs = [{"record_id": i + 1, "reported_at": whea._stamp(start + i * 60 + 30),
+             "header": {"severity": "fatal", "previous_session": False}, "header_error": None}
+            for i in range(window.count)]
+    reach = {"covered_from": whea._stamp(start - 60), "covered_from_inclusive": True}
+    new = whea_reports._buckets(refs, window, reach)
+    old = json.loads(json.dumps(new))
+    returned = old.pop("returned")
+    old.pop("severity")
+    old["active"] = [{"index": index, "start": whea._stamp(start + index * 60), "total": count,
+                      "complete": old["totals"][index] is not None, "previous_session": prior,
+                      "header_unreadable": missing}
+                     for index, count, prior, missing in zip(returned["index"], returned["count"],
+                                                             returned["previous_session"], returned["header_unreadable"], strict=True)]
+
+    def size(value: Any) -> int:
+        return len(json.dumps(value, separators=(",", ":")))
+
+    assert size(new) < size({"buckets": old, "reports": refs}) * 0.1
+    quiet = whea_reports._buckets([], window, reach)
+    old_quiet = json.loads(json.dumps(quiet))
+    old_quiet.pop("returned")
+    old_quiet.pop("severity")
+    old_quiet["active"] = []
+    assert size(quiet) <= size(old_quiet) * 1.05
 
 
 def test_empty_channel_is_only_quiet_when_retention_covers_window():
@@ -94,11 +141,12 @@ def test_empty_channel_is_only_quiet_when_retention_covers_window():
 
 
 def test_unreadable_header_does_not_erase_report_and_unplaced_time_prevents_quiet():
-    reading = reports([row(6, NOW - timedelta(minutes=3), valid_header=False), row(7, None, previous=True)])
+    reading = reports([row(6, NOW - timedelta(minutes=3), valid_header=False), row(7, None, previous=True)], references=True)
     data = sections(reading)
     assert reading.outcome == "ok" and reading.count == 2
     assert data["reports"][0]["header"] is None and data["reports"][0]["header_error"]
     assert data["buckets"]["header_unreadable"] == 1 and data["buckets"]["unplaced"] == 1
+    assert data["buckets"]["severity"]["unreadable"] == data["buckets"]["header_unreadable"]
     assert data["buckets"]["previous_session"] == 1  # the unplaced report still carries its header fact
     assert data["buckets"]["unknown_buckets"] == data["buckets"]["bucket_count"]
     assert data["coverage"]["kernel_whea"]["complete"] is False
@@ -107,10 +155,23 @@ def test_unreadable_header_does_not_erase_report_and_unplaced_time_prevents_quie
 
 def test_unparseable_kernel_filing_time_is_null_in_the_shared_reference():
     unreadable = {**row(11, NOW - timedelta(minutes=1)), "TimeCreated": "unreadable-time"}
-    reading = reports([unreadable])
+    reading = reports([unreadable], references=True)
     assert reading.outcome == "ok" and reading.count == 1
     assert sections(reading)["reports"][0]["reported_at"] is None
     assert sections(reading)["buckets"]["unplaced"] == 1
+
+
+def test_readable_unrecognized_cper_severity_is_not_an_unreadable_header():
+    unusual = row(12, NOW - timedelta(minutes=1))
+    header_bytes = bytearray.fromhex(unusual["HeaderHex"])
+    header_bytes[12:16] = (99).to_bytes(4, "little")
+    unusual["HeaderHex"] = header_bytes.hex().upper()
+    reading = reports([unusual], references=True)
+    buckets = sections(reading)["buckets"]
+    assert reading.outcome == "ok"
+    assert buckets["severity"]["unknown"] == 1 and buckets["severity"]["unreadable"] == 0
+    assert buckets["header_unreadable"] == 0
+    assert sections(reading)["reports"][0]["header"]["severity"] == "unknown (99)"
 
 
 def test_failed_and_stopped_channel_keep_outcome_and_coverage_explicit():

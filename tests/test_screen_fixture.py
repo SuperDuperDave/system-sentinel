@@ -28,7 +28,11 @@ def test_screen_fixture_answers_current_record_and_nearby_source_contracts():
         "since": stamp(moment - timedelta(hours=1)), "before": stamp(moment + timedelta(hours=1)), "count": 100,
     }))
     reports = asyncio.run(take("whea_reports", bridge, {
-        "before": stamp(moment + timedelta(hours=1)), "hours": 2, "bucket_seconds": 60,
+        "before": stamp(moment + timedelta(hours=1)), "hours": 2, "bucket_seconds": 60, "references": True,
+    }))
+    report_window = asyncio.run(take("whea_window", bridge, {
+        "source": "kernel_whea", "since": stamp(moment - timedelta(hours=1)),
+        "before": stamp(moment + timedelta(hours=1)), "order": "newest", "count": 500,
     }))
     whea = asyncio.run(take("whea", bridge, {"count": 30}))
     storms = asyncio.run(take("storms", bridge, {
@@ -42,6 +46,8 @@ def test_screen_fixture_answers_current_record_and_nearby_source_contracts():
     assert all(row["Log"] == "Application" for row in faults.section("records").data)
     assert reports.outcome == "ok" and [row["record_id"] for row in reports.section("reports").data] == [75]
     assert reports.section("coverage").data["kernel_whea"]["complete"] is True
+    assert report_window.outcome == "ok" and [row["RecordId"] for row in report_window.section("records").data] == [75]
+    assert report_window.section("coverage").data["complete"] is True
     assert whea.outcome == "ok" and whea.section("decoded") is None
     selected = whea.section("records").data[0]
     assert "RawData" not in selected and "Properties" not in selected

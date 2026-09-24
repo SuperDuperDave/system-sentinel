@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.8.0] - 2026-09-24
+
+### Changed
+- Broad System WHEA and Kernel-WHEA report timelines now keep exact per-bucket totals and coverage but send sparse returned-bucket columns. System signature counts use compact bucket/signature pairs. Fixed-header severity totals include reports with unplaceable times and distinguish unreadable headers from readable unknown severity codes. System signature sample messages are limited to 1,024 UTF-16 characters with their original length; the exact record keeps the full text.
+- `whea_reports` omits its per-report reference list by default. Set `references=true` to retrieve every returned reference, including reports without a readable filing time. `storms` retains its existing opt-in reference list. The Hardware errors screen reads the compact timeline and asks `whea_window` for at most 500 previews in the selected stretch. The Record moment's nearby Kernel report list also uses an exact, bounded window. Previous previews remain visible while a selected stretch loads; exact record reads remain available from each preview.
+- Stack summaries read both the new sparse buckets and older saved object buckets. Capture manifests explain the Kernel timeline's scope. MCP text JSON is compact while the typed structured answer remains the same, reducing duplicate text bytes for large readings.
+
+### Compatibility and limits
+- Clients that read `buckets.active` must use `buckets.returned` and, for System signatures, `buckets.signature_pairs`; the bucket arithmetic is in [the API contract](docs/API.md). Saved older Stack items remain readable. `whea_reports.reports` now requires `references=true`; agents can instead ask `whea_window` for a selected exact interval and `whea_record` for complete retained fields. The Errors screen's separate preview query can answer at a different time from its timeline. Its 500-preview cap can leave older reports in a busy selected interval, with source reach and truncation stated. An unplaceable report remains available in opt-in references; if returned by an exact time-window query it can make that preview fail rather than imply the interval was empty.
+- The sparse response reduces transferred answer bytes, not the Windows query or bridge projection cost: System WHEA signature generation still receives full messages. High-cardinality signature lists can remain large. No report-time cluster proves when the underlying hardware error occurred.
+
 ## [1.7.0] - 2026-09-24
 
 ### Changed

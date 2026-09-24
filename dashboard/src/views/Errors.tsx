@@ -5,7 +5,7 @@ import { Glyph, OutcomeLine, clock, firstLine } from '../Outcome';
 import { Facts, Head, MomentLink, RowList, Section, Segmented, Tree, Value, ago, basisOf, part, shortDay } from '../Sections';
 import { useApp } from '../store';
 import { useReading } from '../useReading';
-import { KernelReports, type KernelReport, type ReportRange, type ReportReach, type ReportSource } from './KernelReports';
+import { KernelReports, reportsFromWindow, type KernelReport, type ReportRange, type ReportReach, type ReportSource } from './KernelReports';
 import styles from './Errors.module.css';
 
 /** The window counted into wall-clock buckets, idle ones included. */
@@ -18,14 +18,14 @@ interface TimelineBuckets {
   unplaced: number;
   totals: (number | null)[];
   unknown_buckets: number;
-  active: { index: number; start: string; total: number; complete: boolean }[];
+  returned?: { index: number[]; count: number[] };
+  active?: { index: number; start: string; total: number; complete: boolean }[];
 }
 
 interface Buckets extends TimelineBuckets {
   previous_session?: number;
   header_unreadable?: number;
   header_unreadable_reasons?: { no_payload: number; short_payload: number; invalid_header: number };
-  active: (TimelineBuckets['active'][number] & { signatures: Record<string, number>; previous_session?: number; header_unreadable?: number })[];
 }
 
 interface ReportBuckets extends TimelineBuckets {
@@ -72,7 +72,7 @@ interface Signature {
   first_seen: string;
   last_seen: string;
   event_ids: number[];
-  sample: { RecordId?: RecordId; TimeCreated?: string; Id?: number; LevelDisplayName?: string; Message?: string; previous_session?: boolean | null };
+  sample: { RecordId?: RecordId; TimeCreated?: string; Id?: number; LevelDisplayName?: string; Message?: string; MessageChars?: number; previous_session?: boolean | null };
 }
 
 /** One entry of the decoded section: the CPER structure inside a record, or why there is none. */
@@ -181,9 +181,13 @@ export function Errors() {
   const signatures = part<Signature[]>(storms.reading, 'signatures') ?? [];
   const reportBuckets = part<ReportBuckets>(reports.reading, 'buckets');
   const reportCoverage = part<ReportCoverage>(reports.reading, 'coverage')?.kernel_whea;
-  const reportRows = part<KernelReport[]>(reports.reading, 'reports') ?? [];
-  const reportSource = part<{ kernel_whea: ReportSource }>(reports.reading, 'collection')?.kernel_whea ?? null;
+  const reportCollection = part<{ window_end: string }>(reports.reading, 'collection');
   const selectedReportRange = reportSelection?.reading === reports.reading ? reportSelection.range : null;
+  const reportWindowEnd = reportCollection?.window_end ?? reportBuckets?.to;
+  const selectedEndMs = selectedReportRange ? Date.parse(selectedReportRange.to) : NaN;
+  const observedEndMs = reportWindowEnd ? Date.parse(reportWindowEnd) : NaN;
+  const selectedReportEnd = selectedReportRange && (!Number.isFinite(selectedEndMs) || !Number.isFinite(observedEndMs) || selectedEndMs <= observedEndMs)
+    ? selectedReportRange.to : reportWindowEnd;
   const emptyReportText = reportCoverage?.complete
     ? `No Kernel-WHEA reports recorded ${inWindow}`
     : reportCoverage?.covered_from == null
@@ -306,12 +310,12 @@ export function Errors() {
               <p className={`${styles.rates} readout`}>{reportBuckets.previous_session} returned report{reportBuckets.previous_session === 1 ? '' : 's'} marked previous session · {reportBuckets.header_unreadable} with unreadable headers · {reportBuckets.unknown_buckets} buckets with incomplete coverage</p>
               {reports.reading ? <>
                 <div className={styles.reportControls}>
-                  <button type="button" className={styles.exactRaw} aria-pressed={selectedReportRange === null} onClick={() => setReportSelection(null)}>All returned reports</button>
-                  {selectedReportRange ? <span className="readout">Selected: {shortDay.format(new Date(selectedReportRange.from))} {clock.format(new Date(selectedReportRange.from))}–{shortDay.format(new Date(selectedReportRange.to))} {clock.format(new Date(selectedReportRange.to))} · choose another above or show all</span> : <span className="readout">Choose a lit stretch above to narrow these reports in place</span>}
+                  <button type="button" className={styles.exactRaw} aria-pressed={selectedReportRange === null} onClick={() => setReportSelection(null)}>Whole visible window</button>
+                  {selectedReportRange ? <span className="readout">Selected: {shortDay.format(new Date(selectedReportRange.from))} {clock.format(new Date(selectedReportRange.from))}–{shortDay.format(new Date(selectedReportRange.to))} {clock.format(new Date(selectedReportRange.to))} · choose another above or open the whole window</span> : <span className="readout">Choose a lit stretch above to narrow these reports in place</span>}
                 </div>
-                <KernelReports reading={reports.reading} reports={reportRows} range={selectedReportRange}
-                  source={reportSource} reach={reportCoverage as ReportReach | null}
-                  inspect={(report) => <ReportDetail report={report} />} />
+                <KernelReportExplorer from={selectedReportRange?.from ?? reportBuckets.from}
+                  to={selectedReportEnd ?? reportBuckets.to}
+                  enabled={reportBuckets.total > 0} unplaced={reportBuckets.unplaced} />
               </> : null}
             </>
           ) : null}
@@ -374,6 +378,30 @@ export function Errors() {
       </Section>
     </section>
   );
+}
+
+function KernelReportExplorer({ from, to, enabled, unplaced }: { from: string; to: string; enabled: boolean; unplaced: number }) {
+  const taken = useReading('whea_window', { source: 'kernel_whea', since: from, before: to, order: 'newest', count: 500 }, enabled);
+  const [held, setHeld] = useState<Reading | null>(null);
+  useEffect(() => {
+    if (taken.reading) setHeld(observed(taken.reading) ? taken.reading : null);
+  }, [taken.reading]);
+  const stale = enabled && taken.state === 'taking' && taken.reading === null && held !== null;
+  const shown = enabled && observed(taken.reading) ? taken.reading : stale ? held : null;
+  const rows = reportsFromWindow(shown);
+  const source = part<ReportSource>(shown, 'collection');
+  const reach = part<ReportReach>(shown, 'coverage');
+  return <div className={styles.reportList}>
+    {enabled ? <OutcomeLine taken={taken} noun="report previews in this interval" singular="report preview in this interval"
+      emptyText={reach?.complete ? 'No Kernel-WHEA report was returned in this interval' : 'No Kernel-WHEA report was returned; coverage of this interval is not established'} /> : null}
+    {stale ? <p className={`${styles.reportListStatus} readout`} role="status">Reading this interval; the previous previews remain visible until it answers.</p> : null}
+    {unplaced > 0 ? <p className={`${styles.reportListStatus} readout`}>{unplaced} report{unplaced === 1 ? '' : 's'} in the broad answer had no readable filing time. Ask the API for whea_reports with references=true to see those references.</p> : null}
+    {shown && rows.length ? <>
+      {!stale ? <AddToStack item={{ kind: 'reading', envelope: shown, title: `Kernel-WHEA previews ${from} to ${to}` }} label="Stack these previews" /> : null}
+      <KernelReports reading={shown} reports={rows} range={null} source={source} reach={reach}
+        inspect={(report) => <ReportDetail report={report} />} />
+    </> : null}
+  </div>;
 }
 
 function WheaSources({ collection, coverage }: { collection: WheaCollection; coverage: WheaCoverage | null }) {
@@ -441,7 +469,9 @@ function Trace({ buckets, source = 'WHEA-Logger records', interactive = true, pi
   }, [picking]);
   const unknownPattern = interactive ? 'stormUnknown' : 'reportUnknown';
   const totals = buckets.totals ?? [];
-  const active = new Map(buckets.active.map((bucket) => [bucket.index, bucket.total]));
+  const active = new Map(buckets.returned
+    ? buckets.returned.index.map((index, place) => [index, buckets.returned!.count[place]] as const)
+    : (buckets.active ?? []).map((bucket) => [bucket.index, bucket.total] as const));
   const width = 720;
   const height = 72;
   const quarters = 4;
@@ -633,7 +663,8 @@ function SignatureDetail({ signature }: { signature: Signature }) {
       {signature.sample?.Message ? (
         <>
           <p className={`${styles.sampleLabel} label`}>The last record that matched · raw</p>
-          <p className={styles.sample}>{signature.sample.Message}</p>
+          <p className={styles.sample}>{signature.sample.Message}{signature.sample.MessageChars !== undefined &&
+            signature.sample.MessageChars > signature.sample.Message.length ? '… The exact System record has the full message.' : ''}</p>
         </>
       ) : null}
     </>

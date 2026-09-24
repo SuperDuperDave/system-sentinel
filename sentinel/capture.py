@@ -82,6 +82,8 @@ async def create(bridge: Bridge, stack: Stack, prompts: Prompts, redactor: Redac
                 entry = {"path": member, "reading": name, "outcome": body["outcome"], "took_ms": body["took_ms"], "bytes": _write(archive, member, json.dumps(json_safe_integers(body), ensure_ascii=False, indent=1))}
                 if name == "whea":
                     entry["scope"] = "bounded newest-record preview; exact WHEA fields, full CPER bytes and decoded detail require whea_record and are not in this capture"
+                elif name == "whea_reports":
+                    entry["scope"] = "compact Kernel-WHEA report-time timeline; per-report references require references=true in a new reading, bounded previews require whea_window, and exact fields require whea_record"
                 members.append(entry)
 
             try:

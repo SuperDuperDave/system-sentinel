@@ -109,7 +109,11 @@ BASIS = (
     "record. Top-level PreviousError and unreadable-header counts include returned reports whose "
     "time could not be placed; active bucket counts require a readable time. The separate "
     "whea_record reading retrieves one retained event by this channel's log-local RecordId, "
-    "with CPER bytes only on explicit unredacted request. The final bucket is observed only "
+    "with CPER bytes only on explicit unredacted request. Per-report references require references=true; "
+    "whea_window returns bounded previews for a selected exact interval. Sparse returned columns align "
+    "index, count, previous_session and header_unreadable for buckets with placed reports; derive a "
+    "bucket start from from + index * bucket_seconds and completeness from totals[index] not being null. "
+    "CPER-header severity totals count returned reports, including unplaced ones, not error occurrence times; unknown and unreadable stay distinct. The final bucket is observed only "
     "through collection.window_end, even when buckets.to reaches the next bucket boundary."
 )
 REPORT_COVERAGE_BASIS = (
@@ -165,7 +169,8 @@ def take_reports(bridge: Bridge, params: dict[str, Any]) -> Reading:
         if host_window and source["outcome"] in ("ok", "empty"):
             reports.extend(_reports(rows))
             buckets = _buckets(reports, host_window, reach)
-            sections = [Section("reports", "derived", reports, basis=BASIS), Section("buckets", "derived", buckets, basis=BASIS)]
+            sections = ([Section("reports", "derived", reports, basis=BASIS)] if params.get("references") is True else [])
+            sections.append(Section("buckets", "derived", buckets, basis=BASIS))
         else:
             sections = []
         return [*sections, Section("collection", "raw", {"window_start": start, "window_end": end, "queried_at": queried_at, "kernel_whea": source}),
@@ -264,8 +269,12 @@ def _buckets(reports: list[dict[str, Any]], window: Window, reach: dict[str, Any
     counts = [0] * window.count
     previous = [0] * window.count
     unknown_header = [0] * window.count
+    severity = {"fatal": 0, "recoverable": 0, "corrected": 0, "informational": 0, "unknown": 0, "unreadable": 0}
     unplaced = 0
     for report in reports:
+        header = report.get("header")
+        level = header["severity"] if header is not None else "unreadable"
+        severity[level if level in severity else "unknown"] += 1
         at = stamp_key(report.get("reported_at"))
         index = window.index(at[0].timestamp()) if at else None
         if index is None:
@@ -283,14 +292,16 @@ def _buckets(reports: list[dict[str, Any]], window: Window, reach: dict[str, Any
         start = stamp_key(_stamp(window.start + index * window.bucket_seconds))
         covered = cutoff is not None and start is not None and (start > cutoff or inclusive and start == cutoff)
         totals.append(count if covered and not unplaced else None)
+    active = [i for i, count in enumerate(counts) if count]
     return {"from": _stamp(window.start), "to": _stamp(window.end), "bucket_seconds": window.bucket_seconds,
             "bucket_count": window.count, "total": sum(counts), "unplaced": unplaced, "totals": totals,
             "unknown_buckets": sum(value is None for value in totals),
             "previous_session": sum(report.get("header") is not None and report["header"]["previous_session"] for report in reports),
             "header_unreadable": sum(report.get("header") is None for report in reports),
-            "active": [{"index": i, "start": _stamp(window.start + i * window.bucket_seconds), "total": count,
-                        "complete": totals[i] is not None, "previous_session": previous[i],
-                        "header_unreadable": unknown_header[i]} for i, count in enumerate(counts) if count]}
+            "severity": severity,
+            "returned": {"index": active, "count": [counts[i] for i in active],
+                         "previous_session": [previous[i] for i in active],
+                         "header_unreadable": [unknown_header[i] for i in active]}}
 
 
 register(Spec(
@@ -299,5 +310,6 @@ register(Spec(
     classes=("raw", "derived"), take=take_reports,
     params=(Param("hours", "int", 24, "Hours preceding before, or the query time when before is empty; the actual start is bucket-aligned.", minimum=1, maximum=MAX_HOURS),
             Param("bucket_seconds", "int", 60, "The width of one report-time bucket.", minimum=1),
-            Param("before", "str", "", "Exclusive report-time end with Z or an offset; empty uses the query time.")),
+            Param("before", "str", "", "Exclusive report-time end with Z or an offset; empty uses the query time."),
+            Param("references", "bool", False, "Include one bounded reference per returned report. Default false keeps broad timelines compact; use whea_window for a selected interval.")),
 ))

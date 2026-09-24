@@ -7,7 +7,7 @@ import { useApp } from '../store';
 import { Taken, useReading } from '../useReading';
 import { FaultDetail, type Fault } from './Crashes';
 import { ReportDetail } from './Errors';
-import { KernelReports, type KernelReport, type ReportReach, type ReportSource } from './KernelReports';
+import { KernelReports, reportsFromWindow, type ReportReach, type ReportSource } from './KernelReports';
 import styles from './Record.module.css';
 
 type Levels = 'errors' | 'all';
@@ -208,15 +208,16 @@ function FaultWindow({ moment }: { moment: string }) {
 /** The report channel can retain evidence after the System log has rotated away. */
 function KernelReportWindow({ moment }: { moment: string }) {
   const [open, setOpen] = useState(false);
+  const since = new Date(Date.parse(moment) - 60 * 60 * 1000).toISOString();
   const before = new Date(Date.parse(moment) + 60 * 60 * 1000).toISOString();
-  const taken = useReading('whea_reports', { before, hours: 2, bucket_seconds: 60 }, open);
-  const reports = part<KernelReport[]>(taken.reading, 'reports') ?? [];
-  const collection = part<{ window_start: string; window_end: string; queried_at: string; kernel_whea: ReportSource }>(taken.reading, 'collection');
-  const reach = part<{ kernel_whea: ReportReach }>(taken.reading, 'coverage')?.kernel_whea ?? null;
+  const taken = useReading('whea_window', { source: 'kernel_whea', since, before, order: 'newest', count: 500 }, open);
+  const reports = reportsFromWindow(taken.reading);
+  const collection = part<ReportSource & { window_start: string; window_end: string; queried_at: string }>(taken.reading, 'collection');
+  const reach = part<ReportReach>(taken.reading, 'coverage');
   const bounds = collection?.window_start && collection.window_end
     ? `${WINDOW_STAMP.format(new Date(collection.window_start))} to ${WINDOW_STAMP.format(new Date(collection.window_end))}` : null;
   const futureEnd = collection?.queried_at ? Date.parse(before) > Date.parse(collection.queried_at) : false;
-  const reachText = nearbyReachText(reach ? { ...reach, covered_until: reach.covered_until ?? null } : null, collection?.kernel_whea ?? null, collection?.window_end ?? before, 'Kernel-WHEA channel');
+  const reachText = nearbyReachText(reach ? { ...reach, covered_until: reach.covered_until ?? null } : null, collection ?? null, collection?.window_end ?? before, 'Kernel-WHEA channel');
   const answered = taken.reading?.outcome === 'ok' || taken.reading?.outcome === 'empty';
 
   return <section className={styles.nearby} aria-labelledby="nearby-kernel-reports-title">
@@ -235,7 +236,7 @@ function KernelReportWindow({ moment }: { moment: string }) {
       {answered && bounds ? <p className={`${styles.nearbyReach} readout`}>{reachText} · queried {bounds}{futureEnd ? ' · requested end is after the machine’s query time' : ''}</p> : null}
       {taken.reading && observed(taken.reading) ? <AddToStack item={{ kind: 'reading', envelope: taken.reading, title: `Kernel-WHEA reports near ${moment}` }} label="Stack this reading" /> : null}
       {taken.reading && observed(taken.reading) && reports.length ? <KernelReports
-        reading={taken.reading} reports={reports} range={null} source={collection?.kernel_whea ?? null} reach={reach}
+        reading={taken.reading} reports={reports} range={null} source={collection ?? null} reach={reach}
         inspect={(report) => <ReportDetail report={report} showMomentLink={false} />}
       /> : null}
     </div>

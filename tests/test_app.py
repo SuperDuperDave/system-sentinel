@@ -1,5 +1,7 @@
 """The boundary: the token guards every /api and /mcp route; readings arrive redacted unless asked by name."""
 
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -216,7 +218,7 @@ def test_mcp_lists_the_catalog_and_calls_a_reading(client: TestClient):
     r = client.post("/mcp", json={"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "events", "arguments": {"count": 1}}}, headers=MCP_HEADERS)
     assert r.status_code == 200, r.text
     text = r.json()["result"]["content"][0]["text"]
-    assert '"outcome": "ok"' in text and "<host>" in text and "TESTBOX" not in text
+    assert json.loads(text)["outcome"] == "ok" and "<host>" in text and "TESTBOX" not in text
 
 
 def test_the_cookie_is_derived_from_the_token_not_the_token(client: TestClient):

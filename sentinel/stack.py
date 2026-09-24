@@ -22,7 +22,7 @@ from collections import Counter
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -549,13 +549,13 @@ def _item_lines(position: int, item: dict[str, Any]) -> list[str]:
     elif envelope.get("reading") in LOG_READINGS and records is not None and (item.get("verbosity") == "summary" or item.get("ids") is not None):
         lines += _log_handoff(envelope, records, selected=item.get("ids") is not None, compact=item.get("verbosity") == "summary")
     elif envelope.get("reading") == "storms" and item.get("verbosity") == "summary":
-        lines += ["Bounded storm summary. Set this item to full for its stored buckets and signature samples; take `storms` again for a fresh observation.", ""]
+        lines += ["Bounded storm summary. Full shows stored buckets and signatures; `storms(references=true)` in a narrow window returns report references.", ""]
         params = envelope.get("params")
         if isinstance(params, dict) and isinstance(params.get("before"), str) and params["before"].strip():
             lines += ["Historical System WHEA-Logger filing-time window; `collection.window_end` is its actual exclusive end. No live burst, acceleration or quiet status is inferred by design. Check `buckets.previous_session` and `buckets.header_unreadable` when present; reports filed after restart may describe earlier errors.", ""]
         lines += _json_block(_storm_handoff_sections(envelope))
     elif envelope.get("reading") == "whea_reports" and item.get("verbosity") == "summary":
-        lines += ["Bounded Kernel-WHEA report-time summary. These are report times, not error occurrence times; PreviousError marks an earlier Windows session. Set this item to full for every stored report and bucket, or take `whea_reports` again for a fresh observation.", ""]
+        lines += ["Bounded Kernel-WHEA report-time summary. These are report times, not error occurrence times; PreviousError marks an earlier Windows session. Set this item to full for stored buckets and any requested references; take `whea_window` for a selected interval or `whea_reports` with references=true for every returned reference.", ""]
         lines += _json_block(_report_handoff_sections(envelope))
     elif selected_signals is not None:
         if item.get("verbosity") == "summary":
@@ -968,6 +968,76 @@ def _whea_handoff_sections(envelope: dict[str, Any], records: list[dict[str, Any
     return output
 
 
+def _bucket_rows(data: dict[str, Any], signatures: list[Any] | None = None) -> tuple[list[dict[str, Any]], bool]:
+    """Read both stored object buckets and current sparse columns for bounded handoffs."""
+    old = data.get("active")
+    if isinstance(old, list):
+        return ([row for row in old if isinstance(row, dict) and type(row.get("index")) is int
+                 and row["index"] >= 0 and type(row.get("total")) is int and row["total"] >= 0], True)
+    columns = data.get("returned")
+    totals = data.get("totals")
+    bucket_count = data.get("bucket_count")
+    if (not isinstance(columns, dict) or not isinstance(totals, list)
+            or type(bucket_count) is not int or len(totals) != bucket_count
+            or any(value is not None and (type(value) is not int or value < 0) for value in totals)):
+        return [], False
+    indices, counts = columns.get("index"), columns.get("count")
+    previous, unreadable = columns.get("previous_session"), columns.get("header_unreadable")
+    if not all(isinstance(array, list) for array in (indices, counts, previous, unreadable)):
+        return [], False
+    assert isinstance(indices, list) and isinstance(counts, list)
+    assert isinstance(previous, list) and isinstance(unreadable, list)
+    if not (len(indices) == len(counts) == len(previous) == len(unreadable)):
+        return [], False
+    start, seconds = data.get("from"), data.get("bucket_seconds")
+    if not isinstance(start, str) or type(seconds) is not int or seconds < 1:
+        return [], False
+    try:
+        origin = datetime.fromisoformat(start.replace("Z", "+00:00"))
+        if origin.utcoffset() != timedelta(0):
+            return [], False
+        rows: list[dict[str, Any]] = []
+        for index, count, prior, missing in zip(indices, counts, previous, unreadable, strict=True):
+            if (type(index) is not int or not 0 <= index < len(totals) or rows and index <= rows[-1]["index"]
+                    or any(type(value) is not int or value < 0 for value in (count, prior, missing))
+                    or count == 0 or prior + missing > count
+                    or totals[index] is not None and totals[index] != count):
+                return [], False
+            rows.append({"index": index, "start": (origin + timedelta(seconds=index * seconds)).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+                         "total": count, "complete": totals[index] is not None,
+                         "previous_session": prior, "header_unreadable": missing})
+    except (ValueError, OverflowError):
+        return [], False
+    pairs = data.get("signature_pairs")
+    if signatures is not None and pairs is None:
+        return [], False
+    if pairs is not None:
+        if not isinstance(pairs, dict) or signatures is None:
+            return [], False
+        pair_indices, pair_signatures, pair_counts = pairs.get("index"), pairs.get("signature"), pairs.get("count")
+        if not all(isinstance(array, list) for array in (pair_indices, pair_signatures, pair_counts)):
+            return [], False
+        assert isinstance(pair_indices, list) and isinstance(pair_signatures, list) and isinstance(pair_counts, list)
+        if not (len(pair_indices) == len(pair_signatures) == len(pair_counts)):
+            return [], False
+        by_index = {row["index"]: row for row in rows}
+        pair_totals = {row["index"]: 0 for row in rows}
+        for index, sig_index, count in zip(pair_indices, pair_signatures, pair_counts, strict=True):
+            if (type(index) is not int or index not in by_index or type(sig_index) is not int
+                    or not 0 <= sig_index < len(signatures) or type(count) is not int or count < 1
+                    or not isinstance(signatures[sig_index], dict) or not isinstance(signatures[sig_index].get("id"), str)):
+                return [], False
+            signature_counts = by_index[index].setdefault("signatures", {})
+            sig_id = signatures[sig_index]["id"]
+            if sig_id in signature_counts:
+                return [], False
+            signature_counts[sig_id] = count
+            pair_totals[index] += count
+        if any(pair_totals[row["index"]] != row["total"] for row in rows):
+            return [], False
+    return rows, True
+
+
 def _storm_handoff_sections(envelope: dict[str, Any]) -> list[dict[str, Any]]:
     """Carry a bounded storm lead without copying every minute or raw signature sample."""
     named = {
@@ -980,20 +1050,19 @@ def _storm_handoff_sections(envelope: dict[str, Any]) -> list[dict[str, Any]]:
     output = [named[name] for name in ("status", "coverage", "collection") if name in named]
     if output and output[0].get("name") == "status":
         status_data = output[0].get("data")
-        header_lead = ("The separate not_marked_burst uses fixed CPER headers and can remain unknown; an unmarked report does not date an error. "
+        header_lead = ("The fixed-header not_marked_burst can be unknown; an unmarked report does not date an error. "
                        if isinstance(status_data, dict) and "not_marked_burst" in status_data else
                        "This saved reading predates the fixed-header lead. ")
         output[0] = {**output[0], "basis": (
-            "Live System filing-time traffic: a bucket at threshold is a burst; "
-            "acceleration and quiet need coverage; the current bucket ends at query time. Quiet does not clear Kernel-WHEA/Errors. "
+            "Live System report traffic: a threshold bucket is a burst; acceleration and quiet need coverage. "
+            "The current bucket ends at query time. Quiet does not clear Kernel-WHEA/Errors. "
             + header_lead +
-            "Full rule and evidence remain in the stored item."), "projection": "bounded summary"}
+            "Full rule is stored."), "projection": "bounded summary"}
     for index, section in enumerate(output):
         if section.get("name") == "coverage":
             output[index] = {**section, "basis": (
-                "System-log retained reach and exact query bounds. covered_from excludes unobserved older time; "
-                "covered_until is the observed exclusive end. complete needs an answered, uncapped query and retained "
-                "pre-window history in an enabled circular log; future time cannot be complete. Full rule remains in the stored item."),
+                "System-log reach: covered_from excludes older unknown time; covered_until is exclusive. "
+                "Complete needs an answered uncapped query and pre-window history in an enabled circular log; future time is incomplete."),
                 "projection": "bounded summary"}
     buckets = named.get("buckets")
     if isinstance(buckets, dict) and isinstance(buckets.get("data"), dict):
@@ -1005,13 +1074,10 @@ def _storm_handoff_sections(envelope: dict[str, Any]) -> list[dict[str, Any]]:
             and all(value is None or type(value) is int and value >= 0 for value in raw_totals)
         )
         totals = raw_totals if totals_valid else []
-        active_valid = isinstance(data.get("active"), list)
-        active_rows = data["active"] if active_valid else []
-        active = [
-            row for row in active_rows
-            if isinstance(row, dict) and type(row.get("index")) is int and row["index"] >= 0
-            and type(row.get("total")) is int and row["total"] >= 0
-        ]
+        signature_data = named.get("signatures")
+        signature_rows = signature_data.get("data") if isinstance(signature_data, dict) else None
+        active, active_valid = _bucket_rows(data, signature_rows if isinstance(signature_rows, list) else None)
+        active_rows = data.get("active") if isinstance(data.get("active"), list) else active
         active.sort(key=lambda row: row["index"])
         peak = sorted(active, key=lambda row: (-row["total"], -row["index"]))[:5]
         recent = active[-5:]
@@ -1039,6 +1105,8 @@ def _storm_handoff_sections(envelope: dict[str, Any]) -> list[dict[str, Any]]:
             else:
                 previous_unknown = False
         summary = {key: data.get(key) for key in ("from", "to", "bucket_seconds", "bucket_count", "total", "unplaced", "unknown_buckets", "previous_session", "header_unreadable", "header_unreadable_reasons")}
+        if "severity" in data:
+            summary["severity"] = data["severity"]
         summary.update(
             covered_buckets=sum(value is not None for value in totals) if totals_valid else None,
             active_buckets=len(active) if active_valid else None,
@@ -1051,11 +1119,11 @@ def _storm_handoff_sections(envelope: dict[str, Any]) -> list[dict[str, Any]]:
             last_unknown_index=last_unknown,
         )
         basis = (
-            "Five highest and five newest active buckets; other_active_buckets counts omissions. "
-            "Unknown runs and indices refer to null totals from `from`; malformed arrays yield null derived fields. "
-            + ("Top-level header counts include unplaced reports. PreviousError does not date an error. "
-               if type(data.get("previous_session")) is int else "Fixed-header counts are absent in this older saved reading. ")
-            + "Full arrays and basis remain in the stored item."
+            "Five highest and five newest returned buckets; other_active_buckets counts omissions. "
+            "Null totals mark unknown coverage; malformed totals leave coverage summaries null. "
+            + ("Header totals include unplaced reports. PreviousError does not date an error. "
+               if type(data.get("previous_session")) is int else "Older saved reading: header counts unavailable. ")
+            + "Full evidence is in the stored item."
         )
         output.append({**buckets, "data": summary, "basis": basis, "projection": "bounded summary"})
     signatures = named.get("signatures")
@@ -1110,19 +1178,20 @@ def _report_handoff_sections(envelope: dict[str, Any]) -> list[dict[str, Any]]:
         count, totals = data.get("bucket_count"), data.get("totals")
         valid_totals = (type(count) is int and isinstance(totals, list) and len(totals) == count
                         and all(value is None or type(value) is int and value >= 0 for value in totals))
-        rows = data.get("active") if isinstance(data.get("active"), list) else []
-        active = [row for row in rows if isinstance(row, dict) and type(row.get("index")) is int
-                  and type(row.get("total")) is int and row["index"] >= 0 and row["total"] >= 0]
+        active, active_valid = _bucket_rows(data)
         active.sort(key=lambda row: row["index"])
         peak = sorted(active, key=lambda row: (-row["total"], -row["index"]))[:5]
         highlighted = {row["index"]: row for row in [*peak, *active[-5:]]}
         sample = [{key: row.get(key) for key in ("index", "start", "total", "complete", "previous_session", "header_unreadable")}
                   for row in sorted(highlighted.values(), key=lambda row: row["index"])]
         summary = {key: data.get(key) for key in ("from", "to", "bucket_seconds", "bucket_count", "total", "unplaced", "unknown_buckets", "previous_session", "header_unreadable")}
+        if "severity" in data:
+            summary["severity"] = data["severity"]
         summary.update(covered_buckets=sum(value is not None for value in totals) if valid_totals else None,
-                       active_buckets=len(active), highlighted_active=sample, other_active_buckets=len(active) - len(sample))
+                       active_buckets=len(active) if active_valid else None, highlighted_active=sample,
+                       other_active_buckets=len(active) - len(sample) if active_valid else None)
         output.append({**buckets, "data": summary, "projection": "bounded summary",
-                       "basis": "Five highest report counts and five most recent active buckets, with their PreviousError and unreadable-header counts. Full report and bucket arrays remain in the stored reading. Times are report times, not error occurrence times."})
+                       "basis": "Five highest report counts and five most recent active buckets, with their PreviousError and unreadable-header counts. Full bucket columns and any requested report references remain in the stored reading. Times are report times, not error occurrence times."})
     reports = named.get("reports")
     if isinstance(reports, dict) and isinstance(reports.get("data"), list):
         rows = [row for row in reports["data"] if isinstance(row, dict)]

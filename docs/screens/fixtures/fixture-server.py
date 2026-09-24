@@ -301,6 +301,29 @@ def answer_whea_record(script: str) -> BridgeResult:
     return BridgeResult("ok", items=[{"source": source}], took_ms=22)
 
 
+def answer_whea_window(script: str) -> BridgeResult:
+    """A selected, count-capped preview from the same retained synthetic channel rows."""
+    name = re.search(r"source = Read-WheaSource '(system|kernel_whea)'", script).group(1)
+    since = re.search(r"\$from = \[datetimeoffset\]::Parse\('([^']+)'", script).group(1)
+    before = re.search(r"\$requestedUntil = \[datetimeoffset\]::Parse\('([^']+)'", script).group(1)
+    cap = int(re.search(r"source = Read-WheaSource '[^']+' '[^']+' \$select (\d+)", script).group(1))
+    queried = _powershell_stamp(time.time())
+    observed = min(_parse_stamp(before), _parse_stamp(queried))
+    rows = whea_records(WHEA_ANCHOR) if name == "system" else kernel_whea_records(WHEA_ANCHOR)
+    matching = [row for row in rows if _parse_stamp(since) <= _parse_stamp(row["TimeCreated"]) < observed]
+    selected = [_whea_preview(row) for row in matching[:cap]]
+    log = "System" if name == "system" else "Microsoft-Windows-Kernel-WHEA/Errors"
+    source = {
+        "name": name, "log": log, "outcome": "ok" if selected else "empty", "error": None,
+        "returned": len(selected), "limit": cap, "truncated": len(matching) > cap, "stopped": None,
+        "records": selected, "probe_time": matching[cap]["TimeCreated"] if len(matching) > cap else None,
+        "log_enabled": True, "log_mode": "Circular", "log_state": "ok", "log_error": None,
+        "log_oldest": _powershell_stamp(_parse_stamp(since) - 86400), "oldest_state": "ok", "oldest_error": None,
+    }
+    return BridgeResult("ok", items=[{"queried_at": queried, "window_start": since, "window_end": before,
+                                       "observed_end": _powershell_stamp(observed), "source": source}], took_ms=24)
+
+
 def answer_whea_reports(script: str) -> BridgeResult:
     """The bounded report-time projection, including a report near the older restart frame."""
     now = time.time()
@@ -351,6 +374,8 @@ class FixtureBridge:
             return answer_log_records(script)
         if "Read-WheaSource" in script and "sources = @(" in script:
             return answer_whea(script)
+        if "Read-WheaSource" in script and "-windowed -fromTicks" in script:
+            return answer_whea_window(script)
         if "Read-WheaSource" in script and "source = Read-WheaSource" in script:
             return answer_whea_record(script)
         if "window_start = $startIso" in script and "Provider[@Name='Microsoft-Windows-Kernel-WHEA']" in script:

@@ -424,7 +424,7 @@ def _answer(payload: Any) -> types.CallToolResult:
     else:
         # Structured output is a JSON object before 2026-07-28, so anything else travels as text alone.
         payload = json_safe_integers(payload)
-        text, data = json.dumps(payload, indent=1), payload if isinstance(payload, dict) else None
+        text, data = json.dumps(payload, separators=(",", ":")), payload if isinstance(payload, dict) else None
     return types.CallToolResult(content=[types.TextContent(type="text", text=text)], structured_content=data)
 
 

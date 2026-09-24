@@ -1,14 +1,33 @@
 import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { type Reading } from '../api';
+import { type EventRecord, type Reading, type RecordId } from '../api';
 import { Glyph, clock } from '../Outcome';
-import { RowList, ago, byDay } from '../Sections';
+import { RowList, ago, byDay, part } from '../Sections';
 import styles from './Errors.module.css';
 
 export interface KernelReport {
-  record_id: number;
+  record_id: RecordId;
   reported_at: string | null;
   header: { severity: string; previous_session: boolean } | null;
   header_error: string | null;
+}
+
+interface WindowIdentity {
+  RecordId: RecordId;
+  cper: { severity: string; previous_session: boolean } | null;
+  error: string | null;
+}
+
+/** A bounded WHEA window preview has the same exact-record door as a report reference. */
+export function reportsFromWindow(reading: Reading | null): KernelReport[] {
+  const rows = part<EventRecord[]>(reading, 'records') ?? [];
+  const identities = part<WindowIdentity[]>(reading, 'identity') ?? [];
+  const byId = new Map(identities.map((identity) => [String(identity.RecordId), identity]));
+  return rows.map((row) => {
+    const identity = byId.get(String(row.RecordId));
+    return { record_id: row.RecordId, reported_at: row.TimeCreated,
+      header: identity?.cper ? { severity: identity.cper.severity, previous_session: identity.cper.previous_session } : null,
+      header_error: identity?.error ?? null };
+  }).sort((a, b) => (b.reported_at ?? '').localeCompare(a.reported_at ?? '') || Number(b.record_id) - Number(a.record_id));
 }
 
 export interface ReportRange { from: string; to: string }
@@ -38,7 +57,7 @@ function marker(severity: string | undefined): 'critical' | 'error' | 'warning' 
   return severity === 'fatal' ? 'critical' : severity === 'recoverable' ? 'error' : severity === 'corrected' ? 'warning' : severity === 'informational' ? 'info' : null;
 }
 
-/** The report-time references already collected by whea_reports, with one exact read on demand. */
+/** The selected report-time previews, with one exact read on demand. */
 export function KernelReports({ reading, reports, range, source, reach, inspect }: {
   reading: Reading;
   reports: KernelReport[];

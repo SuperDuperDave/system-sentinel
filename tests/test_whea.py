@@ -730,9 +730,49 @@ def test_every_wall_clock_bucket_is_counted_including_the_idle_ones():
     assert buckets.cls == "derived" and buckets.basis
     assert len(buckets.data["totals"]) == buckets.data["bucket_count"] == 1440 and buckets.data["bucket_seconds"] == 60
     assert buckets.data["total"] == 40 == sum(buckets.data["totals"])
-    assert len(buckets.data["active"]) == 29  # the other 1411 minutes are idle and counted as zero
-    assert [b["total"] for b in buckets.data["active"]] == [t for t in buckets.data["totals"] if t]
-    assert buckets.data["active"][-1]["start"] < buckets.data["to"]
+    returned = buckets.data["returned"]
+    assert len(returned["index"]) == 29  # the other 1411 minutes are idle and counted as zero
+    assert returned["count"] == [t for t in buckets.data["totals"] if t]
+    assert returned["index"][-1] < buckets.data["bucket_count"]
+    assert sum(buckets.data["severity"].values()) == reading.count
+    pairs = buckets.data["signature_pairs"]
+    signatures = reading.section("signatures").data
+    assert sum(pairs["count"]) == buckets.data["total"]
+    assert {signatures[index]["id"] for index in pairs["signature"]} == {row["id"] for row in signatures}
+    for index, count in zip(pairs["index"], pairs["count"], strict=True):
+        assert index in returned["index"] and 0 < count <= returned["count"][returned["index"].index(index)]
+
+
+@pytest.mark.parametrize("many_signatures", [False, True])
+def test_busy_storm_bucket_answer_is_smaller_even_when_signatures_are_distinct(many_signatures: bool):
+    start = int(datetime(2026, 9, 1, tzinfo=UTC).timestamp())
+    window = whea.Window(start, 60, 2000)
+    header = cper(1)[:256]
+    records = [{"RecordId": i + 1, "Id": 18, "TimeCreated": whea._stamp(start + i * 60 + 30),
+                "Message": f"Memory Error Bank: {i if many_signatures else 5}", "HeaderHex": header,
+                "PayloadBytes": 200, "LevelDisplayName": "Error"} for i in range(window.count)]
+    sections = {section.name: section.data for section in whea.compose(
+        records, window, {"burst_threshold": 5, "accel_threshold": 2.0},
+        {"covered_from": whea._stamp(start - 60), "covered_from_inclusive": True},
+    )}
+    compact = {"buckets": sections["buckets"], "signatures": sections["signatures"]}
+    legacy = json.loads(json.dumps(compact))
+    buckets = legacy["buckets"]
+    returned, pairs = buckets.pop("returned"), buckets.pop("signature_pairs")
+    buckets.pop("severity")
+    per_index: dict[int, dict[str, int]] = {}
+    for index, signature_index, count in zip(pairs["index"], pairs["signature"], pairs["count"], strict=True):
+        per_index.setdefault(index, {})[legacy["signatures"][signature_index]["id"]] = count
+    buckets["active"] = [{"index": index, "start": whea._stamp(start + index * 60),
+                           "total": count, "complete": buckets["totals"][index] is not None,
+                           "previous_session": prior, "header_unreadable": missing,
+                           "signatures": per_index[index]}
+                          for index, count, prior, missing in zip(returned["index"], returned["count"],
+                                                                  returned["previous_session"], returned["header_unreadable"], strict=True)]
+    def encode(value: Any) -> int:
+        return len(json.dumps(value, separators=(",", ":")))
+
+    assert encode(compact) < encode(legacy) * (0.9 if many_signatures else 0.25)
 
 
 def test_records_group_into_signatures_ranked_by_how_often_they_recur():
@@ -827,7 +867,7 @@ def test_report_traffic_and_not_marked_burst_remain_separate(kinds, composition,
     assert status["not_marked_peak"] == {"at_least": composition[1], "at_most": at_most}
     assert status["not_marked_burst"] is classified
     assert buckets["previous_session"] == composition[0] and buckets["header_unreadable"] == composition[2]
-    assert buckets["active"][-1]["previous_session"] == composition[0]
+    assert buckets["returned"]["previous_session"][-1] == composition[0]
     assert sum(signature["previous_session"] for signature in reading.section("signatures").data) == composition[0]
     assert all(signature["sample"]["previous_session"] is (True if kinds[-1] == "previous" else None if kinds[-1] == "no_payload" else False)
                for signature in reading.section("signatures").data)
@@ -849,8 +889,9 @@ def test_storm_header_failures_keep_returned_reports_and_explain_unknown_flags()
     buckets = reading.section("buckets").data
     assert reading.count == 4 and buckets["total"] == 3 and buckets["unplaced"] == 1
     assert buckets["previous_session"] == 1 and buckets["header_unreadable"] == 3
+    assert buckets["severity"]["unreadable"] == buckets["header_unreadable"]
     assert buckets["header_unreadable_reasons"] == {"no_payload": 1, "short_payload": 1, "invalid_header": 1}
-    assert buckets["active"][-1]["previous_session"] == 1 and buckets["active"][-1]["header_unreadable"] == 2
+    assert buckets["returned"]["previous_session"][-1] == 1 and buckets["returned"]["header_unreadable"][-1] == 2
     assert reading.section("status").data["not_marked_burst"] is None
     assert any("3 returned System reports have no readable fixed CPER header" in warning for warning in reading.warnings)
     assert "HeaderHex" not in json.dumps(reading.to_dict()["sections"])
@@ -867,7 +908,7 @@ def test_historical_storm_keeps_fixed_header_evidence_without_live_classificatio
                      oldest=_powershell_stamp(anchor - 2 * 86400), references=True)
     assert reading.section("status") is None
     assert reading.section("buckets").data["previous_session"] == 1
-    assert reading.section("buckets").data["active"][-1]["previous_session"] == 1
+    assert reading.section("buckets").data["returned"]["previous_session"][-1] == 1
     assert reading.section("signatures").data[0]["sample"]["previous_session"] is True
     assert reading.section("reports").data[0]["header"]["previous_session"] is True
 
@@ -929,7 +970,7 @@ def test_an_empty_window_is_a_finding_with_the_buckets_still_there():
     reading = storms([], outcome="empty")
     assert reading.outcome == "empty" and reading.count == 0
     buckets = reading.section("buckets").data
-    assert len(buckets["totals"]) == 1440 and buckets["total"] == 0 and buckets["active"] == []
+    assert len(buckets["totals"]) == 1440 and buckets["total"] == 0 and buckets["returned"]["index"] == []
     assert reading.section("signatures").data == []
     status = reading.section("status").data
     assert status["state"] == "quiet" and status["reason"] == "the window holds no WHEA-Logger records"

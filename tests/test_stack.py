@@ -337,6 +337,7 @@ def test_historical_storm_handoff_preserves_anchor_and_coverage_without_live_urg
 
 
 def test_old_saved_storm_handoff_keeps_missing_header_facts_unknown():
+    from sentinel.stack import _bucket_rows
     from tests.test_whea import load, storms
 
     reading = storms(load(), references=True).to_dict()
@@ -347,6 +348,12 @@ def test_old_saved_storm_handoff_keeps_missing_header_facts_unknown():
             for key in ("recent_composition", "not_marked_peak", "not_marked_burst"):
                 data.pop(key, None)
         elif section["name"] == "buckets":
+            signatures = next(item["data"] for item in reading["sections"] if item["name"] == "signatures")
+            old_rows, valid = _bucket_rows(data, signatures)
+            assert valid
+            data["active"] = old_rows
+            data.pop("returned")
+            data.pop("signature_pairs")
             for key in ("previous_session", "header_unreadable", "header_unreadable_reasons"):
                 data.pop(key, None)
             for row in data["active"]:
@@ -361,6 +368,46 @@ def test_old_saved_storm_handoff_keeps_missing_header_facts_unknown():
     assert '"previous_session": null' in compact and '"header_unreadable": null' in compact
     assert '"not_marked_burst"' not in compact
     assert '"sample_ref":' in compact and '"name": "reports"' not in compact
+
+
+@pytest.mark.parametrize("damage", [
+    "unequal_columns", "duplicate_bucket", "outside_bucket", "negative_count", "non_utc_start",
+    "bad_signature_position", "duplicate_signature_pair", "missing_signature_pairs",
+    "wrong_pair_total", "wrong_covered_total", "impossible_header_counts",
+])
+def test_malformed_saved_sparse_buckets_do_not_make_a_false_handoff(damage: str):
+    from tests.test_whea import load, storms
+
+    reading = storms(load()).to_dict()
+    buckets = next(section["data"] for section in reading["sections"] if section["name"] == "buckets")
+    returned, pairs = buckets["returned"], buckets["signature_pairs"]
+    if damage == "unequal_columns":
+        returned["count"].pop()
+    elif damage == "duplicate_bucket":
+        returned["index"][1] = returned["index"][0]
+    elif damage == "outside_bucket":
+        returned["index"][0] = buckets["bucket_count"]
+    elif damage == "negative_count":
+        returned["count"][0] = -1
+    elif damage == "non_utc_start":
+        buckets["from"] = "2026-09-23T06:00:00-04:00"
+    elif damage == "bad_signature_position":
+        pairs["signature"][0] = 999
+    elif damage == "missing_signature_pairs":
+        buckets.pop("signature_pairs")
+    elif damage == "wrong_pair_total":
+        pairs["count"][0] += 1
+    elif damage == "wrong_covered_total":
+        buckets["totals"][returned["index"][0]] += 1
+    elif damage == "impossible_header_counts":
+        returned["previous_session"][0] = returned["count"][0] + 1
+    else:
+        for key in ("index", "signature", "count"):
+            pairs[key].append(pairs[key][0])
+    compact = "\n".join(_item_lines(1, {"kind": "reading", "title": "Older saved storm",
+                                          "reading": reading, "verbosity": "summary"}))
+    assert '"active_buckets": null' in compact
+    assert '"other_active_buckets": null' in compact
 
 
 def test_storm_handoff_counts_malformed_saved_references_without_losing_signature_samples():
