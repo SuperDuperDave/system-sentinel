@@ -52,7 +52,7 @@ INSTRUCTIONS = (
     "last System record before the next start, or 'crash' with a 'moment' when the person names a time. "
     "That last record may be later than the estimated stop, so compare timestamps. Then 'record' before a stop's started_at, "
     "'faults' for what went wrong while it kept running, 'storms' for System WHEA report traffic, "
-    "'whea' for a bounded newest-record preview across both WHEA logs, and 'whea_record' for one exact retained report's raw fields and decoded detail; 'signals' last. "
+    "'whea' for a bounded newest-record preview across both WHEA logs, 'whea_window' for one source's exact filing-time window in either direction, and 'whea_record' for one exact retained report's raw fields and decoded detail; 'signals' last. "
     "A burst, a gap or a correlation is a lead, never a diagnosis. "
     "The stack tools hold the evidence you have chosen; 'compose' returns it as the handoff text, with each item's provenance. "
     "The catalog and that handoff are also resources: sentinel://catalog and sentinel://handoff."

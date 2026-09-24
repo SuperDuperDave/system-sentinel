@@ -143,11 +143,13 @@ def test_a_reason_is_asked_for_only_where_it_could_be_needed():
 
 def test_count_ranges_are_visible_to_mcp_clients():
     listed = {tool.name: tool for tool in tools()}
-    for name in ("events", "record", "whea", "faults", "drivers"):
+    for name in ("events", "record", "whea", "whea_window", "faults", "drivers"):
         count = listed[name].input_schema["properties"]["count"]
         assert count["minimum"] == 1
     assert listed["events"].input_schema["properties"]["count"]["maximum"] == 2000
     assert listed["faults"].input_schema["properties"]["count"]["maximum"] == 500
+    assert set(listed["whea_window"].input_schema["required"]) >= {"source", "since", "before"}
+    assert listed["whea_window"].input_schema["properties"]["order"]["enum"] == ["newest", "oldest"]
 
 
 def test_mcp_rejects_out_of_range_count_before_querying(surface: Surface):

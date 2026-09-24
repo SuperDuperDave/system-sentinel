@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.6.0] - 2026-09-23
+
+### Added
+- `whea_window` lets an agent inspect one WHEA log over an exact filing-time interval with up to 500 bounded previews. Required `source`, `since` and `before` preserve Windows' seven fractional timestamp digits; `order=newest` or `oldest` decides which side the cap keeps. Returned rows are in ascending report time, with source-specific retained reach, the host's pre-query clock, and an exclusive boundary from the extra matching probe row. Use `whea_record` for one exact selected report and compare its filing time.
+- The exact time filter runs before the count cap, so millisecond XPath boundary rows do not consume preview slots. A future interval remains incomplete, and failed or denied collection supplies no evidence sections. The Stack and MCP guidance expose the new reading; bulk capture omits it because it requires a selected window.
+
+### Limits
+- This is a report-time view of retained log content, not an error-occurrence timeline. Windows may file an earlier-session error later, and an event written after the pre-query clock is outside this answer. Directional time reach assumes filing times did not move backward across retained record order; a clock correction can invalidate it. The reading has no cross-log grouping, signature, full binary payload or decoder output; use the existing `whea`, `storms` and `whea_reports` readings for their different questions. The Record screen does not yet request this exact window.
+
 ## [1.5.0] - 2026-09-23
 
 ### Changed

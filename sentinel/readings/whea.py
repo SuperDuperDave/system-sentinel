@@ -55,6 +55,7 @@ MAX_WHEA_RECORDS = 500
 MAX_EXACT_BINARY_BYTES = 1024 * 1024
 PREVIEW_MESSAGE_CHARS = 1024
 MAX_RECORD_ID = (1 << 53) - 1  # exact across JSON number clients
+EXACT_WINDOW_STAMP = re.compile(r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,7}))?(Z|[+-]\d{2}:\d{2})", re.ASCII)
 LOG = "System"
 CHANNEL = "Microsoft-Windows-Kernel-WHEA/Errors"
 CHANNEL_PROVIDER = "Microsoft-Windows-Kernel-WHEA"
@@ -95,10 +96,10 @@ class WheaSource:
     event_ids: tuple[int, ...] | None  # None: every event the provider writes to this log
     decode: bool
 
-    def select(self, record_id: int | None = None) -> str:
+    def select(self, record_id: int | None = None, window: str = "") -> str:
         ids = f" and ({' or '.join(f'EventID={i}' for i in self.event_ids)})" if self.event_ids else ""
         exact = f" and EventRecordID={record_id}" if record_id is not None else ""
-        return f"*[System[Provider[@Name='{self.provider}']{ids}{exact}]]"
+        return f"*[System[Provider[@Name='{self.provider}']{ids}{exact}{window}]]"
 
 
 WHEA_SOURCES: tuple[WheaSource, ...] = (
@@ -118,16 +119,26 @@ DEFERRED = (
 RAW_DATA = "RawData = $( $b = $_.Properties | Where-Object { $_.Value -is [byte[]] } | Select-Object -First 1; if ($b) { [System.BitConverter]::ToString($b.Value).Replace('-','') } else { $null } )"
 
 # One source, asked for one record more than the limit so a reached cap is exact. The events are
-# kept as they arrive, so a query that stops part way keeps the newest records it did return; a
-# clean no-match is empty, and every other error is a failure, never an empty log. Log metadata is
-# read afterwards and only qualifies the answer: its own failure is reported beside the records.
+# kept as they arrive, so a query that stops part way keeps the records it did return in the
+# requested direction; a clean no-match is empty, and every other error is a failure, never an
+# empty log. Log metadata is read afterwards and only qualifies the answer.
 WHEA_SOURCE_SCRIPT = r"""
-function Read-WheaSource([string]$name, [string]$log, [string]$select, [int]$limit, [int]$maxBinaryBytes = 0) {
+function Read-WheaSource([string]$name, [string]$log, [string]$select, [int]$limit, [int]$maxBinaryBytes = 0, [switch]$oldest, [switch]$windowed, [long]$fromTicks = 0, [long]$untilTicks = 0) {
     $xml = "<QueryList><Query Id='0' Path='$log'><Select Path='$log'>$select</Select></Query></QueryList>"
     $found = [System.Collections.Generic.List[object]]::new()
     $records = @(); $outcome = 'failed'; $errorText = $null; $truncated = $null; $stopped = $null
     try {
-        Get-WinEvent -FilterXml ([xml]$xml) -MaxEvents ($limit + 1) -ErrorAction Stop | & { process { [void]$found.Add($_) } }
+        if ($windowed) {
+            # XPath uses broad millisecond index bounds. Filter at Windows' full tick precision
+            # before the cap, so a boundary row cannot spend one of the caller's record slots.
+            Get-WinEvent -FilterXml ([xml]$xml) -Oldest:$oldest -ErrorAction Stop |
+                Where-Object {
+                    $time = $_.TimeCreated
+                    $null -eq $time -or ($time.ToUniversalTime().Ticks -ge $fromTicks -and $time.ToUniversalTime().Ticks -lt $untilTicks)
+                } | Select-Object -First ($limit + 1) | & { process { [void]$found.Add($_) } }
+        } else {
+            Get-WinEvent -FilterXml ([xml]$xml) -MaxEvents ($limit + 1) -Oldest:$oldest -ErrorAction Stop | & { process { [void]$found.Add($_) } }
+        }
         $truncated = $found.Count -gt $limit
     } catch {
         $kind = if ($_.CategoryInfo.Category -eq [System.Management.Automation.ErrorCategory]::PermissionDenied -or $_.Exception -is [System.UnauthorizedAccessException]) { 'denied' } else { 'failed' }
@@ -164,6 +175,7 @@ function Read-WheaSource([string]$name, [string]$log, [string]$select, [int]$lim
     [pscustomobject]@{
         name = $name; log = $log; outcome = $outcome; error = $errorText
         returned = $records.Count; limit = $limit; truncated = $truncated; stopped = $stopped; records = $records
+        probe_time = $(if ($windowed -and $null -eq $stopped -and $truncated -and $null -ne $found[$limit].TimeCreated) { $found[$limit].TimeCreated.ToUniversalTime().ToString('o') } else { $null })
         log_enabled = $meta.log_enabled; log_mode = $meta.log_mode; log_state = $meta.log_state; log_error = $meta.log_error
         log_oldest = $meta.log_oldest; oldest_state = $meta.oldest_state; oldest_error = $meta.oldest_error
     }
@@ -222,8 +234,51 @@ def whea_record_script(spec: WheaSource, record_id: int) -> str:
             + f"[pscustomobject]@{{ source = Read-WheaSource '{spec.name}' '{spec.log}' \"{select}\" 1 {MAX_EXACT_BINARY_BYTES} }}\n")
 
 
+def exact_window_stamp(value: str, label: str) -> str:
+    """Keep Windows' seventh fractional digit when normalizing a selected time to UTC."""
+    match = EXACT_WINDOW_STAMP.fullmatch(value.strip())
+    if match is None:
+        raise ValueError(f"parameter {label!r}: expected an ISO timestamp with Z or an offset and at most seven fractional digits")
+    try:
+        parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+        if parsed.tzinfo is None or parsed.utcoffset() is None:
+            raise ValueError("a time zone is required")
+        utc = parsed.astimezone(UTC)
+    except (ValueError, OverflowError) as exc:
+        raise ValueError(f"parameter {label!r}: invalid timestamp ({exc})") from exc
+    if utc < datetime(1601, 1, 1, tzinfo=UTC):
+        raise ValueError(f"parameter {label!r}: a Windows event-log time must be in 1601 or later")
+    seventh = (match.group(2) or "").ljust(7, "0")[6]
+    return f"{utc.year:04d}-" + utc.strftime("%m-%dT%H:%M:%S.%f") + seventh + "Z"
+
+
+def whea_window_script(spec: WheaSource, since: str, before: str, count: int, order: str) -> str:
+    """One log and one exact filing-time window; XPath is only a broad index pre-filter."""
+    select = spec.select(window=" and TimeCreated[@SystemTime&gt;='$xpathStart' and @SystemTime&lt;'$xpathEnd']")
+    oldest = " -oldest" if order == "oldest" else ""
+    projection = WHEA_SOURCE_SCRIPT.replace("[pscustomobject]@{ {fields} }", WHEA_PREVIEW_PROJECTION.replace("{message_limit}", str(PREVIEW_MESSAGE_CHARS)))
+    return LOG_METADATA_SCRIPT + projection + f"""
+$invariant = [Globalization.CultureInfo]::InvariantCulture
+$from = [datetimeoffset]::Parse('{since}', $invariant)
+$requestedUntil = [datetimeoffset]::Parse('{before}', $invariant)
+$queriedAt = [datetimeoffset]::UtcNow
+$until = if ($requestedUntil.UtcTicks -lt $queriedAt.UtcTicks) {{ $requestedUntil }} else {{ $queriedAt }}
+$xpathStart = $from.UtcDateTime.ToString('yyyy-MM-ddTHH:mm:ss.fffZ', $invariant)
+# At least one millisecond beyond the ceiling protects sub-millisecond comparisons.
+$xpathEnd = $until.UtcDateTime.AddMilliseconds(2).ToString('yyyy-MM-ddTHH:mm:ss.fffZ', $invariant)
+$select = "{select}"
+[pscustomobject]@{{
+    queried_at = $queriedAt.ToString('o'); window_start = $from.ToString('o')
+    window_end = $requestedUntil.ToString('o'); observed_end = $until.ToString('o')
+    source = Read-WheaSource '{spec.name}' '{spec.log}' $select {count}{oldest} -windowed -fromTicks $from.UtcTicks -untilTicks $until.UtcTicks
+}}
+"""
+
+
 COLLECTION_BASIS = "each source's own answer: outcome, bounded preview records against its limit of count + 1 asked, whether it was truncated or stopped part way, and its log's metadata; take whea_record for one exact retained row"
 EXACT_COLLECTION_BASIS = "one selected log and EventRecordID, with its provider and event-ID filter; the collector asks for two matches to detect ambiguity, enforces a binary-byte bound before projection, and reports that log's outcome and retention metadata"
+WINDOW_COLLECTION_BASIS = "one selected WHEA log, indexed by broad millisecond XPath bounds and filtered to the exact seven-digit UTC filing-time window before the count cap; the probe time is the next matching row when capped; the machine's clock before the query limits the observable end"
+WINDOW_COVERAGE_BASIS = "one log's retained, answered filing-time window: covered_from and covered_until bound the contiguous portion observed, with the latter exclusive; a probe or interrupted query makes its side exclusive. This time reach assumes event timestamps have not moved backward across retained record order. An inversion among returned rows and the probe is detected, but one among unreturned rows is not. Complete requires an enabled circular log retained before the start, a clean uncapped query, an end no later than the pre-query host clock, and monotonic returned event times. This describes retained log content received by query time, not every error that occurred or every event Windows might later file."
 WHEA_COVERAGE_BASIS = (
     "records holds the newest `limit` records across both logs, newest first; ties are ordered by source "
     "(System first) and then by descending RecordId. complete means every record both logs still retain "
@@ -381,6 +436,150 @@ def take_whea_record(bridge: Bridge, params: dict[str, Any]) -> Reading:
         reading.warnings.append(f"{spec.log} is disabled: Windows is not recording new events there")
     if collection.get("log_state") != "ok" or collection.get("oldest_state") not in ("ok", "empty"):
         reading.warnings.append(f"how far back {spec.log} reaches could not be read; its query outcome still stands")
+    reading.took_ms = _ms(started)
+    return reading
+
+
+def whea_window_reach(
+    source: dict[str, Any], rows: list[dict[str, Any]], start: str, end: str, observed_end: str,
+    queried_at: str, order: str, probe_time: str | None, ordered: bool,
+) -> dict[str, Any]:
+    """Bound only the contiguous part of one log that the directional query actually reached."""
+    retained = source.get("log_oldest")
+    reach: dict[str, Any] = {
+        "log": source["log"], "retained_from": retained, "covered_from": None,
+        "covered_from_inclusive": None, "covered_until": None, "complete": False,
+    }
+    start_key, end_key = known_stamp_key(start), known_stamp_key(end)
+    observed_key, query_key = known_stamp_key(observed_end), known_stamp_key(queried_at)
+    oldest_key = stamp_key(retained)
+    if (not ordered or start_key >= query_key or source.get("log_state") != "ok"
+            or source.get("log_enabled") is not True or source.get("log_mode") != "Circular"
+            or source.get("oldest_state") != "ok" or oldest_key is None or oldest_key >= observed_key):
+        return reach
+    assert isinstance(retained, str)
+    base = start if oldest_key < start_key else retained
+    from_inclusive = oldest_key < start_key
+    bound = probe_time
+    if bound is None and source.get("stopped") is not None and rows:
+        key = min if order == "newest" else max
+        bound = key((row["TimeCreated"] for row in rows), key=known_stamp_key)
+    if order == "newest" and bound is not None:
+        if known_stamp_key(bound) >= known_stamp_key(base):
+            base = bound
+            from_inclusive = False
+    until = observed_end
+    if order == "oldest" and bound is not None and known_stamp_key(bound) < observed_key:
+        until = bound
+    if known_stamp_key(base) >= known_stamp_key(until):
+        return reach
+    complete = (oldest_key < start_key and source.get("truncated") is False and source.get("stopped") is None
+                and end_key <= query_key)
+    return {**reach, "covered_from": base, "covered_from_inclusive": from_inclusive,
+            "covered_until": until, "complete": complete}
+
+
+def take_whea_window(bridge: Bridge, params: dict[str, Any]) -> Reading:
+    """One source's bounded previews over an exact filing-time window, in either direction."""
+    started = time.perf_counter()
+    spec = next(source for source in WHEA_SOURCES if source.name == params["source"])
+    start = exact_window_stamp(params["since"], "since")
+    end = exact_window_stamp(params["before"], "before")
+    if known_stamp_key(start) >= known_stamp_key(end):
+        raise ValueError("parameter 'before': must be after 'since' at seven-digit Windows time precision")
+    order, count = params["order"], params["count"]
+    normalized = {**params, "since": start, "before": end}
+    script = whea_window_script(spec, start, end, count, order)
+    state: dict[str, Any] = {}
+
+    def fail(kind: str, detail: str) -> list[Section]:
+        state.update(outcome=kind, error=detail)
+        return []
+
+    def build(payload: dict[str, Any]) -> list[Section]:
+        source_value = payload.get("source")
+        source, rows = whea_source(spec, source_value, count, preview=True)
+        if source["outcome"] not in ("ok", "empty"):
+            return fail(source["outcome"], source["error"] or "the selected WHEA log did not answer")
+        if not isinstance(source_value, dict) or "probe_time" not in source_value:
+            return fail("failed", "the WHEA window collector omitted its probe time")
+        query, observed = payload.get("queried_at"), payload.get("observed_end")
+        window_start, window_end = payload.get("window_start"), payload.get("window_end")
+        if not all(isinstance(v, str) and stamp_key(v) is not None for v in (query, observed, window_start, window_end)):
+            return fail("failed", "the WHEA window collector returned an unreadable host time")
+        assert isinstance(query, str) and isinstance(observed, str)
+        assert isinstance(window_start, str) and isinstance(window_end, str)
+        query_key, observed_key = known_stamp_key(query), known_stamp_key(observed)
+        start_key, end_key = known_stamp_key(start), known_stamp_key(end)
+        if (known_stamp_key(window_start) != start_key or known_stamp_key(window_end) != end_key
+                or observed_key != min(query_key, end_key)):
+            return fail("failed", "the WHEA window collector changed the requested time bounds")
+        probe = source_value["probe_time"]
+        if source["truncated"] is True:
+            if not isinstance(probe, str) or stamp_key(probe) is None or not start_key <= known_stamp_key(probe) < observed_key:
+                return fail("failed", "the WHEA window probe was missing or outside the exact window")
+        elif probe is not None:
+            return fail("failed", "the WHEA window collector returned a probe without reaching the cap")
+        if any(not start_key <= known_stamp_key(row["TimeCreated"]) < observed_key for row in rows):
+            return fail("failed", "a returned WHEA record was outside the exact window")
+        if source["stopped"] is not None and not rows:
+            stopped = source["stopped"]
+            return fail(stopped["kind"], "the WHEA query stopped before any in-window record could be observed: " + stopped["detail"])
+        times = [known_stamp_key(row["TimeCreated"]) for row in rows]
+        if isinstance(probe, str):
+            times.append(known_stamp_key(probe))
+        ordered = all((left >= right if order == "newest" else left <= right)
+                      for left, right in zip(times, times[1:], strict=False))
+        shown = sorted(rows, key=lambda row: (known_stamp_key(row["TimeCreated"]), row["RecordId"]))
+        collection = {**source, "source": spec.name, "order": order, "probe_time": probe,
+                      "window_start": start, "window_end": end, "observed_end": observed,
+                      "queried_at": query}
+        reach = whea_window_reach(source, rows, start, end, observed, query, order, probe, ordered)
+        reach["returned_time_ordered"] = ordered
+        state.update(outcome="ok" if shown else "empty", rows=shown, collection=collection,
+                     coverage=reach, query=query, observed=observed, ordered=ordered)
+        return [Section("records", "raw", shown),
+                Section("collection", "raw", collection, basis=WINDOW_COLLECTION_BASIS),
+                Section("coverage", "derived", reach, basis=WINDOW_COVERAGE_BASIS),
+                Section("identity", "derived", [record_identity(row, preview=True) for row in shown], basis=IDENTITY_BASIS)]
+
+    reading = from_object("whea_window", normalized, script, bridge.run(script, depth=WHEA_DEPTH), build)
+    if not reading.observed:
+        return reading
+    if state.get("outcome") in ("failed", "denied"):
+        reading.outcome = state["outcome"]
+        reading.error = {"kind": reading.outcome, "detail": state["error"]}
+        reading.count = None
+        reading.took_ms = _ms(started)
+        return reading
+    reading.outcome = state["outcome"]
+    reading.count = len(state["rows"])
+    collection, reach = state["collection"], state["coverage"]
+    if collection["truncated"]:
+        reading.warnings.append("the count cap left other matching records outside this directional answer; use coverage to see which side was reached")
+    if collection["stopped"] is not None:
+        reading.warnings.append("the WHEA query stopped after some records; this is partial evidence, not an empty remainder")
+    if not state["ordered"]:
+        reading.warnings.append("returned WHEA filing times moved against log record order; contiguous time reach cannot be established")
+    elif collection["truncated"] or collection["stopped"] is not None:
+        reading.warnings.append("directional time reach assumes filing times did not move backward among unreturned records; a clock correction can invalidate it")
+    if known_stamp_key(end) > known_stamp_key(state["query"]):
+        reading.warnings.append("the requested end is after the machine's pre-query clock; later reports could not be observed in this answer")
+    if known_stamp_key(start) >= known_stamp_key(state["query"]):
+        reading.warnings.append("the window starts at or after the machine's pre-query clock; its empty answer cannot establish a quiet window")
+    elif not state["ordered"]:
+        pass  # the order warning already explains why no contiguous reach is available
+    elif (stamp_key(collection.get("log_oldest")) is not None
+          and known_stamp_key(collection["log_oldest"]) >= known_stamp_key(state["observed"])):
+        reading.warnings.append("the requested window ends at or before this log's oldest retained record; earlier reports may be gone")
+    elif reach["covered_from"] is None:
+        reading.warnings.append("this log's retained reach for the requested window could not be established")
+    elif reach["covered_from_inclusive"] is False:
+        reading.warnings.append("the lower coverage boundary is exclusive; records at that time may be omitted or no longer retained")
+    if collection.get("log_enabled") is False:
+        reading.warnings.append(f"{spec.log} is disabled; its absence of new reports is not evidence")
+    if any(row["MessageChars"] is not None and row["MessageChars"] > _utf16_chars(row["Message"]) for row in state["rows"]):
+        reading.warnings.append("some messages were shortened in this preview; use whea_record for one exact retained row")
     reading.took_ms = _ms(started)
     return reading
 
@@ -1495,6 +1694,33 @@ register(
             Param("record_id", "int", None, "EventRecordID in that log, as shown in whea or whea_reports.", minimum=1, maximum=MAX_RECORD_ID),
         ),
         private=("MachineName", "user names inside Message", "CPER bytes in RawData and Properties", "serial and UUID fields inside the decoded structure"),
+        requires_selection=True,
+    )
+)
+
+register(
+    Spec(
+        name="whea_window",
+        description=(
+            "Bounded WHEA report previews in one selected log over an exact [since,before) UTC filing-time window. "
+            "Choose newest or oldest to keep the reports nearest that side when count is reached. The answer "
+            "preserves Windows' seven-digit event time, reports that log's own retained reach and query cap, and "
+            "returns rows in ascending time for reading. A pre-query host clock limits future reach; previous-session "
+            "CPER flags mean report time need not be error time. Take whea_record with source and RecordId for one "
+            "exact retained row, then compare TimeCreated. No full binary payload, decoded detail, cross-log group "
+            "or signature is collected here."
+        ),
+        classes=("raw", "derived"),
+        take=take_whea_window,
+        params=(
+            Param("source", "str", None, "One log: system or kernel_whea.", choices=tuple(s.name for s in WHEA_SOURCES)),
+            Param("since", "str", None, "Inclusive filing-time start with Z or an offset, up to seven fractional digits."),
+            Param("before", "str", None, "Exclusive filing-time end with Z or an offset, up to seven fractional digits."),
+            Param("order", "str", "newest", "Which side of the window keeps the count limit.", choices=("newest", "oldest")),
+            Param("count", "int", 50, "Maximum bounded preview records from this log.", minimum=1, maximum=MAX_WHEA_RECORDS),
+        ),
+        private=("user names inside Message", "CPER fixed-header bytes in HeaderHex"),
+        heavy=True,
         requires_selection=True,
     )
 )

@@ -404,7 +404,7 @@ async def new_item(stack: Stack, bridge: Bridge, body: dict[str, Any], *, reader
         if kind == "selection":
             ids = _selection_ids(envelope, body.get("ids") or [])
 
-    large_log = bool(kind == "reading" and envelope and envelope.get("reading") in (*LOG_READINGS, "whea") and len(_records(envelope) or []) > SUMMARY_LOG_LIMIT)
+    large_log = bool(kind == "reading" and envelope and envelope.get("reading") in (*LOG_READINGS, "whea", "whea_window") and len(_records(envelope) or []) > SUMMARY_LOG_LIMIT)
     derived_summary = bool(kind == "reading" and envelope and envelope.get("reading") in ("storms", "whea_reports", "crash", "faults"))
     verbosity = requested_verbosity or ("summary" if derived_summary or large_log else "full")
 
@@ -480,7 +480,7 @@ def _item_lines(position: int, item: dict[str, Any]) -> list[str]:
     lines.append(f"- outcome: {_outcome_text(envelope)}")
     if isinstance(envelope.get("count"), int):
         lines.append(f"- reading count: {envelope['count']}")
-    if item.get("verbosity") == "summary" and envelope.get("reading") in (*LOG_READINGS, "whea", "faults"):
+    if item.get("verbosity") == "summary" and envelope.get("reading") in (*LOG_READINGS, "whea", "whea_window", "faults"):
         cutoff = next((section.get("data") for section in sections if section.get("name") == "collection"), None)
         if isinstance(cutoff, dict) and all(key in cutoff for key in ("limit", "returned", "truncated")):
             truncated = cutoff["truncated"]
@@ -536,11 +536,11 @@ def _item_lines(position: int, item: dict[str, Any]) -> list[str]:
             lines += _fault_handoff(envelope, records if item.get("ids") is not None else None, compact)
     elif envelope.get("reading") == "changes" and (item.get("verbosity") == "summary" or item.get("ids") is not None):
         lines += _json_block(_change_handoff_sections(envelope, records if item.get("ids") is not None else None, item.get("verbosity") == "summary"))
-    elif envelope.get("reading") in ("whea", "whea_record") and records is not None and (item.get("verbosity") == "summary" or item.get("ids") is not None):
+    elif envelope.get("reading") in ("whea", "whea_window", "whea_record") and records is not None and (item.get("verbosity") == "summary" or item.get("ids") is not None):
         compact = item.get("verbosity") == "summary"
         if compact:
             lines.append("CPER severity and previous-session status come from the record header; Windows event level can differ. Set this item to full for its stored fields. Default redaction may withhold CPER bytes.")
-            if envelope.get("reading") == "whea" and records and isinstance(records[0], dict) and "RawData" not in records[0]:
+            if envelope.get("reading") in ("whea", "whea_window") and records and isinstance(records[0], dict) and "RawData" not in records[0]:
                 lines.append("This stored WHEA list is a bounded preview. Full verbosity expands only the stored preview; take whea_record with a selected source and RecordId for exact fields and decoded detail, then compare TimeCreated.")
             if len(records) > SUMMARY_LOG_LIMIT:
                 lines.append(f"Showing the first and last {SUMMARY_LOG_EDGE} of {len(records)} returned records.")

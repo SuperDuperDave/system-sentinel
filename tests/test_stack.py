@@ -205,6 +205,33 @@ def test_whea_preview_handoff_names_the_exact_read_and_original_lengths():
     assert '"MessageChars": 2000' in summary and '"PayloadBytes": 20480' in summary
 
 
+def test_exact_whea_window_handoff_keeps_the_window_reach_with_a_selected_preview():
+    envelope = {
+        "reading": "whea_window", "params": {"source": "system", "since": "2026-09-22T00:00:00.0000000Z",
+            "before": "2026-09-23T00:00:00.0000000Z", "order": "newest", "count": 25},
+        "asked_at": "2026-09-23T03:00:00Z", "method": {"kind": "powershell"},
+        "outcome": "ok", "count": 1, "warnings": [],
+        "sections": [
+            {"name": "records", "class": "raw", "data": [{"Log": "System", "RecordId": 9,
+                "TimeCreated": "2026-09-22T02:00:00.1234567Z", "Id": 18, "Level": 2,
+                "Message": "bounded preview", "MessageChars": 2000, "PayloadBytes": 20480,
+                "HeaderHex": "43504552"}]},
+            {"name": "identity", "class": "derived", "data": [{"Log": "System", "RecordId": 9,
+                "cper": {"severity": "fatal", "previous_session": False}}]},
+            {"name": "collection", "class": "raw", "data": {"source": "system", "limit": 25,
+                "returned": 1, "truncated": False, "window_start": "2026-09-22T00:00:00.0000000Z"}},
+            {"name": "coverage", "class": "derived", "data": {"complete": True,
+                "covered_from": "2026-09-22T00:00:00.0000000Z", "covered_until": "2026-09-23T00:00:00.0000000Z"}},
+        ],
+    }
+    item = {"kind": "selection", "title": "Window report", "reading": envelope,
+            "verbosity": "summary", "ids": ["System:9"]}
+    text = "\n".join(_item_lines(1, item))
+    assert "bounded preview" in text and "take whea_record" in text
+    assert '"covered_until": "2026-09-23T00:00:00.0000000Z"' in text
+    assert '"RecordId": 9' in text
+
+
 def test_an_exact_whea_report_keeps_previous_session_meaning_in_compact_and_selected_handoffs():
     channel = "Microsoft-Windows-Kernel-WHEA/Errors"
     record = {"Log": channel, "RecordId": 73, "TimeCreated": "2026-09-23T02:00:00Z", "Id": 20,
