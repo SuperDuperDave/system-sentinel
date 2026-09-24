@@ -99,6 +99,22 @@ grouped and unusable references, and that a changed citation on retake starts cl
 horizontal overflow in both views. Set `SCREENSHOT_DIR` to an existing scratch directory to save
 the inspected screens; they are not part of the five published screenshots.
 
+The investigation-continuity check uses the same fixture server, `TOKEN_FILE`, `PORT` and
+`NODE_PATH` setup:
+
+```
+NODE_PATH=/some/scratch/dir/node_modules TOKEN_FILE=/some/scratch/dir/token PORT=8021 \
+  node docs/screens/fixtures/check-investigation-continuity.cjs
+```
+
+At desktop and phone widths it checks browser Back and the direct return from a Record moment,
+the exact Crash and Signals source-link positions and focus, a stop and fault open together, a selected dump header,
+a near-top stop on desktop, an open Signals lead after navigation, no new observed questions on
+return, visible held evidence during a slower failed retake, transport loss, and a new question
+after a 401 and fresh sign-in. It also checks that an unanswered changed count may retry on return
+without moving focus later. Its readings are synthetic;
+it does not measure the installed application's timing or prove the reported click path.
+
 ## The social preview
 
 `social-preview.png` is the card a shared link to the repository shows: 1280×640, the identity's

@@ -26,6 +26,8 @@ Record shows when the returned System log rows cluster and which sources appear 
 
 Crashes keeps each stop's cited System and Application rows beside its timeline, with the last pre-restart record's shorter projection labeled separately. Signals names the exact rows behind a lead. Inspect either in place; checking the current log again is a separate action, and the result says whether the same row remains, its ID was reused, or the row was not returned. The original observation stays visible.
 
+Following a time from a stop or lead opens Record and gives you a direct way back. Crashes and Signals keep their open evidence and place during that trip in the same browser tab. A returned reading says when it was taken; use **Take again** when you want a new observation. If that take fails, the earlier reading stays visible with the failure named beside it.
+
 Diagnostics takes deeper readings when asked. Memory shows the returned modules, reported slot population and configured speed beside each module's rating; the original Windows fields and derivation stay open below the overview.
 PCIe keeps the present Windows device inventory, groups devices only where their reported parent chains support it, and shows when relationships are incomplete. The full raw PCI records remain available beneath the map.
 

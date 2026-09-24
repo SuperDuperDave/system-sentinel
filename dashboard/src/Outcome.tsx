@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Reading } from './api';
 import { CopyButton } from './Copy';
 import { Taken } from './useReading';
@@ -17,15 +17,31 @@ function seconds(ms: number): string {
   return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(ms < 10000 ? 1 : 0)} s`;
 }
 
+function age(iso: string): string {
+  const minutes = Math.max(0, Math.floor((Date.now() - Date.parse(iso)) / 60_000));
+  if (!Number.isFinite(minutes)) return 'time unknown';
+  if (minutes < 1) return 'less than a minute ago';
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) return `${hours} h ago`;
+  return `${Math.floor(hours / 24)} days ago`;
+}
+
 /**
  * The line under a view's title: what was asked, what came back, and whether the machine was observed.
  * A failure reads as a failure; an empty result reads as a finding; both name the method on request.
  */
 export function OutcomeLine<T>({ taken, noun = 'records', singular, emptyText }: { taken: Taken<T>; noun?: string; singular?: string; emptyText?: string }) {
   const [showMethod, setShowMethod] = useState(false);
+  const [, updateAge] = useState(0);
+  useEffect(() => {
+    if (!taken.held) return;
+    const timer = window.setInterval(() => updateAge((value) => value + 1), 60_000);
+    return () => window.clearInterval(timer);
+  }, [taken.held]);
   const r = taken.reading;
 
-  if (taken.state === 'lost') {
+  if (taken.state === 'lost' && !r) {
     return <p className={`${styles.line} readout`}><Glyph kind="warn" /> The dashboard could not get this reading: {taken.problem}. <button className={styles.action} onClick={taken.retake}>Try again</button></p>;
   }
   if (!r) {
@@ -57,12 +73,18 @@ export function OutcomeLine<T>({ taken, noun = 'records', singular, emptyText }:
       <p className={`${styles.line} readout`}>
         {body}
         {taken.state === 'taking' ? <span className={styles.taking}> · taking again…</span> : null}
+        {taken.held ? <span className={styles.taking}> · held reading · {age(r.asked_at)}</span> : null}
         <span className={styles.sep} />
         <span className={styles.actions}>
           <button className={styles.action} onClick={() => { if (taken.state !== 'taking') taken.retake(); }} aria-disabled={taken.state === 'taking'}>Take again</button>
           <button className={styles.action} onClick={() => setShowMethod((v) => !v)} aria-expanded={showMethod}>{showMethod ? 'Hide method' : 'Method'}</button>
         </span>
       </p>
+      {taken.held && taken.heldParams?.count !== undefined && taken.heldParams.count !== taken.requestedParams?.count ? (
+        <p className={`${styles.line} readout`}>Showing last {taken.heldParams.count} while asking for last {taken.requestedParams?.count}. The visible rows belong to the earlier reading.</p>
+      ) : null}
+      {taken.held && taken.state === 'lost' ? <p className={`${styles.line} readout`} role="status"><Glyph kind="warn" /> Latest take could not reach Sentinel: {taken.problem}. The held reading remains visible.</p> : null}
+      {taken.held && taken.latestFailure ? <p className={`${styles.line} readout`} role="status"><Glyph kind="warn" /> Latest take was not observed: {NOT_OBSERVED[taken.latestFailure.outcome] ?? taken.latestFailure.outcome}{taken.latestFailure.error?.detail ? ` · ${firstLine(taken.latestFailure.error.detail)}` : ''}. The held reading remains visible.</p> : null}
       {r.warnings.length ? (
         <ul className={styles.warnings} aria-label="What did not answer">
           {r.warnings.map((w, i) => (

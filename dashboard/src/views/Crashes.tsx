@@ -1,10 +1,10 @@
-import { ReactNode, useEffect, useRef, useState } from 'react';
+import { ReactNode, useLayoutEffect, useRef, useState } from 'react';
 import { AddToStack } from '../AddToStack';
 import { CitedRecord, eventRef } from '../CitedRecord';
 import { EventRecord, Reading, type RecordId, observed } from '../api';
 import { OutcomeLine, clock } from '../Outcome';
 import { Basis, Facts, Head, MomentLink, RowList, Section, Segmented, Value, ago, basisOf, byDay, duration, part, size, useKeepButtonInPlace } from '../Sections';
-import { useReading } from '../useReading';
+import { canRestoreCrashView, useReading } from '../useReading';
 import { useApp } from '../store';
 import { ReliabilityHistory } from './ReliabilityHistory';
 import styles from './Crashes.module.css';
@@ -166,7 +166,7 @@ const KIND_WORD: Record<string, string> = {
 export function Crashes() {
   const { stopCount, faultCount, faultKind, stopId, faultId, dumpId, focus } = useApp((s) => s.crashesView);
   const setCrashesView = useApp((s) => s.setCrashesView);
-  const returnTo = useRef(focus);
+  const returnTo = useRef(canRestoreCrashView(stopCount, faultCount, focus) ? focus : null);
   const stopButtons = useRef(new Map<number, HTMLButtonElement>());
   const faultRowsRef = useRef<HTMLDivElement>(null);
   const dumpRowsRef = useRef<HTMLDivElement>(null);
@@ -174,9 +174,9 @@ export function Crashes() {
   const missingFaultRef = useRef<HTMLParagraphElement>(null);
   const missingDumpRef = useRef<HTMLParagraphElement>(null);
 
-  const crash = useReading('crash', { count: stopCount });
-  const faults = useReading('faults', { count: faultCount });
-  const dumps = useReading('dumps');
+  const crash = useReading('crash', { count: stopCount }, true, { hold: 'same-reading' });
+  const faults = useReading('faults', { count: faultCount }, true, { hold: 'same-reading' });
+  const dumps = useReading('dumps', {}, true, { hold: 'same-params' });
 
   const stops = part<Stop[]>(crash.reading, 'stops') ?? [];
   const selectedStopIndex = stops.findIndex((stop) => stopIdentity(stop) === stopId);
@@ -190,10 +190,12 @@ export function Crashes() {
   const references = new Map(targets.map((target) => [target.file_index, target.ref]));
   const files = (part<DumpFile[]>(dumps.reading, 'files') ?? []).map((file, index) => ({ ...file, fileRef: references.get(index) }));
   const times = new Map(faultRecords.map((r) => [r.RecordId, r.TimeCreated]));
+  const shownStopCount = typeof crash.heldParams?.count === 'number' && crash.held ? crash.heldParams.count : stopCount;
+  const shownFaultCount = typeof faults.heldParams?.count === 'number' && faults.held ? faults.heldParams.count : faultCount;
 
-  // Returning takes fresh readings. Reopen only the same source identity, and return keyboard
-  // focus after it arrives. A missing item gets a visible explanation rather than another row.
-  useEffect(() => {
+  // A held reading puts the original row back before paint. Restore keyboard focus without
+  // moving the viewport a second time; Shell restores its saved position.
+  useLayoutEffect(() => {
     const destination = returnTo.current;
     if (!destination) return;
     const taken = destination === 'stop' ? crash : destination === 'fault' ? faults : dumps;
@@ -207,26 +209,23 @@ export function Crashes() {
       : [...(root?.querySelectorAll<HTMLButtonElement>('button[data-row-id]') ?? [])].find((button) => button.dataset.rowId === id);
     const missing = destination === 'stop' ? missingStopRef.current : destination === 'fault' ? missingFaultRef.current : missingDumpRef.current;
     const target = row ?? missing;
-    target?.scrollIntoView({ block: 'center' });
     target?.focus({ preventScroll: true });
   }, [crash, faults, dumps, selectedStop, faultId, dumpId]);
 
   function chooseStop(index: number | null) {
-    returnTo.current = null;
     setCrashesView({ stopId: index === null ? null : stopIdentity(stops[index]), focus: index === null ? null : 'stop' });
   }
 
   function chooseFaultKind(kind: string | null) {
     if (!faults.reading) return;
-    returnTo.current = null;
     setCrashesView({ faultKind: kind, faultId: null, focus: null });
   }
 
   return (
-    <section onPointerDownCapture={() => { returnTo.current = null; }} onKeyDownCapture={() => { returnTo.current = null; }} onWheelCapture={() => { returnTo.current = null; }}>
+    <section>
       <Head title="Crashes">
         <Segmented value={stopCount} onChange={(count) => setCrashesView({ stopCount: count })} options={STOP_COUNTS.map((c) => ({ value: c, label: `last ${c}` }))} label="How many stops" />
-        {crash.reading ? <AddToStack item={{ kind: 'reading', envelope: crash.reading, title: `Unplanned stops, last ${stopCount}` }} label="Stack this reading" /> : null}
+        {crash.reading ? <AddToStack item={{ kind: 'reading', envelope: crash.reading, title: `Unplanned stops, last ${shownStopCount}` }} label="Stack this reading" /> : null}
       </Head>
       <OutcomeLine taken={crash} noun="stops" singular="stop" emptyText="No unplanned stop among the starts read" />
       {observed(crash.reading) && stopId && selectedStop === null ? <p ref={missingStopRef} className={`${styles.selectionMissing} readout`} role="status" tabIndex={-1}>The previously selected stop is not in this returned reading.</p> : null}
@@ -252,7 +251,7 @@ export function Crashes() {
         controls={
           <>
             <Segmented value={faultCount} onChange={(count) => setCrashesView({ faultCount: count })} options={FAULT_COUNTS.map((c) => ({ value: c, label: `last ${c}` }))} label="How many records" />
-            {faults.reading ? <AddToStack item={{ kind: 'reading', envelope: faults.reading, title: `Faults, last ${faultCount}` }} /> : null}
+            {faults.reading ? <AddToStack item={{ kind: 'reading', envelope: faults.reading, title: `Faults, last ${shownFaultCount}` }} /> : null}
           </>
         }
       >
@@ -268,7 +267,7 @@ export function Crashes() {
             items={shownFaults}
             idOf={faultIdentity}
             openId={faultId}
-            onOpenChange={(id) => { returnTo.current = null; setCrashesView({ faultId: id === null ? null : String(id), focus: id === null ? null : 'fault' }); }}
+            onOpenChange={(id) => setCrashesView({ faultId: id === null ? null : String(id), focus: id === null ? null : 'fault' })}
             layout={styles.faultRow}
             cells={(f) => (
               <>
@@ -303,7 +302,7 @@ export function Crashes() {
                   items={rows}
                   idOf={(file) => file.fileRef ?? file.path}
                   openId={dumpId}
-                  onOpenChange={(id) => { returnTo.current = null; setCrashesView({ dumpId: id === null ? null : String(id), focus: id === null ? null : 'dump' }); }}
+                  onOpenChange={(id) => setCrashesView({ dumpId: id === null ? null : String(id), focus: id === null ? null : 'dump' })}
                   layout={styles.fileRow}
                   cells={(f) => (
                     <>
@@ -326,7 +325,7 @@ export function Crashes() {
                       />
                       <DumpHeaderDetail path={f.path} fileRef={f.fileRef} refreshInventory={dumps.retake} />
                       <div className={styles.actions}>
-                        <MomentLink at={f.modified} />
+                        <MomentLink at={f.modified} sourceKey={`dump:${f.fileRef ?? f.path}:${f.modified}`} />
                       </div>
                     </>
                   )}
@@ -556,7 +555,7 @@ function StopDetail({ stop, envelope }: { stop: Stop; envelope: Reading | null }
         heldKind="projection"
       /> : null}
       <div className={styles.actions}>
-        <MomentLink at={moment} />
+        <MomentLink at={moment} sourceKey={`stop:${stopIdentity(stop)}:${moment}`} />
         {envelope && ids.length ? (
           <AddToStack item={{ kind: 'selection', envelope, ids, title: `Stop at ${moment ?? stop.stopped_at ?? 'an unknown time'}` }} label="Stack this stop" />
         ) : null}
@@ -612,7 +611,8 @@ function DumpCoverage({ reading }: { reading: Reading | null }) {
 
 /** Read just the selected file's header when the person opens its detail. */
 function DumpHeaderDetail({ path, fileRef, refreshInventory }: { path: string; fileRef?: string; refreshInventory?: () => void }) {
-  const taken = useReading('dump_header', fileRef ? { ref: fileRef } : { path });
+  // Hold only this exact file selector; another file must never inherit its header.
+  const taken = useReading('dump_header', fileRef ? { ref: fileRef } : { path }, true, { hold: 'same-params' });
   const [rawOpen, setRawOpen] = useState(false);
   const info = part<DumpInspection>(taken.reading, 'inspection');
   const streams = part<DumpStreams>(taken.reading, 'streams');
@@ -779,7 +779,7 @@ export function FaultDetail({ fault, at: moment, envelope, rawRecords, showMomen
       </details> : <p className={`${styles.faultRawMissing} readout`}>No matching raw record was returned in this reading.</p>}
       {missingRaw.length ? <p className={`${styles.faultRawMissing} readout`}>Raw {missingRaw.length === 1 ? 'record' : 'records'} {missingRaw.join(', ')} {missingRaw.length === 1 ? 'was' : 'were'} named by this decoded entry but not returned.</p> : null}
       <div className={styles.actions}>
-        {showMomentLink ? <MomentLink at={moment} /> : null}
+        {showMomentLink ? <MomentLink at={moment} sourceKey={`fault:${faultIdentity(fault)}:${moment}`} /> : null}
         {envelope ? (
           <AddToStack
             item={{ kind: 'selection', envelope, ids: rawIds.map((id) => `${log}:${id}`), title: `${KIND_WORD[fault.kind] ?? fault.kind} at ${moment ?? 'an unknown time'}` }}

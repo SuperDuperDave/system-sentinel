@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.9.24] - 2026-09-24
+
+### Improved
+- Crashes and Signals now keep their last observed readings in bounded, tab-only memory while an investigation moves between views. Returning to a selected stop or lead restores the open detail, keyboard focus and visible place without re-asking the machine. A link to a moment says it opens Record, and Record offers a direct return to the view that opened it.
+- Changing a reading's scope or retrying after a collection failure keeps earlier observed rows visible. The outcome line labels their taken time and age, distinguishes a later failed or lost take, and says when visible rows use an earlier count. **Take again** explicitly asks the machine for a new observation. A closed session clears held readings.
+
+### Limits
+- Held rows are earlier evidence, never a claim about the machine now. They are neither persisted nor added to a copied URL. The agent reading API still takes a new reading on each request. A return whose supporting panels were not held begins at the title; a changed count that never answered is retried while earlier rows remain labelled. Crashes' dump and reliability panels can only be held after their own sources answered `ok` or `empty`. A selected dump header is first read on demand and can be held only for that exact file selector after it answers; an unanswered header is asked again on return.
+- The synthetic browser check measures browser Back, direct return, selected stop and fault rows, a selected dump header, an open Signals lead, failed and lost retakes, session clearing and overflow at 1440 and 390 pixels. It does not establish the exact click path or timing of the reported experience in the installed app. Other views still take on entry and begin at the top. Locally opened disclosures outside the selected row can close when a view unmounts, and a dump header that had not yet answered can change the detail's height on return.
+
 ## [1.9.23] - 2026-09-24
 
 ### Improved

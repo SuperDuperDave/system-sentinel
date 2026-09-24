@@ -1,9 +1,10 @@
-import { FormEvent, ReactElement, useEffect, useRef, useState } from 'react';
+import { FormEvent, ReactElement, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Unauthorized, catalog, openSession } from './api';
 import { Devices } from './Devices';
 import { Lockup, Mark } from './Mark';
 import { NavIcon } from './NavIcon';
 import { Live } from './Live';
+import { canRestoreCrashView, clearHeldReadings, hasHeldReading } from './useReading';
 import { useApp, VIEWS, ViewGroup, ViewId } from './store';
 import { Record } from './views/Record';
 import { Errors } from './views/Errors';
@@ -32,6 +33,11 @@ const NAV_GROUPS: ViewGroup[] = ['Evidence', 'Interpret', 'Carry'];
 export function App() {
   const session = useApp((s) => s.session);
   const setSession = useApp((s) => s.setSession);
+  const clearViewContext = useApp((s) => s.clearViewContext);
+
+  useEffect(() => {
+    if (session === 'closed') { clearHeldReadings(); clearViewContext(); }
+  }, [session, clearViewContext]);
 
   // One cheap request decides whether a session exists: the catalog, which touches no PowerShell.
   useEffect(() => {
@@ -94,16 +100,40 @@ function Shell() {
     return () => window.removeEventListener('popstate', restoreAddress);
   }, [restoreAddress]);
 
-  // A view change or moment jump is navigation for a keyboard reader too. Focus the new title,
-  // and put it on screen even when the action came from far down another view.
   useEffect(() => {
+    const former = history.scrollRestoration;
+    history.scrollRestoration = 'manual';
+    return () => { history.scrollRestoration = former; };
+  }, []);
+
+  // Restore the view's saved viewport before paint. A new view or moment starts at its title.
+  useLayoutEffect(() => {
     const current = `${view}\u0000${moment ?? ''}`;
     if (previousNavigation.current === current) return;
+    const formerView = previousNavigation.current.split('\u0000')[0];
     previousNavigation.current = current;
     closeMobileNavigation();
-    window.scrollTo(0, 0);
+    const { viewScroll, crashesView: { stopCount, faultCount, focus }, recordOrigin, recordReturnKey } = useApp.getState();
+    // Restore only against evidence available at first paint. The requested Crashes section
+    // determines which earlier panels must also be held for the saved position to be meaningful.
+    const crashesReady = canRestoreCrashView(stopCount, faultCount, focus);
+    const returning = formerView !== view && viewScroll[view] !== undefined &&
+      (view === 'crashes' ? crashesReady : view === 'signals' && hasHeldReading('signals'));
+    window.scrollTo(0, returning ? viewScroll[view]! : 0);
+    const main = document.querySelector('main');
+    if (returning && formerView === 'record' && recordOrigin === view && recordReturnKey !== null) {
+      const source = [...(main?.querySelectorAll<HTMLElement>('[data-moment-source]') ?? [])]
+        .find((element) => element.dataset.momentSource === recordReturnKey);
+      source?.focus({ preventScroll: true });
+    }
+    const focused = document.activeElement instanceof HTMLElement && main?.contains(document.activeElement)
+      ? document.activeElement : null;
+    if (returning && focused) {
+      const box = focused.getBoundingClientRect();
+      if (box.top < 0 || box.bottom > innerHeight) focused.scrollIntoView({ block: 'nearest' });
+    }
     const title = document.querySelector<HTMLElement>('main h1');
-    if (title) {
+    if (title && (!returning || !focused)) {
       title.tabIndex = -1;
       title.focus({ preventScroll: true });
     }

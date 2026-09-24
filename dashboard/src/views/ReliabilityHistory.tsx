@@ -1,9 +1,9 @@
-import { useState } from 'react';
 import { observed } from '../api';
 import { AddToStack } from '../AddToStack';
 import { OutcomeLine } from '../Outcome';
 import { Section, basisOf, part } from '../Sections';
 import { useReading } from '../useReading';
+import { useApp } from '../store';
 import styles from './ReliabilityHistory.module.css';
 
 interface ReliabilityDay {
@@ -74,11 +74,12 @@ function indexPoint(value: number, position: number, count: number): [number, nu
 
 /** Windows' reliability history, not a health score: bars count the events Windows returned. */
 export function ReliabilityHistory() {
-  const taken = useReading('reliability', { days: 30 });
+  const chosen = useApp((state) => state.crashesView.reliabilityDay);
+  const setCrashesView = useApp((state) => state.setCrashesView);
+  const taken = useReading('reliability', { days: 30 }, true, { hold: 'same-params' });
   const rollup = part<Rollup>(taken.reading, 'days');
   const records = part<RawRecord[]>(taken.reading, 'records') ?? [];
   const days = rollup ? calendar(rollup.days) : [];
-  const [chosen, setChosen] = useState<string | null>(null);
   const selected = days.find((day) => day.day === chosen) ?? [...days].reverse().find((day) => day.row);
   const row = selected?.row ?? null;
   const max = Math.max(1, ...days.map((day) => day.row ? recordCount(day.row) ?? 0 : 0));
@@ -132,7 +133,7 @@ export function ReliabilityHistory() {
                     className={`${styles.day} ${entry ? '' : styles.missing} ${active ? styles.active : ''}`}
                     aria-label={`${dateLabel(day, true)} UTC: ${count === null ? entry ? 'event count unavailable' : 'no daily row returned' : `${count} reliability ${count === 1 ? 'event' : 'events'} returned`}${entry?.index_last == null ? '' : `, last index ${entry.index_last}`}`}
                     aria-pressed={active}
-                    onClick={() => setChosen(day)}
+                    onClick={() => setCrashesView({ reliabilityDay: day })}
                   >
                     <span className={styles.barTrack}>
                       {count === null ? <span className={styles.absent} /> : count === 0 ? <span className={styles.zero} /> : <span className={styles.bar} style={{ height: `${Math.max(10, (count / max) * 100)}%` }} />}
@@ -150,7 +151,7 @@ export function ReliabilityHistory() {
           </figure>
           <p className={`${styles.key} readout`}>A dot means the returned event count is zero. A short dash means the count is unknown: no daily row was returned, or the event source did not answer.</p>
           <label className={`${styles.pickerLabel} label`} htmlFor="reliability-day">Inspect a day</label>
-          <select id="reliability-day" className={styles.picker} value={selected?.day ?? ''} onChange={(event) => setChosen(event.target.value)}>
+          <select id="reliability-day" className={styles.picker} value={selected?.day ?? ''} onChange={(event) => setCrashesView({ reliabilityDay: event.target.value })}>
             {days.map(({ day, row: entry }) => <option key={day} value={day}>{dateLabel(day, true)} · {entry ? recordCount(entry) === null ? 'event count unavailable' : `${recordCount(entry)} events` : 'no daily row'}</option>)}
           </select>
           {row ? (

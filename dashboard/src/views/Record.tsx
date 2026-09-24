@@ -3,7 +3,7 @@ import { AddToStack } from '../AddToStack';
 import { EventRecord, Reading, type RecordId, observed, section } from '../api';
 import { clock, Glyph, OutcomeLine, firstLine } from '../Outcome';
 import { Segmented, byDay, day, part } from '../Sections';
-import { useApp } from '../store';
+import { useApp, VIEWS } from '../store';
 import { Taken, useReading } from '../useReading';
 import { FaultDetail, type Fault } from './Crashes';
 import { ReportDetail } from './Errors';
@@ -127,6 +127,8 @@ function Log() {
  */
 function Frame({ moment }: { moment: string }) {
   const setMoment = useApp((s) => s.setMoment);
+  const origin = useApp((s) => s.recordOrigin);
+  const setView = useApp((s) => s.setView);
   const when = new Date(moment);
   const before = useBefore(moment);
 
@@ -135,6 +137,10 @@ function Frame({ moment }: { moment: string }) {
       <div className={styles.head}>
         <h1 className={`${styles.title} display`}>The record around {clock.format(when)}</h1>
         <div className={styles.controls}>
+          {origin ? <button className={styles.action} onClick={() => {
+            if (history.state?.sentinelReturnTo === origin) history.back();
+            else setView(origin);
+          }}>Back to {VIEWS.find((item) => item.id === origin)?.label ?? origin}</button> : null}
           <button className={styles.action} onClick={() => setMoment(null)}>
             Back to the log
           </button>

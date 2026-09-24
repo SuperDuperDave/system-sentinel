@@ -1,9 +1,11 @@
+import { useLayoutEffect, useRef } from 'react';
 import { AddToStack } from '../AddToStack';
 import { CitedRecord, eventRefGroups, evidenceWithoutRefRows } from '../CitedRecord';
 import { Reading, observed, section } from '../api';
 import { OutcomeLine } from '../Outcome';
 import { Head, MomentLink, RowList, Section, Tree } from '../Sections';
-import { useReading } from '../useReading';
+import { hasHeldReading, useReading } from '../useReading';
+import { useApp } from '../store';
 import styles from './Signals.module.css';
 
 interface Signal {
@@ -34,7 +36,10 @@ interface Input {
  * never observed cannot pass for one built on the machine.
  */
 export function Signals() {
-  const taken = useReading<Signal[]>('signals');
+  const signalId = useApp((s) => s.signalId);
+  const setSignalId = useApp((s) => s.setSignalId);
+  const returnTo = useRef(hasHeldReading('signals') ? signalId : null);
+  const taken = useReading<Signal[]>('signals', {}, true, { hold: 'same-params' });
   const reading = taken.reading;
   const signals = section(reading, 'signals') ?? [];
   const head = observed(reading) ? reading?.sections.find((s) => s.name === 'signals') : undefined;
@@ -44,6 +49,17 @@ export function Signals() {
   const emptyLimit = missingInputs && warnedInputs ? 'missing inputs and input warnings limit this reading' : missingInputs ? 'missing inputs limit this reading' : warnedInputs ? 'input warnings may limit this reading' : '';
   const groups = CLASSES.map((cls) => [cls, signals.filter((s) => s.class === cls)] as const);
   const silent = groups.filter(([, found]) => found.length === 0).map(([cls]) => cls);
+
+  useLayoutEffect(() => {
+    const saved = returnTo.current;
+    if (!saved || !observed(reading)) return;
+    returnTo.current = null;
+    const divider = saved.indexOf(':');
+    const group = document.getElementById(`signal-${saved.slice(0, divider)}`);
+    const button = [...(group?.querySelectorAll<HTMLButtonElement>('button[data-row-id]') ?? [])]
+      .find((row) => row.dataset.rowId === saved.slice(divider + 1));
+    button?.focus({ preventScroll: true });
+  }, [reading]);
 
   return (
     <section>
@@ -62,7 +78,7 @@ export function Signals() {
       {head && reading ? (
         <div className={styles.section}>
           <Section title="What was noticed" cls={head.class} basis={head.basis}>
-            {groups.map(([cls, found]) => (found.length ? <Group key={cls} cls={cls} signals={found} reading={reading} /> : null))}
+            {groups.map(([cls, found]) => (found.length ? <Group key={cls} cls={cls} signals={found} reading={reading} openId={signalId?.startsWith(`${cls}:`) ? signalId.slice(cls.length + 1) : null} onOpenChange={(id) => setSignalId(id === null ? null : `${cls}:${id}`)} /> : null))}
             {signals.length && silent.length ? <p className={`${styles.silent} readout`}>No signal in {silent.join(', ')}.</p> : null}
           </Section>
         </div>
@@ -72,7 +88,7 @@ export function Signals() {
 }
 
 /** One class of signal: what the class looks for, then the leads that fired under it. */
-function Group({ cls, signals, reading }: { cls: string; signals: Signal[]; reading: Reading }) {
+function Group({ cls, signals, reading, openId, onOpenChange }: { cls: string; signals: Signal[]; reading: Reading; openId: string | null; onOpenChange: (id: string | null) => void }) {
   return (
     <div className={styles.group} id={`signal-${cls}`}>
       <h3 className={`${styles.groupTitle} label`}>{cls}</h3>
@@ -80,6 +96,8 @@ function Group({ cls, signals, reading }: { cls: string; signals: Signal[]; read
       <RowList
         items={signals}
         idOf={(s) => s.id}
+        openId={openId}
+        onOpenChange={(id) => onOpenChange(id === null ? null : String(id))}
         layout={styles.signalRow}
         cells={(s) => (
           <>
@@ -92,7 +110,7 @@ function Group({ cls, signals, reading }: { cls: string; signals: Signal[]; read
             <p className="label">Evidence</p>
             <Tree value={evidenceWithoutRefRows(s.evidence)} />
             <Citations evidence={s.evidence} />
-            <Jumps evidence={s.evidence} />
+            <Jumps evidence={s.evidence} sourceKey={`signal:${s.id}`} />
             <p className={`${styles.from} readout`}>read from {s.readings.join(', ')} · {s.id}</p>
             <div className={styles.stackLead}><AddToStack item={{ kind: 'selection', envelope: reading, ids: [s.id], title: s.title }} label="Stack this lead" /></div>
           </div>
@@ -155,13 +173,13 @@ function SignalOverview({ groups }: { groups: readonly (readonly [string, Signal
  * is followed by reading the log where it happened, so the evidence carries the way there —
  * still a jump, still labelled, and still the only thing in the panel that moves anyone.
  */
-function Jumps({ evidence }: { evidence: Record<string, unknown> }) {
+function Jumps({ evidence, sourceKey }: { evidence: Record<string, unknown>; sourceKey: string }) {
   const moments = momentsIn(evidence);
   if (!moments.length) return null;
   return (
     <div className={styles.jumps}>
       {moments.map((at) => (
-        <MomentLink key={at} at={at} />
+        <MomentLink key={at} at={at} sourceKey={`${sourceKey}:${at}`} />
       ))}
     </div>
   );

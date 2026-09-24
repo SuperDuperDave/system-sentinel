@@ -291,18 +291,19 @@ export function Segmented<V extends string | number>({
  * and it is the only thing on a row that leaves the view — which is what makes opening a row
  * safe everywhere else.
  */
-export function MomentLink({ at, label = 'The record before this' }: { at: string | null | undefined; label?: string }) {
+export function MomentLink({ at, label = 'The record before this', sourceKey }: { at: string | null | undefined; label?: string; sourceKey?: string }) {
   const setMoment = useApp((s) => s.setMoment);
   const moment = at ? new Date(at) : null;
   if (!at || !moment || Number.isNaN(moment.getTime())) return null;
   return (
     <button
       className={styles.moment}
-      onClick={() => setMoment(at)}
-      aria-label={`${label} · ${shortDay.format(moment)} ${clock.format(moment)}`}
+      data-moment-source={sourceKey}
+      onClick={() => setMoment(at, sourceKey)}
+      aria-label={`Open Record view: ${label} · ${shortDay.format(moment)} ${clock.format(moment)}`}
     >
       <span className={`${styles.momentTime} readout`}>{clock.format(moment)}</span>
-      <span className={styles.momentLabel}>{label}</span>
+      <span className={styles.momentLabel}>{label} · in Record ↗</span>
     </button>
   );
 }
