@@ -736,6 +736,22 @@ def test_a_missing_input_is_named_in_the_basis_and_the_rest_still_answer():
     assert not any(s["id"] == "suppression:fast-startup" for s in signals)  # neither input said so
 
 
+def test_signals_can_be_ok_while_an_input_failed_and_names_that_gap(monkeypatch):
+    inputs = _inputs()
+
+    async def input_with_failure(name, _bridge, _want):
+        if name == "power":
+            return _reading("power", [], outcome="failed"), None
+        return inputs[name], None
+
+    monkeypatch.setattr(diagnostics_module, "_take_input", input_with_failure)
+    reading = asyncio.run(take_signals(Bridge(exe=None), {}))
+    assert reading.outcome == "ok"
+    assert next(signal for signal in reading.section("signals").data if signal["id"] == "gap:inputs")["evidence"]["not_observed"] == {"power": "failed"}
+    assert next(source for source in reading.method["readings"] if source["name"] == "power")["outcome"] == "failed"
+    assert any("power was not observed (failed)" in warning for warning in reading.warnings)
+
+
 def test_the_disabled_device_is_a_suppression_and_the_one_that_will_not_start_is_a_gap():
     signals, _ = take_signals_sync(_inputs())
     assert any(s["id"] == "suppression:disabled:HDAUDIO\\A" for s in signals)
@@ -908,6 +924,8 @@ def test_signals_takes_every_input_and_carries_their_provenance():
     assert reading.method["kind"] == "readings"
     assert [r["name"] for r in reading.method["readings"]] == ["hardware", "pcie", "power", "constraints", "events", "crash", "reliability"]
     assert all("outcome" in r and "params" in r for r in reading.method["readings"])
+    assert next(r for r in reading.method["readings"] if r["name"] == "events")["params"] == {"levels": [1, 2, 3, 4], "count": 200}
+    assert next(r for r in reading.method["readings"] if r["name"] == "crash")["params"] == {"count": 20}
     power_input = next(r for r in reading.method["readings"] if r["name"] == "power")
     assert power_input["warnings_total"] == 1
     assert power_input["warnings"] == ["powercfg /a produced no output: the supported sleep states were not observed."]

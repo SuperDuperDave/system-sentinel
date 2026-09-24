@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.9.19] - 2026-09-24
+
+### Improved
+- MCP now guides an agent from Health to a reading chosen by the person's question: Crash and then nearby Record for an unexpected restart, WHEA and Storms for hardware errors, Faults for a program crash or hang, and Signals for broad or unresolved questions. The previous fixed eight-reading tour is no longer the suggested starting path. A Signals lead points to its input's parameters so a follow-up uses the same scope; the new take is still a new observation. Agents can still request every full reading and exact follow-up.
+- Signals' tool description now derives its seven input names and scopes from the collector's actual input list. It takes none of the WHEA readings or Kernel-WHEA/Errors, while System WHEA-Logger records may appear among ordinary recent System events. Its `ok` can contain missing inputs, identified by `gap:inputs` and `method.readings`; `empty` is no noticed pattern in the observed inputs, not a healthy-machine verdict.
+- The synthetic agent-answer measurement now reports question-directed path bytes and underlying bridge-question counts after startup. Its broad Health + Signals path is 7,567 MCP text bytes across eight synthetic source questions; the former eight-reading tour is 163,913 bytes across fourteen. A specific question can use fewer source questions than Signals despite a larger answer.
+
+### Fixed
+- A failed identity retry now clears its shared pending slot before waking callers. A fresh successful lookup can no longer briefly inherit the finished retry's stale refusal. A deterministic held-completion test pins that ordering.
+
+### Limits
+- The path figures come from public synthetic fixtures, not another machine's records or Windows query timings. Three direct synthetic Claude Code probes exercised the routing and a quick overview, but they are not a before-and-after comparison and do not show a general cost reduction. A broad question can still lead to many detailed reads. A directed reading may leave another problem unexplained; Signals is the broad fallback, and hardware-error questions still need the WHEA readings because Signals does not take them.
+
 ## [1.9.18] - 2026-09-24
 
 ### Improved

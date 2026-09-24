@@ -3,7 +3,7 @@
 import asyncio
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import UTC, datetime
 
 import anyio
@@ -13,6 +13,7 @@ from mcp import types
 from mcp.server.subscriptions import ResourceUpdated
 from mcp.shared.exceptions import MCPError
 
+import sentinel.app as app_module
 from sentinel import capture
 from sentinel.app import State, create_app
 from sentinel.bridge import BridgeResult
@@ -191,6 +192,33 @@ def test_crashed_identity_lookup_refuses_before_an_edit_and_retries_after_interv
     bridge.fail = False
     state.learn()  # a later successful direct learning must not be trapped by a stale error
     assert state.redactor.identity.host == "TESTBOX" and bridge.lookups == 3
+
+
+def test_a_finished_retry_clears_its_slot_before_waking_waiters(monkeypatch, tmp_path):
+    monkeypatch.setenv("SYSTEM_SENTINEL_HOME", str(tmp_path))
+    published, release = threading.Event(), threading.Event()
+
+    class HeldCompletion(Future[None]):
+        def set_exception(self, exception):
+            super().set_exception(exception)
+            published.set()
+            release.wait(3)
+
+    monkeypatch.setattr(app_module, "Future", HeldCompletion)
+    bridge = CrashedIdentity()
+    state = State(bridge=bridge, token=TOKEN)
+
+    try:
+        pending = state._pending_relearn()
+        assert pending is not None and published.wait(3)
+        bridge.fail = False
+        state.learn()
+        assert asyncio.run(state.redaction()).identity.host == "TESTBOX"
+        assert bridge.lookups == 2
+        with pytest.raises(app_module.RedactionWithheld):
+            pending.result()
+    finally:
+        release.set()
 
 
 def test_crashed_identity_lookup_refuses_all_sync_edits_before_writing(monkeypatch, tmp_path):

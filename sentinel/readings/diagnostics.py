@@ -841,6 +841,13 @@ SIGNAL_INPUTS: tuple[tuple[str, dict[str, Any]], ...] = (
     ("crash", {"count": SIGNAL_STOP_LIMIT}),
     ("reliability", {}),
 )
+_SIGNAL_INPUT_SCOPES = dict(SIGNAL_INPUTS)
+SIGNAL_INPUT_DESCRIPTION = (
+    f"Inputs: {', '.join(name for name, _ in SIGNAL_INPUTS)}. "
+    f"Events asks for up to {_SIGNAL_INPUT_SCOPES['events']['count']} records at levels "
+    f"{', '.join(str(level) for level in _SIGNAL_INPUT_SCOPES['events']['levels'])}; "
+    f"Crash asks for up to {_SIGNAL_INPUT_SCOPES['crash']['count']} stops. "
+)
 
 # A provider's share of the recent records, not a count: the window is whatever the log
 # held. Below TALKATIVE it is not worth naming; at or above LOUD one source is most of it.
@@ -1420,7 +1427,14 @@ register(
             "Forensic signals across the readings: what is suppressed, where the record has a hole, "
             "what is filling the log, what the machine did between states, and where two parts of "
             "the record disagree. Each signal names the readings it drew on and the rule it came "
-            "from. These are leads to investigate, never a diagnosis."
+            "from. These are leads to investigate, never a diagnosis. "
+            + SIGNAL_INPUT_DESCRIPTION
+            + "Signals takes none of the WHEA readings and does not read the Kernel-WHEA/Errors log. "
+            "System WHEA-Logger records can appear among its recent System events, but no signal classifies "
+            "them as hardware errors. Take whea or storms for hardware errors. "
+            "An ok answer can still lack inputs: read the gap:inputs signal "
+            "and each method.readings outcome. Empty means no pattern was noticed in what was observed, "
+            "not that the machine is healthy."
         ),
         classes=("inferred",),
         take=take_signals,

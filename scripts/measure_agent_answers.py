@@ -13,7 +13,7 @@ import json
 import os
 import re
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -35,6 +35,13 @@ from tests.test_system import HARDWARE
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE_PATH = ROOT / "docs/screens/fixtures/fixture-server.py"
 CRASH_FIXTURE_STOPS = 5
+AGENT_PATHS = (
+    ("Broad or unclear", ("health", "signals")),
+    ("Unexpected restart", ("health", "crash", "record")),
+    ("Hardware errors", ("health", "whea", "storms")),
+    ("Program crashed or hung", ("health", "faults")),
+    ("Former full tour", ("health", "crash", "events", "record", "faults", "storms", "whea", "signals")),
+)
 
 
 @dataclass(frozen=True)
@@ -48,6 +55,7 @@ class Row:
     method_bytes: int
     messages_bytes: int = 0
     properties_bytes: int = 0
+    source_questions: int = 0
 
     def markdown(self) -> str:
         count = f"{self.count:,}" if self.count is not None else "—"
@@ -80,8 +88,10 @@ class AgentSizeBridge:
     def __init__(self) -> None:
         self.screen = fixture_bridge()
         self.diagnostics = payload_bridge()
+        self.questions: list[str] = []
 
     def run(self, script: str, *, timeout: float = 60, depth: int = 6) -> BridgeResult:
+        self.questions.append(script[:80])
         if "dump_inventory = $dump_inventory" in script:
             match = re.search(r"\$system = @\(Get-WinEvent -FilterXml \(\[xml\]\$q\) -MaxEvents (\d+)", script)
             if match is None:
@@ -127,6 +137,16 @@ def bytes_of(value: Any) -> int:
     return len(json.dumps(value, separators=(",", ":")).encode("utf-8"))
 
 
+def path_totals(rows: list[Row]) -> list[tuple[str, int, int, int]]:
+    """Client-facing bytes and synthetic bridge questions for question-directed entry paths."""
+    measured = {row.label: row for row in rows}
+    return [
+        (label, len(names), sum(measured[name].text_bytes for name in names),
+         sum(measured[name].source_questions for name in names))
+        for label, names in AGENT_PATHS
+    ]
+
+
 async def row(surface: Surface, name: str, params: dict[str, Any], label: str) -> Row:
     answer = await surface.call_tool(None, types.CallToolRequestParams(name=name, arguments=params))
     body = answer.structured_content
@@ -167,7 +187,10 @@ async def measure(home: Path, *, heavy: bool = True) -> list[Row]:
     previous_home = os.environ.get("SYSTEM_SENTINEL_HOME")
     os.environ["SYSTEM_SENTINEL_HOME"] = str(home)
     try:
-        fixture = Surface(State(bridge=AgentSizeBridge(), token="synthetic-token"))
+        bridge = AgentSizeBridge()
+        state = State(bridge=bridge, token="synthetic-token")
+        state.learn()  # The app does this at startup; path counts below cover reading work after startup.
+        fixture = Surface(state)
         now = datetime.now(UTC).isoformat()
         rows = []
         for name, params in (
@@ -180,7 +203,9 @@ async def measure(home: Path, *, heavy: bool = True) -> list[Row]:
             ("whea", {}),
             ("signals", {}),
         ):
-            rows.append(await row(fixture, name, params, name))
+            before = len(bridge.questions)
+            answer = await row(fixture, name, params, name)
+            rows.append(replace(answer, source_questions=len(bridge.questions) - before))
         if heavy:
             large = Surface(State(bridge=heavy_bridge(), token="synthetic-token"))
             rows.append(await row(large, "record", {"before": "2026-09-21T00:00:00Z", "count": 2000}, "record: 2,000 generated rows"))
@@ -202,6 +227,10 @@ async def main() -> None:
         print(item.markdown())
         if item.messages_bytes:
             print(f"Heavy raw-field breakdown: Message values {item.messages_bytes:,} bytes; Properties values {item.properties_bytes:,} bytes.")
+    print("\n| Agent path | Readings | MCP text bytes | Synthetic bridge questions |")
+    print("| --- | ---: | ---: | ---: |")
+    for label, readings, text_bytes, questions in path_totals(rows):
+        print(f"| {label} | {readings} | {text_bytes:,} | {questions} |")
 
 
 if __name__ == "__main__":

@@ -212,6 +212,7 @@ class State:
             return pending
 
     def _complete_relearn(self, pending: Future[None]) -> None:
+        failure: RedactionWithheld | None = None
         try:
             self.learn()
         except BaseException as exc:
@@ -220,13 +221,16 @@ class State:
             failure.__cause__ = exc
             with self._relearn_lock:
                 self._relearn_error = exc
-            pending.set_exception(failure)
-        else:
-            pending.set_result(None)
         finally:
             with self._relearn_lock:
                 if self._relearning is pending:
                     self._relearning = None
+        # Publish the result only after clearing the shared slot. A waiter may immediately
+        # perform a fresh successful lookup; it must never inherit this finished failure.
+        if failure is None:
+            pending.set_result(None)
+        else:
+            pending.set_exception(failure)
 
     @property
     def identity(self) -> Identity:

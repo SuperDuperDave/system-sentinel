@@ -11,6 +11,7 @@ where the question is about what a client actually receives.
 
 import asyncio
 import json
+import re
 import zipfile
 
 import httpx
@@ -26,6 +27,7 @@ from sentinel.mcp_server import (
     CATALOG_URI,
     ENVELOPE_SCHEMA,
     HANDOFF_URI,
+    INSTRUCTIONS,
     ROUTE_TOOLS,
     Surface,
     check_tool_names,
@@ -34,6 +36,7 @@ from sentinel.mcp_server import (
 )
 from sentinel.paths import captures_dir
 from sentinel.reading import REGISTRY
+from sentinel.readings.diagnostics import SIGNAL_INPUTS
 from sentinel.stack import PRESET_PROMPTS, slug
 from tests.conftest import FakeBridge, LogBridge, identity_result
 from tests.test_stream import serve
@@ -112,6 +115,19 @@ def test_wire_refusal_does_not_send_the_identity_exception_to_an_agent():
 
 
 # --- what a client is told before it calls anything ------------------------------------------
+
+
+def test_agent_guidance_routes_by_question_and_names_signals_limits():
+    quoted = set(re.findall(r"'([a-z_]+)'", INSTRUCTIONS))
+    answer_terms = {"busy", "method", "moment", "outcome", "sections", "unavailable"}
+    assert quoted <= set(REGISTRY) | set(ROUTE_TOOLS) | answer_terms
+    assert "gap:inputs" in INSTRUCTIONS and "method.readings" in INSTRUCTIONS
+
+    description = REGISTRY["signals"].description
+    assert "gap:inputs" in description and "method.readings" in description
+    assert ("does not read the Kernel-WHEA/Errors log" in description) == (
+        not any(name == "storms" or name.startswith("whea") for name, _ in SIGNAL_INPUTS)
+    )
 
 
 def test_every_tool_says_what_it_does_to_the_machine():
