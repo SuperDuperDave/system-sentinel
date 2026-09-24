@@ -20,12 +20,16 @@ interface CrashesViewState {
   faultId: string | null;
   dumpId: string | null;
   reliabilityDay: string | null;
+  /** The one stop whose on-demand change history is open, with its exact estimated boundary. */
+  changesStopId: string | null;
+  changesBefore: string | null;
   /** Which open evidence to return to after following its System record. */
   focus: 'stop' | 'fault' | 'dump' | null;
 }
 
 const INITIAL_CRASHES_VIEW: CrashesViewState = { stopCount: 5, faultCount: 30, faultKind: null,
-  stopId: null, faultId: null, dumpId: null, reliabilityDay: null, focus: null };
+  stopId: null, faultId: null, dumpId: null, reliabilityDay: null,
+  changesStopId: null, changesBefore: null, focus: null };
 
 export const VIEWS: { id: ViewId; label: string; group: ViewGroup }[] = [
   { id: 'record', label: 'Record', group: 'Evidence' },

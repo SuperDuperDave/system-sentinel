@@ -109,6 +109,8 @@ NODE_PATH=/some/scratch/dir/node_modules TOKEN_FILE=/some/scratch/dir/token PORT
 
 At desktop and phone widths it checks browser Back and the direct return from a Record moment,
 the exact Crash and Signals source-link positions and focus, a stop and fault open together, a selected dump header,
+a stop's on-demand Changes reading with its exact estimated boundary, per-source denial, returned raw row and held return,
+separate windows for two stop times, and no before-stop request when no estimate exists,
 a near-top stop on desktop, an open Signals lead after navigation, no new observed questions on
 return, visible held evidence during a slower failed retake, transport loss, and a new question
 after a 401 and fresh sign-in. It also checks that an unanswered changed count may retry on return

@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.9.25] - 2026-09-24
+
+### Improved
+- Opening a stop with a Windows stop estimate now offers on-demand change history for the seven days before that estimate. Windows Update, device configuration and MSI results stay beside the stop, with per-log outcome and window reach, interpreted rows, the exact returned raw row and the full reading available on request. The disclosure makes no machine query until opened, can be stacked, and stays open with its held observation when an investigation visits Record and returns.
+- Power now warns when its transition ledger reaches the returned-record limit. The warning reaches Signals with the Power input, so a quiet transition rule does not hide that older matching records were not returned. Invalid limit claims are treated as an unobserved transition source.
+- The agent's question-directed guidance names `changes` for nearby installations and device configuration and uses the estimated stop time as the before-stop boundary. It distinguishes a later next start or report filing from the stop itself.
+
+### Limits
+- The change-history control appears only when Windows returned a stop estimate. A report-only stop or next-start record does not establish a before-stop time. Change results are time-adjacent leads, not causes; each log's retention, failure and record cap qualify absence. The view reads a bounded, safe projection rather than collecting arbitrary event messages or device identifiers.
+- A synthetic browser check exercises the on-demand scope, denied source, raw access, different stop boundaries, Record return and no-estimate case at desktop and phone widths. It does not measure the installed app or establish whether a particular change preceded a real incident.
+
 ## [1.9.24] - 2026-09-24
 
 ### Improved

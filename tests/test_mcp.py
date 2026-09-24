@@ -124,6 +124,7 @@ def test_agent_guidance_routes_by_question_and_names_signals_limits():
     assert "gap:inputs" in INSTRUCTIONS and "method.readings" in INSTRUCTIONS
     assert "event_record" in quoted and all(term in INSTRUCTIONS for term in ("record_id", "time_created", "refs_missing", "refs_omitted", "asked_at"))
     assert "When a Signals lead carries refs" in INSTRUCTIONS and "For a lead without refs" in INSTRUCTIONS
+    assert "take 'changes' before stopped_at" in INSTRUCTIONS and "a next start or report filing is a later boundary" in INSTRUCTIONS
     assert "Other Signals leads have no exact-row refs" not in INSTRUCTIONS
 
     description = REGISTRY["signals"].description

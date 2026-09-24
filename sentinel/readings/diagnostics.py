@@ -551,7 +551,9 @@ def _valid_source_field(payload: dict[str, Any], field: str, outcome: str | None
             source = (payload.get("sources") or {}).get("transitions") or {}
             if not (isinstance(source.get("returned"), int) and not isinstance(source.get("returned"), bool)
                     and source["returned"] == len(value) and isinstance(source.get("limit"), int)
-                    and source["limit"] > 0 and isinstance(source.get("limit_reached"), bool)):
+                    and not isinstance(source["limit"], bool) and source["limit"] > 0
+                    and len(value) <= source["limit"] and isinstance(source.get("limit_reached"), bool)
+                    and (not source["limit_reached"] or len(value) == source["limit"])):
                 return False
         return all(isinstance(item, dict) for item in value) if field in ("batteries", "transitions", "modules", "arrays") else True
     if field == "aspm":
@@ -654,6 +656,10 @@ def take_power(bridge: Bridge, params: dict[str, Any]) -> Reading:
 
     reading = from_object("power", params, script, result, build)
     reading.warnings.extend(f"The {name} source did not return its expected fields or outcome." for name in missing)
+    ledger = reading.section("derived")
+    if ledger is not None and ledger.data["ledger"]["limit_reached"] is True:
+        limit = ledger.data["ledger"]["limit"]
+        reading.warnings.append(f"The power transition ledger reached its {limit}-record limit; older matching transitions were not returned.")
     _all_sources_failed(reading)
     return reading
 

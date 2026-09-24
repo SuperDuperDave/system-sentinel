@@ -1,0 +1,30 @@
+.region { margin: 16px 0; border-top: 1px solid var(--rule-soft); border-bottom: 1px solid var(--rule-soft); }
+.trigger { display: flex; align-items: center; justify-content: space-between; gap: 10px 20px; flex-wrap: wrap; width: 100%; min-height: 48px; padding: 10px 0; text-align: left; color: var(--ink); }
+.trigger:hover, .trigger:focus-visible { color: var(--body); }
+.action, .boundary, .listLabel, .itemTop time, .extra, .issue, .sources, .list summary { font: 12px/1.5 var(--font-readout); }
+.action { color: var(--body); }
+.body { padding: 0 0 16px; }
+.scope { max-width: 76ch; margin: 0 0 6px; color: var(--body); font-size: 13px; line-height: 1.5; }
+.boundary { margin: 0 0 12px; color: var(--muted); overflow-wrap: anywhere; }
+.sources { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 12px 0; padding: 0; list-style: none; }
+.sources li { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 10px 12px; background: var(--deep); color: var(--body); overflow-wrap: anywhere; }
+.sources strong { color: var(--ink); font-weight: 500; }
+.listLabel { margin: 15px 0 6px; color: var(--muted); }
+.list { max-height: 420px; overflow: auto; margin: 0; padding: 0 12px; list-style: none; background: var(--deep); }
+.list li { padding: 12px 0; }
+.list li + li { border-top: 1px solid var(--rule-soft); }
+.itemTop { display: flex; align-items: baseline; justify-content: space-between; gap: 5px 12px; flex-wrap: wrap; }
+.itemTop strong { color: var(--ink); font-size: 13px; font-weight: 500; }
+.itemTop time, .extra { color: var(--muted); }
+.subject { margin: 4px 0 0; color: var(--body); font-size: 13px; overflow-wrap: anywhere; }
+.extra, .issue { margin: 3px 0 0; overflow-wrap: anywhere; }
+.issue { color: var(--ink); }
+.list details { margin-top: 5px; }
+.list summary, .full summary { width: fit-content; min-height: 34px; padding: 7px 0; cursor: pointer; color: var(--body); }
+.list pre, .full pre { max-height: 360px; overflow: auto; margin: 4px 0 0; padding: 10px; background: var(--inspection-well); color: var(--body); font-size: 11px; }
+.actions { display: flex; align-items: baseline; gap: 8px 18px; flex-wrap: wrap; margin-top: 12px; }
+.full { min-width: 0; max-width: 100%; }
+@media (max-width: 700px) {
+  .sources { grid-template-columns: minmax(0, 1fr); gap: 3px; }
+  .list { max-height: 320px; }
+}

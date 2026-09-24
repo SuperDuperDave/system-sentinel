@@ -6,6 +6,7 @@ import { OutcomeLine, clock } from '../Outcome';
 import { Basis, Facts, Head, MomentLink, RowList, Section, Segmented, Value, ago, basisOf, byDay, duration, part, size, useKeepButtonInPlace } from '../Sections';
 import { canRestoreCrashView, useReading } from '../useReading';
 import { useApp } from '../store';
+import { ChangesNearStop } from './ChangesNearStop';
 import { ReliabilityHistory } from './ReliabilityHistory';
 import styles from './Crashes.module.css';
 
@@ -164,9 +165,9 @@ const KIND_WORD: Record<string, string> = {
  * which is itself the finding; the bucket WER named is shown as WER's words, not as a cause.
  */
 export function Crashes() {
-  const { stopCount, faultCount, faultKind, stopId, faultId, dumpId, focus } = useApp((s) => s.crashesView);
+  const { stopCount, faultCount, faultKind, stopId, faultId, dumpId, focus, changesBefore } = useApp((s) => s.crashesView);
   const setCrashesView = useApp((s) => s.setCrashesView);
-  const returnTo = useRef(canRestoreCrashView(stopCount, faultCount, focus) ? focus : null);
+  const returnTo = useRef(canRestoreCrashView(stopCount, faultCount, focus, changesBefore) ? focus : null);
   const stopButtons = useRef(new Map<number, HTMLButtonElement>());
   const faultRowsRef = useRef<HTMLDivElement>(null);
   const dumpRowsRef = useRef<HTMLDivElement>(null);
@@ -213,7 +214,7 @@ export function Crashes() {
   }, [crash, faults, dumps, selectedStop, faultId, dumpId]);
 
   function chooseStop(index: number | null) {
-    setCrashesView({ stopId: index === null ? null : stopIdentity(stops[index]), focus: index === null ? null : 'stop' });
+    setCrashesView({ stopId: index === null ? null : stopIdentity(stops[index]), focus: index === null ? null : 'stop', changesStopId: null, changesBefore: null });
   }
 
   function chooseFaultKind(kind: string | null) {
@@ -545,6 +546,8 @@ function StopDetail({ stop, envelope }: { stop: Stop; envelope: Reading | null }
   return (
     <>
       <Facts rows={rows} />
+      {stop.stopped_at ? <ChangesNearStop stopId={stopIdentity(stop)} before={stop.stopped_at} />
+        : <p className={styles.quiet}>Windows did not return a stop estimate, so a change window cannot be placed before this stop. The next start and report filing are later boundaries.</p>}
       {stop.dump?.path && stop.dump.bytes != null ? <DumpHeaderDetail path={stop.dump.path} /> : null}
       {stop.last_record_before?.Message ? <p className={styles.lastRecordMessage}>{stop.last_record_before.Message}</p> : null}
       <StopRawRows stop={stop} envelope={envelope} />

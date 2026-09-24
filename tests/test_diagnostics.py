@@ -24,6 +24,7 @@ from sentinel.readings.diagnostics import (
     MEMORY_SCRIPT,
     PCIE_SCRIPT,
     _aspm,
+    compose_signals,
     constraints_derived,
     memory_derived,
     pcie_address,
@@ -336,6 +337,21 @@ def test_power_counts_the_ledger_and_reports_the_window_it_covers():
     assert derived["uptime_seconds"] > 0
 
 
+def test_a_capped_power_ledger_warns_agents_and_signals_that_older_transitions_are_unseen():
+    transitions = [{**POWER_PAYLOAD["transitions"][0], "RecordId": index + 1} for index in range(120)]
+    payload = dict(POWER_PAYLOAD, transitions=transitions, sources={**POWER_PAYLOAD["sources"],
+        "transitions": {"outcome": "ok", "limit": 120, "limit_reached": True, "returned": 120}})
+    power = asyncio.run(take("power", FakeBridge(BridgeResult("ok", items=[payload])), {}))
+    assert power.section("derived").data["ledger"]["limit_reached"] is True
+    assert any("120-record limit" in warning and "older matching transitions were not returned" in warning for warning in power.warnings)
+
+    signals = compose_signals({name: power if name == "power" else None for name, _ in diagnostics_module.SIGNAL_INPUTS}, {}, {})
+    power_input = next(source for source in signals.method["readings"] if source["name"] == "power")
+    assert power_input["warnings_total"] == 1
+    assert "120-record limit" in power_input["warnings"][0]
+    assert "Observed with warnings: power" in signals.section("signals").basis
+
+
 def test_a_nonbinary_fast_startup_setting_cannot_become_enabled():
     payload = dict(POWER_PAYLOAD, hiberboot_enabled=2)
     assert power_derived(payload)["fast_startup"] is None
@@ -400,6 +416,15 @@ def test_power_mismatched_transition_metadata_cannot_certify_returned_counts():
     assert reading.outcome == "ok"
     assert reading.section("collection").data["transitions"]["outcome"] == "failed"
     assert reading.section("derived").data["ledger"]["records"] is None
+    assert any("transitions source" in warning for warning in reading.warnings)
+
+
+def test_a_transition_limit_claim_requires_that_many_returned_rows():
+    payload = dict(POWER_PAYLOAD, sources={**POWER_PAYLOAD["sources"],
+        "transitions": {"outcome": "ok", "limit": 120, "limit_reached": True, "returned": 5}})
+    reading = asyncio.run(take("power", FakeBridge(BridgeResult("ok", items=[payload])), {}))
+    assert reading.section("collection").data["transitions"]["outcome"] == "failed"
+    assert reading.section("derived").data["ledger"]["limit_reached"] is None
     assert any("transitions source" in warning for warning in reading.warnings)
 
 

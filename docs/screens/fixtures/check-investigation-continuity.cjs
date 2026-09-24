@@ -17,6 +17,8 @@ const stops = Array.from({ length: 5 }, (_, i) => ({ started_at: at, announced_a
     parameters: [], source: 'synthetic', bucket: null }, no_bugcheck_recorded: false, last_record_before: null,
   quiet_seconds: null, records: { start: 420 + i, power_41: 430 + i, eventlog_6008: 440 + i,
     wer_1001: null, report: [] }, power: null, dump: null, dump_inventory_complete: true }));
+stops[0].stopped_at = null;
+stops[3].stopped_at = '2026-09-23T11:00:00.1234567Z';
 stops[4].dump = { name: 'synthetic-five.dmp', path: 'synthetic-dump-five', bytes: 4096,
   modified: at, matched_by: 'synthetic' };
 stops[3].dump = { name: 'synthetic-four.dmp', path: 'synthetic-dump-four', bytes: 4096,
@@ -33,6 +35,17 @@ const fault = { RecordId: 701, Log: 'Application', kind: 'application crash',
   fields: { AppName: 'synthetic.exe', ModuleName: 'synthetic.dll' }, exception: null, process: null };
 const faults = envelope('faults', [section('records', [faultRecord]), section('decoded', [fault], 'derived'),
   section('summary', { by_kind: { 'application crash': 1 }, applications: [], live_kernel: [] }, 'derived')]);
+const changeRaw = { Log: 'System', RecordId: 810, Id: 19, ProviderName: 'Microsoft-Windows-WindowsUpdateClient',
+  TimeCreated: '2026-09-23T12:00:00.000Z', Data: { updateTitle: 'Synthetic update KB1234567' } };
+const changes = envelope('changes', [section('records', [changeRaw]),
+  section('changes', [{ at: changeRaw.TimeCreated, source: 'windows_update', ref: { log: 'System', record_id: 810 },
+    kind: 'update_installed', subject: 'Synthetic update KB1234567', version: null, publisher: null, outside_window: false }], 'derived'),
+  section('collection', { windows_update: { outcome: 'ok', returned: 1, limit: 100, truncated: false },
+    device_configuration: { outcome: 'denied', returned: 0, limit: 100, truncated: null },
+    msi: { outcome: 'empty', returned: 0, limit: 100, truncated: false } }),
+  section('coverage', { windows_update: { complete: true }, device_configuration: { complete: null }, msi: { complete: true } }, 'derived')]);
+changes.count = 1;
+changes.warnings = ['device_configuration did not answer: synthetic access denied'];
 const dumps = envelope('dumps', [section('files', [])], 'empty');
 const reliability = envelope('reliability', [section('days', { from: '2026-09-23', to: '2026-09-24', days: [
   { day: '2026-09-23', index_last: 8, index_min: 8, records: { information: 1 }, event_types: [] },
@@ -44,7 +57,7 @@ function assert(ok, message) { if (!ok) throw Error(message); }
   const browser = await chromium.launch();
   for (const width of [1440, 390]) {
     const page = await browser.newPage({ viewport: { width, height: 900 } });
-    const requests = { crash: 0, faults: 0, dumps: 0, reliability: 0, signals: 0, dump_header: 0 };
+    const requests = { crash: 0, faults: 0, dumps: 0, reliability: 0, signals: 0, dump_header: 0, changes: 0 };
     let crashMode = 'ok';
     await page.route('**/api/readings/**', async route => {
       const name = new URL(route.request().url()).pathname.split('/').pop();
@@ -54,6 +67,13 @@ function assert(ok, message) { if (!ok) throw Error(message); }
         else if (crashMode === 'lost') await route.fulfill({ status: 503, json: { detail: 'Synthetic transport loss' } });
         else if (crashMode === 'closed') await route.fulfill({ status: 401, json: { detail: 'Synthetic session closed' } });
         else await route.fulfill({ json: crash });
+        return;
+      }
+      if (name === 'changes') {
+        const params = new URL(route.request().url()).searchParams;
+        assert([at, stops[3].stopped_at].includes(params.get('before')) && params.get('hours') === '168' && params.get('count') === '100',
+          'Changes did not use this stop’s estimated boundary and requested scope');
+        await route.fulfill({ json: changes });
         return;
       }
       const answer = { faults, dumps, reliability, signals }[name];
@@ -88,6 +108,26 @@ function assert(ok, message) { if (!ok) throw Error(message); }
     else await page.getByRole('button', { name: /September 23, 2026 UTC/ }).click();
     await stop.scrollIntoViewIfNeeded();
     await stop.click();
+    assert(requests.changes === 0, 'opening a stop eagerly took its change history');
+    const changeButton = page.getByRole('button', { name: /What changed before Windows/ });
+    await changeButton.scrollIntoViewIfNeeded();
+    const changeTop = await changeButton.evaluate(el => el.getBoundingClientRect().top);
+    await changeButton.click();
+    await page.getByText('Synthetic update KB1234567', { exact: true }).waitFor();
+    assert(requests.changes === 1, 'opening change history did not take exactly one reading');
+    assert(Math.abs(await changeButton.evaluate(el => el.getBoundingClientRect().top) - changeTop) < 4,
+      'opening change history moved its clicked control');
+    assert(await page.getByText('not read · denied').count() === 1, 'a refused change source looked complete');
+    assert(await page.getByText('window reach unknown').count() === 1, 'a refused change source lost its reach');
+    await page.getByText('Source row · System record 810').click();
+    const rawChange = page.locator('section[aria-label="Changes before the estimated stop"] ol pre').first();
+    await rawChange.waitFor();
+    assert((await rawChange.textContent()).includes('Microsoft-Windows-WindowsUpdateClient'), 'the returned raw row is not inspectable');
+    assert(await page.getByText(/nearby change is a lead to inspect, not proof of a cause/).count() === 1,
+      'the nearby-change panel claimed a cause');
+    if (process.env.SCREENSHOT_DIR) await page.locator('section[aria-label="Changes before the estimated stop"]').screenshot({
+      path: `${process.env.SCREENSHOT_DIR}/changes-near-stop-${width}.png`,
+    });
     await page.getByText('synthetic-five', { exact: true }).waitFor();
     const moment = page.locator('#stop-detail-4 button', { hasText: 'The record before this' }).first();
     await moment.scrollIntoViewIfNeeded();
@@ -107,7 +147,9 @@ function assert(ok, message) { if (!ok) throw Error(message); }
     assert(await page.locator('#reliability-day').inputValue() === '2026-09-23', 'Back lost selected reliability day');
     assert(requests.crash === beforeReturn.crash && requests.faults === beforeReturn.faults &&
       requests.dumps === beforeReturn.dumps && requests.reliability === beforeReturn.reliability &&
-      requests.dump_header === beforeReturn.dump_header, 'Back re-asked held Crashes readings');
+      requests.dump_header === beforeReturn.dump_header && requests.changes === beforeReturn.changes,
+      'Back re-asked held Crashes readings');
+    assert(await changeButton.getAttribute('aria-expanded') === 'true', 'Back closed the open change history');
     assert(await page.getByText(/held reading/).count() >= 1, 'held evidence is not labelled');
     await delay(900);
     assert(Math.abs(await moment.evaluate(el => el.getBoundingClientRect().top) - afterBack.top) < 4, 'late jump after Back');
@@ -198,9 +240,18 @@ function assert(ok, message) { if (!ok) throw Error(message); }
     assert(await page.getByText('synthetic-five', { exact: true }).count() === 0,
       'another dump file inherited the previous file header');
     assert(requests.dump_header === 2, 'opening another dump file did not ask for its header');
+    await page.getByRole('button', { name: /What changed before Windows/ }).click();
+    assert(requests.changes === 2, 'a different stop boundary inherited the first change history');
     await stop.click();
     await page.getByText('synthetic-five', { exact: true }).waitFor();
     assert(requests.dump_header === 2, 'returning to the exact dump file re-asked its held header');
+    const noEstimate = page.locator('button[aria-controls="stop-detail-0"]');
+    await noEstimate.click();
+    assert(await page.getByText(/change window cannot be placed before this stop/).count() === 1,
+      'a stop without an estimated stop time offered a false before-stop window');
+    assert(await page.getByRole('button', { name: /What changed before Windows/ }).count() === 0,
+      'a stop without an estimated stop time offered a change request');
+    await stop.click();
     crashMode = 'slow-failed';
     await page.getByRole('button', { name: 'last 20' }).click();
     assert(await stop.count() === 1, 'changing count collapsed held stops');

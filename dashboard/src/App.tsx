@@ -113,10 +113,10 @@ function Shell() {
     const formerView = previousNavigation.current.split('\u0000')[0];
     previousNavigation.current = current;
     closeMobileNavigation();
-    const { viewScroll, crashesView: { stopCount, faultCount, focus }, recordOrigin, recordReturnKey } = useApp.getState();
+    const { viewScroll, crashesView: { stopCount, faultCount, focus, changesBefore }, recordOrigin, recordReturnKey } = useApp.getState();
     // Restore only against evidence available at first paint. The requested Crashes section
     // determines which earlier panels must also be held for the saved position to be meaningful.
-    const crashesReady = canRestoreCrashView(stopCount, faultCount, focus);
+    const crashesReady = canRestoreCrashView(stopCount, faultCount, focus, changesBefore);
     const returning = formerView !== view && viewScroll[view] !== undefined &&
       (view === 'crashes' ? crashesReady : view === 'signals' && hasHeldReading('signals'));
     window.scrollTo(0, returning ? viewScroll[view]! : 0);

@@ -55,6 +55,7 @@ INSTRUCTIONS = (
     "Take 'health' first to check whether the bridge can answer, then choose by the person's question. "
     "For an unexpected restart or system stop, take 'crash', using 'moment' when the person names a time. "
     "Use 'record' before a stop's started_at when the stop has one, for nearby System evidence; the last record before the next start may be later than the estimated stop, so compare timestamps. "
+    "When looking for nearby installations or device configuration, take 'changes' before stopped_at if Windows estimated that time; a next start or report filing is a later boundary, not the stop time. Check each log's coverage; proximity does not establish cause. "
     "For hardware errors, take 'whea' across both WHEA logs, then 'storms' for System report traffic over time; "
     "use 'whea_window' around a moment and 'whea_record' for one exact report. "
     "For a program that crashed or hung while Windows kept running, take 'faults'. "
