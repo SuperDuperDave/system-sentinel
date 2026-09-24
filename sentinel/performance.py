@@ -168,8 +168,17 @@ def locked(path: Path, timeout: float = 5.0) -> Iterator[None]:
     try:
         yield
     finally:
-        _native_lock(handle, False)
-        handle.close()
+        try:
+            _native_lock(handle, False)
+        except OSError:
+            # The body may already have committed. Closing the handle also releases the OS lock;
+            # an unlock error must not turn a saved change into a misleading failed reply.
+            pass
+        finally:
+            try:
+                handle.close()
+            except OSError:
+                pass
 
 
 def _atomic_json(path: Path, data: dict[str, Any]) -> None:

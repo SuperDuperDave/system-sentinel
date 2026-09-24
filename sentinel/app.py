@@ -230,7 +230,7 @@ def create_app(state: State | None = None, mcp: bool = True) -> FastAPI:
 
     @app.exception_handler(StoreUnavailable)
     async def saved_context_unavailable(_request: Request, exc: StoreUnavailable) -> JSONResponse:
-        return JSONResponse({"error": "saved_context_unavailable", "detail": str(exc)}, status_code=503)
+        return JSONResponse({"error": "saved_context_unavailable", "reason": exc.reason, "detail": str(exc)}, status_code=503)
 
     async def handoff_changed() -> None:
         if mcp_app is not None:
@@ -489,16 +489,16 @@ def create_app(state: State | None = None, mcp: bool = True) -> FastAPI:
     @app.delete("/api/prompts/{prompt_id}", tags=["stack"])
     def prompts_remove(prompt_id: str) -> dict[str, Any]:
         try:
-            state.prompts.remove(prompt_id)
+            remaining = state.prompts.remove(prompt_id)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=f"no prompt {prompt_id!r}") from exc
         handoff_changed_from_route()
-        return {"prompts": state.prompts.all()}
+        return {"prompts": remaining}
 
     @app.post("/api/captures", tags=["captures"])
     async def captures_create(unredacted: bool = False) -> Response:
-        """Take readings that need no exact selection, write the ZIP into the data directory and return it. Takes as
-        long as the slowest query on this machine; nothing is sent anywhere."""
+        """Take readings that need no exact selection in turn and return their ZIP. Their costs add up;
+        nothing is sent anywhere."""
         made = await capture.create(state.bridge, state.stack, state.prompts, None if unredacted else state.redactor, reader=state.readings.take)
         return FileResponse(made.path, media_type="application/zip", filename=made.name, headers={"X-Capture-Name": made.name})
 

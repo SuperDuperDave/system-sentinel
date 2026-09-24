@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.9.7] - 2026-09-24
+
+### Fixed
+- Saved Stack and prompt failures now distinguish a lock not obtained in time, inaccessible files, damaged content, edits that did not reach replacement, and edits whose result must be checked. HTTP gives agents a stable `reason` beside the existing error and detail; MCP refusals lead with it. Prompt deletion answers with the list its own transaction wrote.
+- A failed unlock after a completed saved-file edit no longer tells a client the edit failed and invites a duplicate retry. Damaged saved files are still refused, never replaced with an empty one.
+- Capture and benchmark descriptions now say their readings run in turn, so their costs add up. Concurrent capture collection remains unmeasured and is unchanged.
+
+### Limits
+- A failed replacement is reported as `uncertain` even when it may not have changed the file; inspect saved state before retrying. A hard stop can leave a dot-named scratch copy of private or recoverable data. The app preserves it for manual review rather than deleting a possible recovery source.
+
 ## [1.9.6] - 2026-09-24
 
 ### Fixed

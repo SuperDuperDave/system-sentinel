@@ -289,7 +289,7 @@ CAPTURE_TOOLS: dict[str, RouteTool] = {
             "Take readings that need no exact selection and write them with saved Stack context and a manifest into "
             "one ZIP in the captures directory. The manifest names readings omitted because they need a selection "
             "and saved context unavailable at capture time. "
-            "Takes as long as the slowest query on this machine. Nothing is sent anywhere.",
+            "Readings are taken in turn, so their costs add up. Nothing is sent anywhere.",
             _NO_ARGUMENTS,
             _capture_create,
             effect="changes",
@@ -500,7 +500,7 @@ class Surface:
             except Duplicate as exc:
                 return _refused(f"this observation ({exc.asked_at or 'time unknown'}) is already on the stack as item {exc}")
             except StoreUnavailable as exc:
-                return _refused(str(exc))
+                return _refused(f"{exc.reason}: {exc}")
             except KeyError as exc:
                 return _refused(f"nothing on the stack with id {exc}")
             except ValueError as exc:
@@ -525,7 +525,7 @@ class Surface:
         try:
             prompts = self.state.prompts.all()
         except StoreUnavailable as exc:
-            raise MCPError(types.INTERNAL_ERROR, str(exc)) from exc
+            raise MCPError(types.INTERNAL_ERROR, f"{exc.reason}: {exc}") from exc
         return types.ListPromptsResult(
             prompts=[types.Prompt(name=p["id"], title=p.get("name"), description=p.get("description") or None) for p in prompts]
         )
@@ -534,7 +534,7 @@ class Surface:
         try:
             prompt = self.state.prompts.get(params.name)
         except StoreUnavailable as exc:
-            raise MCPError(types.INTERNAL_ERROR, str(exc)) from exc
+            raise MCPError(types.INTERNAL_ERROR, f"{exc.reason}: {exc}") from exc
         if prompt is None:
             raise MCPError(types.INVALID_PARAMS, f"no prompt {params.name!r}")
         return types.GetPromptResult(
@@ -554,7 +554,7 @@ class Surface:
             try:
                 text = compose(self.state.stack, self.state.prompts, self.state.redactor)["text"]
             except StoreUnavailable as exc:
-                raise MCPError(types.INTERNAL_ERROR, str(exc)) from exc
+                raise MCPError(types.INTERNAL_ERROR, f"{exc.reason}: {exc}") from exc
             return _resource(uri, "text/markdown", text)
         raise MCPError(types.INVALID_PARAMS, f"no resource at {uri!r}")
 

@@ -18,8 +18,8 @@ other one through. The transport a section names is the one that carried its que
 sets the pool's size before the first question and reads back what the bridge did with it, so a
 question that fell back to a launch is counted on the line rather than hidden in the numbers.
 
-A default run takes each reading that needs no exact file or event selection, the heavy readings included, so it is as slow as the slowest query
-on the machine. `--readings a,b` narrows it when only some are in question; a selection-dependent reading named without a reference is marked not taken. `--runs N` buys a
+A default run takes each reading that needs no exact file or event selection in turn, the heavy readings included, so their costs add up.
+`--readings a,b` narrows it when only some are in question; a selection-dependent reading named without a reference is marked not taken. `--runs N` buys a
 tail worth reading, since a p95 over three runs is only the slowest of the three.
 
 Nothing here names a machine, a person or a path, and `bench` refuses to write a document that

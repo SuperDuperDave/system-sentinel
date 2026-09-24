@@ -25,7 +25,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from .bridge import Bridge
 from .paths import data_dir
@@ -79,6 +79,10 @@ class Duplicate(Exception):
 
 class StoreUnavailable(Exception):
     """Saved Stack or prompt data could not be read or changed without risking its contents."""
+
+    def __init__(self, reason: Literal["busy", "unreadable", "invalid", "not_saved", "uncertain"], detail: str):
+        super().__init__(detail)
+        self.reason = reason
 
 
 @dataclass
@@ -168,16 +172,18 @@ class Store:
             raw = self.path.read_text(encoding="utf-8")
         except FileNotFoundError:
             if not self.path.parent.is_dir():
-                raise StoreUnavailable(f"{self.path.name} directory is unavailable; no new file was written") from None
+                raise StoreUnavailable("unreadable", f"{self.path.name} directory is unavailable; no new file was written") from None
             return json.loads(json.dumps(self._empty))
-        except (OSError, UnicodeError) as exc:
-            raise StoreUnavailable(f"{self.path.name} could not be read; its file was left intact") from exc
+        except UnicodeError as exc:
+            raise StoreUnavailable("invalid", f"{self.path.name} is not valid UTF-8; its file was left intact") from exc
+        except OSError as exc:
+            raise StoreUnavailable("unreadable", f"{self.path.name} could not be read; its file was left intact") from exc
         try:
             loaded = json.loads(raw)
         except json.JSONDecodeError as exc:
-            raise StoreUnavailable(f"{self.path.name} is not valid JSON; its file was left intact") from exc
+            raise StoreUnavailable("invalid", f"{self.path.name} is not valid JSON; its file was left intact") from exc
         if not isinstance(loaded, dict):
-            raise StoreUnavailable(f"{self.path.name} has an invalid shape; its file was left intact")
+            raise StoreUnavailable("invalid", f"{self.path.name} has an invalid shape; its file was left intact")
         return loaded
 
     def write(self, state: dict[str, Any]) -> None:
@@ -188,9 +194,13 @@ class Store:
                 json.dump(state, handle, ensure_ascii=False, indent=1)
                 handle.flush()
                 os.fsync(handle.fileno())
-            temporary.replace(self.path)
         except OSError as exc:
-            raise StoreUnavailable(f"{self.path.name} could not be written; inspect it before retrying") from exc
+            raise StoreUnavailable("not_saved", f"{self.path.name} could not be prepared; the saved file was not changed") from exc
+        else:
+            try:
+                temporary.replace(self.path)
+            except OSError as exc:
+                raise StoreUnavailable("uncertain", f"{self.path.name} replacement could not be confirmed; read the saved file before retrying") from exc
         finally:
             try:
                 temporary.unlink(missing_ok=True)
@@ -201,14 +211,22 @@ class Store:
     def transaction(self) -> Iterator[None]:
         with self._lock:
             if not self.path.parent.is_dir():
-                raise StoreUnavailable(f"{self.path.name} directory is unavailable; no new file was written")
+                raise StoreUnavailable("unreadable", f"{self.path.name} directory is unavailable; no new file was written")
+            acquired = False
             try:
                 with locked(self.path.with_name(self.path.name + ".lock")):
+                    acquired = True
                     yield
             except StoreUnavailable:
                 raise
-            except (OSError, TimeoutError) as exc:
-                raise StoreUnavailable(f"{self.path.name} lock is unavailable; inspect the saved file before retrying") from exc
+            except TimeoutError as exc:
+                if acquired:
+                    raise StoreUnavailable("uncertain", f"{self.path.name} operation stopped unexpectedly; read the saved file before retrying") from exc
+                raise StoreUnavailable("busy", f"{self.path.name} lock was not obtained within five seconds; no saved data was changed") from exc
+            except OSError as exc:
+                if acquired:
+                    raise StoreUnavailable("uncertain", f"{self.path.name} operation could not be confirmed; read the saved file before retrying") from exc
+                raise StoreUnavailable("unreadable", f"{self.path.name} lock file could not be opened; no saved data was changed") from exc
 
 
 class Stack:
@@ -238,11 +256,11 @@ class Stack:
             or not isinstance(raw.get("system_prompt", True), bool)
             or raw.get("prompt_id") is not None and not isinstance(raw["prompt_id"], str)
         ):
-            raise StoreUnavailable("stack.json has an invalid shape; the file was left intact")
+            raise StoreUnavailable("invalid", "stack.json has an invalid shape; the file was left intact")
         try:
             items = [item_from_dict(i).to_dict() for i in saved]
         except (KeyError, TypeError, ValueError) as exc:
-            raise StoreUnavailable("stack.json contains a malformed item; the file was left intact") from exc
+            raise StoreUnavailable("invalid", "stack.json contains a malformed item; the file was left intact") from exc
         if any(
             not isinstance(item["id"], str) or not isinstance(item["added_at"], str)
             or item["kind"] not in KINDS
@@ -252,7 +270,7 @@ class Stack:
             or item["note"] is not None and not isinstance(item["note"], str)
             for item in items
         ):
-            raise StoreUnavailable("stack.json contains a malformed item; the file was left intact")
+            raise StoreUnavailable("invalid", "stack.json contains a malformed item; the file was left intact")
         return {"items": items, "prompt_id": raw.get("prompt_id"), "system_prompt": bool(raw.get("system_prompt", True))}
 
     def add(self, item: Item) -> Item:
@@ -342,7 +360,7 @@ class Prompts:
             or not isinstance(p.get("name"), str) or not isinstance(p.get("content"), str)
             for p in prompts
         ):
-            raise StoreUnavailable("prompts.json has an invalid shape; the file was left intact")
+            raise StoreUnavailable("invalid", "prompts.json has an invalid shape; the file was left intact")
         return prompts
 
     def get(self, prompt_id: str | None) -> dict[str, Any] | None:
@@ -376,13 +394,14 @@ class Prompts:
                     return prompt
         raise KeyError(prompt_id)
 
-    def remove(self, prompt_id: str) -> None:
+    def remove(self, prompt_id: str) -> list[dict[str, Any]]:
         with self.store.transaction():
             prompts = self._all_locked()
             kept = [p for p in prompts if p["id"] != prompt_id]
             if len(kept) == len(prompts):
                 raise KeyError(prompt_id)
             self.store.write({"prompts": kept, "seeded": True})
+            return kept
 
 
 async def new_item(stack: Stack, bridge: Bridge, body: dict[str, Any], *, reader: ReadingCall | None = None) -> Item:

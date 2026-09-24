@@ -4,6 +4,8 @@ import asyncio
 import copy
 import json
 import os
+import subprocess
+import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -658,6 +660,7 @@ def test_unreadable_stack_is_reported_and_never_overwritten(client: TestClient, 
     ):
         response = client.request(method, route, headers=AUTH, json=body)
         assert response.status_code == 503 and response.json()["error"] == "saved_context_unavailable"
+        assert response.json()["reason"] == "invalid"
         assert path.read_bytes() == contents
 
 
@@ -677,7 +680,9 @@ def test_mcp_resources_name_unavailable_saved_context(client: TestClient):
     surface = client.app.state.mcp_surface
     path = client.app.state.sentinel.stack.store.path
     path.write_bytes(b"{broken")
-    with pytest.raises(MCPError, match="stack.json is not valid JSON"):
+    answer = call(client, "stack_list")
+    assert answer.get("isError") is True and "invalid: stack.json is not valid JSON" in answer["content"][0]["text"]
+    with pytest.raises(MCPError, match="invalid: stack.json is not valid JSON"):
         asyncio.run(surface.read_resource(None, types.ReadResourceRequestParams(uri="sentinel://handoff")))
     path.unlink()
     prompt_path = client.app.state.sentinel.prompts.store.path
@@ -716,7 +721,7 @@ def test_transient_stack_read_failure_is_not_an_empty_stack(client: TestClient, 
 
     monkeypatch.setattr(Path, "read_text", unavailable)
     response = client.post("/api/stack/items", headers=AUTH, json={"kind": "note", "note": "new evidence"})
-    assert response.status_code == 503
+    assert response.status_code == 503 and response.json()["reason"] == "unreadable"
     assert path.exists() is False
 
 
@@ -810,9 +815,131 @@ def test_local_queue_still_respects_a_separate_file_lock_holder(tmp_path, monkey
     original = path.read_bytes()
     monkeypatch.setattr(stack_module, "locked", lambda file: file_locked(file, timeout=0.05))
     with file_locked(tmp_path / "stack.json.lock"):
-        with pytest.raises(StoreUnavailable):
+        with pytest.raises(StoreUnavailable) as blocked:
             Stack(path).add(Item(id="one", added_at="2026-09-24T00:00:00Z", kind="note", title="one", note="one"))
+    assert blocked.value.reason == "busy"
     assert path.read_bytes() == original
+
+
+def test_lock_open_failure_is_unreadable_without_waiting_for_contention(tmp_path, monkeypatch: pytest.MonkeyPatch):
+    path = tmp_path / "stack.json"
+    lock_path = tmp_path / "stack.json.lock"
+    original_open = Path.open
+    attempts = 0
+
+    def blocked_open(self: Path, *args, **kwargs):
+        nonlocal attempts
+        if self == lock_path:
+            attempts += 1
+            raise PermissionError("synthetic lock file refusal")
+        return original_open(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", blocked_open)
+    with pytest.raises(StoreUnavailable) as unavailable:
+        Stack(path).state()
+    assert unavailable.value.reason == "unreadable" and attempts == 1
+
+
+def test_hard_exit_leaves_old_stack_intact_and_preserves_recovery_scratch(tmp_path):
+    path = tmp_path / "stack.json"
+    Stack(path).add(Item(id="saved", added_at="2026-09-24T00:00:00Z", kind="note", title="saved", note="saved"))
+    original = path.read_bytes()
+    child = """
+import os
+import sys
+from pathlib import Path
+from sentinel.stack import Item, Stack
+path = Path(sys.argv[1])
+Path.replace = lambda self, target: os._exit(3)
+Stack(path).add(Item(id='interrupted', added_at='2026-09-24T00:00:01Z', kind='note', title='interrupted', note='interrupted'))
+"""
+    result = subprocess.run([sys.executable, "-c", child, str(path)], cwd=Path(__file__).resolve().parents[1], capture_output=True, timeout=20, check=False)
+    assert result.returncode == 3, result.stderr.decode(errors="replace")
+    assert path.read_bytes() == original
+    orphans = list(tmp_path.glob(".stack.json.*.tmp"))
+    assert len(orphans) == 1 and orphans[0].stat().st_size > 0
+    unrelated = [tmp_path / ".stack.json.nothex.tmp", tmp_path / f".prompts.json.{'a' * 32}.tmp", tmp_path / "stack.json.bak"]
+    for file in unrelated:
+        file.write_text("leave alone")
+    assert [item["id"] for item in Stack(path).state()["items"]] == ["saved"]
+    Stack(path).clear()
+    assert orphans[0].exists() and all(file.exists() for file in unrelated)
+
+
+def test_interrupted_first_save_does_not_look_committed_or_erase_scratch(tmp_path):
+    path = tmp_path / "stack.json"
+    child = """
+import os
+import sys
+from pathlib import Path
+from sentinel.stack import Item, Stack
+Path.replace = lambda self, target: os._exit(3)
+Stack(Path(sys.argv[1])).add(Item(id='first', added_at='2026-09-24T00:00:00Z', kind='note', title='first', note='first'))
+"""
+    result = subprocess.run([sys.executable, "-c", child, str(path)], cwd=Path(__file__).resolve().parents[1], capture_output=True, timeout=20, check=False)
+    assert result.returncode == 3, result.stderr.decode(errors="replace")
+    orphan = next(tmp_path.glob(".stack.json.*.tmp"))
+    assert not path.exists()
+    assert Stack(path).state()["items"] == []
+    assert orphan.exists()  # an interrupted first save is available for manual recovery
+
+
+def test_save_failure_distinguishes_unapplied_and_uncertain_changes(client: TestClient, monkeypatch: pytest.MonkeyPatch):
+    path = client.app.state.sentinel.stack.store.path
+    first = client.post("/api/stack/items", headers=AUTH, json={"kind": "note", "note": "first"})
+    assert first.status_code == 201
+    original = path.read_bytes()
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "fsync", lambda _fd: (_ for _ in ()).throw(OSError(28, "synthetic full disk")))
+        failed = client.post("/api/stack/items", headers=AUTH, json={"kind": "note", "note": "second"})
+    assert failed.status_code == 503 and failed.json()["reason"] == "not_saved"
+    assert path.read_bytes() == original
+
+    original_replace = Path.replace
+    with monkeypatch.context() as patch:
+        def replaced_then_lost_reply(self: Path, target: Path):
+            original_replace(self, target)
+            raise OSError("synthetic lost replacement reply")
+
+        patch.setattr(Path, "replace", replaced_then_lost_reply)
+        uncertain = client.post("/api/stack/items", headers=AUTH, json={"kind": "note", "note": "second"})
+    assert uncertain.status_code == 503 and uncertain.json()["reason"] == "uncertain"
+    assert path.read_bytes() != original
+    assert [item["note"] for item in client.get("/api/stack", headers=AUTH).json()["items"]] == ["first", "second"]
+
+
+def test_unlock_error_after_save_does_not_invite_duplicate_retry(tmp_path, monkeypatch: pytest.MonkeyPatch):
+    from sentinel import performance
+
+    native_lock = performance._native_lock
+
+    def release_fails(handle, acquire, blocking=False):
+        if not acquire:
+            raise OSError("synthetic unlock failure")
+        return native_lock(handle, acquire, blocking)
+
+    path = tmp_path / "stack.json"
+    with monkeypatch.context() as patch:
+        patch.setattr(performance, "_native_lock", release_fails)
+        Stack(path).add(Item(id="saved", added_at="2026-09-24T00:00:00Z", kind="note", title="saved", note="saved"))
+    assert [item["id"] for item in Stack(path).state()["items"]] == ["saved"]
+
+
+def test_prompt_delete_answer_is_from_its_transaction(client: TestClient, monkeypatch: pytest.MonkeyPatch):
+    prompts = client.app.state.sentinel.prompts
+    removed_id = prompts.all()[0]["id"]
+    original_remove = prompts.remove
+
+    def remove_then_another_client_adds(prompt_id: str):
+        remaining = original_remove(prompt_id)
+        prompts.add("Later prompt")
+        return remaining
+
+    monkeypatch.setattr(prompts, "remove", remove_then_another_client_adds)
+    response = client.delete(f"/api/prompts/{removed_id}", headers=AUTH)
+    assert response.status_code == 200
+    assert "Later prompt" not in {prompt["name"] for prompt in response.json()["prompts"]}
+    assert "Later prompt" in {prompt["name"] for prompt in prompts.all()}
 
 
 def test_remove_answer_is_the_state_its_transaction_wrote(client: TestClient, monkeypatch: pytest.MonkeyPatch):

@@ -68,7 +68,8 @@ def measure_case(root: Path, n: int) -> dict:
         ).to_dict()
         for i in range(n)
     ]
-    stack.store.write({"items": items, "prompt_id": None, "system_prompt": True})
+    with stack.store.transaction():
+        stack.store.write({"items": items, "prompt_id": None, "system_prompt": True})
     initial_bytes = path.stat().st_size
     first_id = items[0]["id"]
     list_ms = timed(lambda: index_state(stack.state()))

@@ -364,7 +364,7 @@ function Captures({ captures, onTaken, guard }: { captures: Capture[]; onTaken: 
     <>
       <p className={styles.what}>
         Readings that need no exact file or event selection, taken now and written into the data directory as one ZIP: an envelope for each, the stack, and the handoff when saved context is available. The manifest names anything omitted or unavailable.
-        Hardware errors are a bounded newest-record preview in the ZIP; exact WHEA records and decoded detail need a selected record and are omitted. It takes as long as the slowest query on this machine. Nothing is sent anywhere. The list below reads each manifest; it does not verify the rest of the ZIP.
+        Hardware errors are a bounded newest-record preview in the ZIP; exact WHEA records and decoded detail need a selected record and are omitted. Readings are taken in turn, so their costs add up. Nothing is sent anywhere. The list below reads each manifest; it does not verify the rest of the ZIP.
       </p>
       <p className={styles.handoffLine}>
         <button

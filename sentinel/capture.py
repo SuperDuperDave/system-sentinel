@@ -1,8 +1,8 @@
 """Captures: readings that can be taken without a selection, written to one ZIP on disk.
 
 A capture is what a person hands to someone who is not at the machine, or keeps for the day the
-machine will not start. It holds one envelope per automatically selectable reading — the heavy ones included, so it takes
-as long as the slowest query on this machine — the stack as it stands, the composed handoff, and
+machine will not start. It holds one envelope per automatically selectable reading. It takes them
+in turn, heavy ones included, so their costs add up. It also holds the stack as it stands, the composed handoff, and
 a manifest that lists exactly the members with each reading's outcome and size. A reading that
 needs an exact event or file reference is listed as omitted in that manifest. A reading that was
 attempted but could not answer is written with its outcome, never hidden.
