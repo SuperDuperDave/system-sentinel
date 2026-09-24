@@ -1,9 +1,7 @@
 <!--
-The release notes, as a template. .github/workflows/release.yml renders it on a tag: it strips
-this comment and replaces {{VERSION}} with the version the source states, {{TAG}} with the tag
-being released, and {{SHA256}} with the checksum of the executable it just built. Nothing else is
-substituted, so anything a particular release needs to say is edited here before the tag is
-pushed, and the draft release is editable afterwards.
+The release notes template. build/windows/render_notes.py inserts the matching CHANGELOG.md
+entry and replaces the version, tag and executable hash. Keep this file to evergreen install,
+privacy and verification guidance; put release-specific changes in the changelog before tagging.
 
 "Tested on" below says only what the workflow itself establishes on every commit. A clean-machine
 run is a claim about one release and nobody can make it true from here: add the sentence when the
@@ -13,11 +11,7 @@ A stethoscope for a Windows computer. It gathers the record the machine keeps of
 
 ## New in {{VERSION}}
 
-**A bounded window around the moment you are investigating.** `events` and `faults` now accept an exclusive `before` end alongside `since`. The result says where the retained log reaches, whether the whole requested window is complete, and how far the machine had observed when the query began. A future end is never called complete. `changes` follows that same upper-reach rule. Returned rows outside a requested window remain available as raw evidence and lower the completeness claim.
-
-**Nearby fault reports without losing the System record.** A moment-framed Record view can open Application crashes, hangs and live kernel reports filed within one hour on either side. It shows that source's coverage, interpreted facts and exact raw records, with a Stack handoff for an agent. A nearby report is a lead, not proof of a cause; a report can be filed after a fault.
-
-**Clearer agent handoffs.** Compact `events` and `record` Stack summaries now carry the log query's source outcome and retention reach beside citable `Log:RecordId` rows. Selected rows keep that context and the exact raw record. The Agents catalog accurately says recognized profile-path segments are masked, rather than claiming an entire path field disappears.
+{{CHANGES}}
 
 **Update from 1.1.0 or later in the app.** Choose *Check for updates…* from the tray's version menu. From a source install, run `system-sentinel update`. The tool checks only when asked, verifies the downloaded file before starting it, and preserves the token, stack and prompts. An installed 1.0.1 still needs one manual download to gain this action.
 

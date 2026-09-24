@@ -103,16 +103,14 @@ jobs:
           "sha256=$hash" >> $env:GITHUB_OUTPUT
           Write-Host ($lines -join "`n")
 
-      - name: The notes, rendered from the template
+      - name: The notes, rendered from this version's changelog
         shell: pwsh
         run: |
           $tag = if ("${{ github.ref_type }}" -eq "tag") { "${{ github.ref_name }}" } else { "main" }
-          $notes = Get-Content build\windows\notes.md -Raw
-          $notes = [regex]::Replace($notes, '^\s*<!--.*?-->\s*', '', 'Singleline')
-          $notes = $notes.Replace("{{VERSION}}", "${{ steps.version.outputs.version }}")
-          $notes = $notes.Replace("{{TAG}}", $tag)
-          $notes = $notes.Replace("{{SHA256}}", "${{ steps.checksum.outputs.sha256 }}")
-          [IO.File]::WriteAllText("dist\notes.md", $notes)
+          python build\windows\render_notes.py `
+            --version "${{ steps.version.outputs.version }}" --tag $tag `
+            --sha256 "${{ steps.checksum.outputs.sha256 }}" --output dist\notes.md
+          if ($LASTEXITCODE -ne 0) { throw "the release notes could not be rendered" }
 
       - name: Where the executable came from
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
