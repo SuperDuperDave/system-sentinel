@@ -9,8 +9,10 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import ipaddress
+import threading
 import time
 from collections.abc import AsyncIterator, Callable
+from concurrent.futures import Future
 from pathlib import Path
 from typing import Any, Literal
 
@@ -25,8 +27,8 @@ from . import __version__, capture, readings  # noqa: F401  (readings registers 
 from .auth import LINK_TTL, TokenMiddleware, bearer, clear_session_cookie, code_expiry, code_valid, load_or_create_token, matches, session_cookie
 from .bridge import Bridge, shutdown_sessions
 from .link import qr_svg, reach, sign_in_link
-from .performance import KEEP_DAYS, PerformanceCollector, PerformanceStore
-from .reading import REGISTRY, Reading
+from .performance import KEEP_DAYS, MAX_INTERVAL, MIN_INTERVAL, PerformanceCollector, PerformanceStore
+from .reading import REGISTRY
 from .readings.health import learn_identity
 from .redact import Identity, Redactor
 from .serialization import json_safe_integers
@@ -125,6 +127,9 @@ class State:
         self.on_quit: Callable[[], None] | None = None
         self._redactor = Redactor()
         self._learned_at: float | None = None
+        self._relearn_lock = threading.Lock()
+        self._relearning: Future[None] | None = None
+        self._relearn_error: BaseException | None = None
         self.stack = Stack()
         self.prompts = Prompts()
         self.spent_codes: dict[str, float] = {}
@@ -171,6 +176,48 @@ class State:
             identity = Identity(host=previous.host or learned.host, user=previous.user or learned.user)
         self._redactor = Redactor(identity)
 
+    def _pending_relearn(self) -> Future[None] | None:
+        """One identity attempt for all callers; a failed attempt is not a weaker policy."""
+        with self._relearn_lock:
+            if self._relearning is not None:
+                return self._relearning
+            due = self.identity.host is None and (self._learned_at is None or time.time() - self._learned_at > RELEARN_SECONDS)
+            if not due:
+                if self._relearn_error is not None and self.identity.host is None:
+                    raise RuntimeError("identity lookup failed; redacted answer withheld") from self._relearn_error
+                return None
+            self._learned_at = time.time()
+            pending: Future[None] = Future()
+            pending.set_running_or_notify_cancel()
+            self._relearning = pending
+            try:
+                threading.Thread(target=self._complete_relearn, args=(pending,), name="sentinel-identity-relearn", daemon=True).start()
+            except BaseException as exc:
+                failure = RuntimeError("identity lookup failed; redacted answer withheld")
+                failure.__cause__ = exc
+                self._relearning = None
+                self._relearn_error = failure
+                pending.set_exception(failure)
+            return pending
+
+    def _complete_relearn(self, pending: Future[None]) -> None:
+        try:
+            self.learn()
+        except BaseException as exc:
+            failure = RuntimeError("identity lookup failed; redacted answer withheld")
+            failure.__cause__ = exc
+            with self._relearn_lock:
+                self._relearn_error = failure
+            pending.set_exception(failure)
+        else:
+            with self._relearn_lock:
+                self._relearn_error = None
+            pending.set_result(None)
+        finally:
+            with self._relearn_lock:
+                if self._relearning is pending:
+                    self._relearning = None
+
     @property
     def identity(self) -> Identity:
         return self._redactor.identity
@@ -180,8 +227,20 @@ class State:
         """The policy with the machine's names in it. If the names were never learned (the bridge
         was not answering when the server started), try again, at most once a minute, so the
         default cannot quietly stay weaker than it should for the life of the process."""
-        if self.identity.host is None and (self._learned_at is None or time.time() - self._learned_at > RELEARN_SECONDS):
-            self.learn()
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            pass
+        else:
+            raise RuntimeError("await State.redaction() on the event loop")
+        if (pending := self._pending_relearn()) is not None:
+            pending.result()
+        return self._redactor
+
+    async def redaction(self) -> Redactor:
+        """Wait for the same identity policy without occupying the event loop or a worker."""
+        if (pending := self._pending_relearn()) is not None:
+            await asyncio.shield(asyncio.wrap_future(pending))
         return self._redactor
 
 
@@ -242,14 +301,14 @@ def create_app(state: State | None = None, mcp: bool = True) -> FastAPI:
         if mcp_app is not None:
             anyio.from_thread.run(mcp_app.state.surface.handoff_changed)
 
-    def guarded(payload: Any, unredacted: bool = False, status_code: int = 200) -> JSONResponse:
-        """The one way anything leaves: redacted unless the caller asked for the real values by name."""
-        if not unredacted:
-            payload = state.redactor.attach(payload)
+    def respond(payload: Any, policy: Redactor | None, status_code: int = 200) -> JSONResponse:
+        if policy is not None:
+            payload = policy.attach(payload)
         return JSONResponse(json_safe_integers(payload), status_code=status_code)
 
-    def envelope(reading: Reading, unredacted: bool) -> JSONResponse:
-        return guarded(reading.to_dict(), unredacted)
+    def guarded(payload: Any, unredacted: bool = False, status_code: int = 200) -> JSONResponse:
+        """Synchronous routes run in a worker and wait for the same current identity policy."""
+        return respond(payload, None if unredacted else state.redactor, status_code)
 
     @app.post("/api/session", tags=["session"])
     def open_session(session: Session, request: Request) -> Response:
@@ -364,22 +423,26 @@ def create_app(state: State | None = None, mcp: bool = True) -> FastAPI:
     @app.put("/api/performance/collection", tags=["performance"])
     def configure_performance(change: PerformanceCollectionChange) -> Response:
         """Stop or resume background sampling, and choose its cost/precision cadence."""
+        if not MIN_INTERVAL <= change.interval_seconds <= MAX_INTERVAL:
+            raise HTTPException(status_code=422, detail=f"interval_seconds must be {MIN_INTERVAL}–{MAX_INTERVAL} and enabled must be a boolean")
+        policy = state.redactor
         try:
             settings = state.performance_store.configure(change.enabled, change.interval_seconds)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         except (OSError, TimeoutError) as exc:
             raise HTTPException(status_code=503, detail="Local performance settings are unavailable") from exc
-        return guarded({"settings": settings, "last_attempt": state.performance_store.status(), "retention_days": KEEP_DAYS})
+        return respond({"settings": settings, "last_attempt": state.performance_store.status(), "retention_days": KEEP_DAYS}, policy)
 
     @app.delete("/api/performance/history", tags=["performance"])
     def clear_performance() -> Response:
         """Clear locally kept numeric samples. Future samples resume if collection remains enabled."""
+        policy = state.redactor
         try:
             cleared = state.performance_store.clear()
         except (OSError, TimeoutError) as exc:
             raise HTTPException(status_code=503, detail="Local performance history is unavailable") from exc
-        return guarded({"cleared_files": cleared, "settings": state.performance_store.settings()})
+        return respond({"cleared_files": cleared, "settings": state.performance_store.settings()}, policy)
 
     @app.get("/api/readings/{name}", tags=["readings"])
     async def reading(name: str, request: Request, unredacted: bool = False) -> Response:
@@ -391,7 +454,8 @@ def create_app(state: State | None = None, mcp: bool = True) -> FastAPI:
             result = await state.readings.take(name, params)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
-        return envelope(result, unredacted)
+        policy = None if unredacted else await state.redaction()
+        return await asyncio.to_thread(lambda: respond(result.to_dict(), policy))
 
     @app.get("/api/stream", tags=["stream"])
     async def stream(request: Request, unredacted: bool = False) -> Response:
@@ -408,23 +472,26 @@ def create_app(state: State | None = None, mcp: bool = True) -> FastAPI:
     @app.patch("/api/stack", tags=["stack"])
     def stack_choose(choice: StackChoice, unredacted: bool = False) -> Response:
         """Change which prompt leads the handoff, or whether one does at all."""
+        policy = None if unredacted else state.redactor
         changed = state.stack.choose(prompt_id=choice.prompt_id, system_prompt=choice.system_prompt, set_prompt="prompt_id" in choice.model_fields_set)
         handoff_changed_from_route()
-        return guarded(index_state(changed), unredacted)
+        return respond(index_state(changed), policy)
 
     @app.delete("/api/stack", tags=["stack"])
     def stack_clear() -> Response:
+        policy = state.redactor
         cleared = state.stack.clear()
         handoff_changed_from_route()
-        return guarded(index_state(cleared))
+        return respond(index_state(cleared), policy)
 
     @app.post("/api/stack/items", tags=["stack"], status_code=201)
     async def stack_add(item: NewStackItem, unredacted: bool = False) -> Response:
         """Add evidence: a reading the server takes now, a reading the caller holds, some of its
         records, or a note. The same observation and selection are refused."""
+        policy = None if unredacted else await state.redaction()
         try:
             added = await new_item(state.stack, state.bridge, item.model_dump(exclude_unset=True), reader=state.readings.take)
-            response = guarded(index_entry(state.stack.add(added).to_dict()), unredacted, status_code=201)
+            response = respond(index_entry(state.stack.add(added).to_dict()), policy, status_code=201)
             await handoff_changed()
             return response
         except Duplicate as exc:
@@ -442,8 +509,9 @@ def create_app(state: State | None = None, mcp: bool = True) -> FastAPI:
 
     @app.patch("/api/stack/items/{item_id}", tags=["stack"])
     def stack_change(item_id: str, change: ItemChange, unredacted: bool = False) -> Response:
+        policy = None if unredacted else state.redactor
         try:
-            response = guarded(index_entry(state.stack.update(item_id, rank=change.rank, verbosity=change.verbosity, title=change.title)), unredacted)
+            response = respond(index_entry(state.stack.update(item_id, rank=change.rank, verbosity=change.verbosity, title=change.title)), policy)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=f"no item {item_id!r}") from exc
         except ValueError as exc:
@@ -453,12 +521,13 @@ def create_app(state: State | None = None, mcp: bool = True) -> FastAPI:
 
     @app.delete("/api/stack/items/{item_id}", tags=["stack"])
     def stack_remove(item_id: str) -> Response:
+        policy = state.redactor
         try:
             remaining = state.stack.remove(item_id)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=f"no item {item_id!r}") from exc
         handoff_changed_from_route()
-        return guarded(index_state(remaining))
+        return respond(index_state(remaining), policy)
 
     @app.get("/api/stack/composed", tags=["stack"])
     def stack_composed(unredacted: bool = False) -> Response:
@@ -499,7 +568,8 @@ def create_app(state: State | None = None, mcp: bool = True) -> FastAPI:
     async def captures_create(unredacted: bool = False) -> Response:
         """Take readings that need no exact selection in turn and return their ZIP. Their costs add up;
         nothing is sent anywhere."""
-        made = await capture.create(state.bridge, state.stack, state.prompts, None if unredacted else state.redactor, reader=state.readings.take)
+        policy = None if unredacted else await state.redaction()
+        made = await capture.create(state.bridge, state.stack, state.prompts, policy, reader=state.readings.take)
         return FileResponse(made.path, media_type="application/zip", filename=made.name, headers={"X-Capture-Name": made.name})
 
     @app.get("/api/captures", tags=["captures"])

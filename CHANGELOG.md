@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.9.9] - 2026-09-24
+
+### Fixed
+- When the machine's names must be relearned after a failed identity probe, redacted async HTTP and MCP requests now wait for one shared lookup without freezing other clients or occupying a worker thread per waiter. The triggering answer uses the new policy; cancelling one request does not cancel the lookup for others.
+- Stack and performance edits acquire their redaction policy before changing saved data. An unexpected identity-lookup exception therefore refuses an edit before it lands, instead of reporting failure after a successful change.
+
+### Limits
+- On native Windows the inherited machine name normally avoids this relearn path; the measured event-loop stall came from a synthetic delayed probe in a development-style unknown-identity state. A routine unavailable lookup keeps the prior policy and retries no more than once per minute. An unexpected lookup exception with no known host refuses redacted answers until the next attempt or a successful direct learn and can close a connected live stream. Saved Stack I/O and capture assembly on async paths remain to be measured separately.
+
 ## [1.9.8] - 2026-09-24
 
 ### Changed

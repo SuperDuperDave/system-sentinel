@@ -21,6 +21,7 @@ transport. Nothing in the surface knows about JSON-RPC.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
@@ -491,7 +492,7 @@ class Surface:
             return _refused(NEEDS_REASON)
         tool = ROUTE_TOOLS.get(params.name)
         if tool is not None:
-            redactor = None if unredacted else self.state.redactor
+            redactor = None if unredacted else await self.state.redaction()
             if params.name == "capture_create" and reason:
                 # The capture outlives this tool result; keep the stated reason inside its ZIP.
                 arguments["reason"] = reason
@@ -516,7 +517,8 @@ class Surface:
             reading = await self.state.readings.take(reading_name, arguments)
         except ValueError as exc:
             return _refused(str(exc))
-        body = reading.to_dict() if unredacted else self.state.redactor.attach(reading.to_dict())
+        policy = None if unredacted else await self.state.redaction()
+        body = await asyncio.to_thread(lambda: reading.to_dict() if policy is None else policy.attach(reading.to_dict()))
         return _answer(_warned(body, reason))
 
     async def list_prompts(self, _ctx: Any = None, _params: Any = None) -> types.ListPromptsResult:
@@ -552,7 +554,8 @@ class Surface:
             return _resource(uri, "application/json", body)
         if uri == HANDOFF_URI:
             try:
-                text = compose(self.state.stack, self.state.prompts, self.state.redactor)["text"]
+                policy = await self.state.redaction()
+                text = (await asyncio.to_thread(compose, self.state.stack, self.state.prompts, policy))["text"]
             except StoreUnavailable as exc:
                 raise MCPError(types.INTERNAL_ERROR, f"{exc.reason}: {exc}") from exc
             return _resource(uri, "text/markdown", text)
