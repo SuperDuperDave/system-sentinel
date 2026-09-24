@@ -8,7 +8,10 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-from sentinel import readings  # noqa: F401
+from sentinel import (
+    __version__,
+    readings,  # noqa: F401
+)
 from sentinel.bridge import Bridge, BridgeResult
 from sentinel.reading import REGISTRY, Param, Reading, Section, Spec, from_bridge, from_object, take
 from sentinel.readings.events import _utc_stamp, events_script, record_script, since_clause
@@ -24,6 +27,7 @@ def test_ok_reading_has_one_raw_section_and_a_count():
     assert d["method"] == {"kind": "powershell", "query": "Get-WinEvent"}
     assert d["error"] is None and d["redacted"] == []
     assert d["asked_at"].endswith("Z")
+    assert d["sentinel_version"] == __version__
 
 
 def test_take_measures_composition_instead_of_trusting_an_inner_time(monkeypatch):

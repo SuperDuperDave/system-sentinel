@@ -5,10 +5,11 @@ see one stack; the composed handoff is a route an agent reads without a clipboar
 operation reads the file, changes it and writes it back under a lock, so there is no in-memory
 copy to drift from what is on disk and a second process sees what the first wrote.
 
-An item keeps the reading's envelope as it was at the moment of adding: its ``asked_at``,
-``outcome`` and ``method`` are the item's provenance, and the composed text states them, so a
-reading that failed cannot enter a handoff disguised as a finding. The same observation and
-selection are refused rather than stacked twice; a later reading is a new observation.
+An item keeps the reading's envelope as it was at the moment of adding. Its origin records
+whether this server took it for the Stack or a client supplied it; older items remain unknown.
+The composed text attributes supplied outcomes to their envelopes, so a failed or unverified
+reading cannot enter a handoff disguised as a fresh machine observation. The same observation
+and selection are refused rather than stacked twice; a later reading is a new observation.
 """
 
 from __future__ import annotations
@@ -96,6 +97,7 @@ class Item:
     reading: dict[str, Any] | None = None
     ids: list[int | str] | None = None
     note: str | None = None
+    origin: Literal["taken", "supplied"] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -108,6 +110,7 @@ class Item:
             "reading": self.reading,
             "ids": self.ids,
             "note": self.note,
+            "origin": self.origin,
         }
 
     @property
@@ -124,6 +127,7 @@ class Item:
 
 
 def item_from_dict(raw: dict[str, Any]) -> Item:
+    origin = raw.get("origin")
     return Item(
         id=raw["id"],
         added_at=raw["added_at"],
@@ -134,6 +138,7 @@ def item_from_dict(raw: dict[str, Any]) -> Item:
         reading=raw.get("reading"),
         ids=raw.get("ids"),
         note=raw.get("note"),
+        origin=origin if origin in ("taken", "supplied") else None,
     )
 
 
@@ -149,6 +154,8 @@ def index_entry(item: dict[str, Any]) -> dict[str, Any]:
             "asked_at": fields.get("asked_at") if isinstance(fields.get("asked_at"), str) else None,
             "outcome": fields.get("outcome") if isinstance(fields.get("outcome"), str) else None,
             "count": fields.get("count") if type(fields.get("count")) is int and fields["count"] >= 0 else None,
+            "origin": item.get("origin") if item.get("origin") in ("taken", "supplied") else None,
+            "sentinel_version": fields.get("sentinel_version") if isinstance(fields.get("sentinel_version"), str) and len(fields["sentinel_version"]) <= 64 else None,
         }
     return {key: item.get(key) for key in ("id", "added_at", "kind", "title", "rank", "verbosity", "ids", "note")} | {"provenance": provenance}
 
@@ -426,6 +433,7 @@ async def new_item(stack: Stack, bridge: Bridge, body: dict[str, Any], *, reader
         raise ValueError(f"verbosity must be one of {list(VERBOSITIES)}")
 
     envelope: dict[str, Any] | None = None
+    origin: Literal["taken", "supplied"] | None = None
     ids: list[int | str] | None = None
     note: str | None = None
 
@@ -451,10 +459,12 @@ async def new_item(stack: Stack, bridge: Bridge, body: dict[str, Any], *, reader
             if not isinstance(params, dict):
                 raise ValueError("'take' parameters must be an object")
             envelope = (await reader(name, params) if reader else await take(name, bridge, params)).to_dict()
+            origin = "taken"
         else:
             if not isinstance(given, dict):
                 raise ValueError("'envelope' must be a reading as the API returned it")
             envelope = dict(given)
+            origin = "supplied"
             sections = envelope.get("sections")
             valid_sections = isinstance(sections, list) and all(
                 isinstance(section, dict) and isinstance(section.get("name"), str)
@@ -488,6 +498,7 @@ async def new_item(stack: Stack, bridge: Bridge, body: dict[str, Any], *, reader
         reading=envelope,
         ids=ids,
         note=note,
+        origin=origin,
     )
 
 
@@ -580,7 +591,15 @@ def _item_lines(position: int, item: dict[str, Any]) -> list[str]:
     params = _params_text(envelope["params"] if isinstance(envelope.get("params"), dict) else {})
     lines.append(f"- reading: `{envelope.get('reading', 'unknown')}`" + (f" ({params})" if params else ""))
     lines.append(f"- asked at: {envelope.get('asked_at', 'unknown')}")
-    lines.append(f"- outcome: {_outcome_text(envelope)}")
+    origin = item.get("origin")
+    if origin == "taken":
+        lines.append("- origin: taken by Sentinel for this Stack")
+    elif origin == "supplied":
+        lines.append("- origin: held reading, stored as received (Sentinel checked its shape, not its content)")
+    else:
+        lines.append("- origin: not recorded")
+    label = "outcome" if origin == "taken" else "outcome as held" if origin == "supplied" else "outcome as saved"
+    lines.append(f"- {label}: {_outcome_text(envelope, voice='sentinel' if origin == 'taken' else 'envelope')}")
     if isinstance(envelope.get("count"), int):
         lines.append(f"- reading count: {envelope['count']}")
     if item.get("verbosity") == "summary" and envelope.get("reading") in (*LOG_READINGS, "whea", "whea_window", "faults"):
@@ -626,7 +645,8 @@ def _item_lines(position: int, item: dict[str, Any]) -> list[str]:
     if envelope.get("outcome") not in ("ok", "empty"):
         error = envelope.get("error") if isinstance(envelope.get("error"), dict) else {}
         detail = error.get("detail") or ""
-        lines += [f"The machine was not observed{': ' + detail if detail else ''}.", ""]
+        subject = "The machine" if origin == "taken" else "The envelope says the machine"
+        lines += [f"{subject} was not observed{': ' + detail if detail else ''}.", ""]
         source_context = [section for section in sections if section.get("name") in ("collection", "coverage")]
         if source_context:
             lines += _json_block(source_context)
@@ -680,12 +700,13 @@ def _item_lines(position: int, item: dict[str, Any]) -> list[str]:
     return lines
 
 
-def _outcome_text(envelope: dict[str, Any]) -> str:
+def _outcome_text(envelope: dict[str, Any], *, voice: Literal["sentinel", "envelope"] = "sentinel") -> str:
     outcome = envelope.get("outcome", "unknown")
     if not isinstance(outcome, str):
         return "unknown — the stored outcome is malformed"
     if outcome == "unavailable" and isinstance(envelope.get("error"), dict) and envelope["error"].get("kind") == "local_store":
-        return "unavailable — not observed: local performance history could not be read"
+        said = "not observed: local performance history could not be read"
+        return f"unavailable — {'the envelope says ' if voice == 'envelope' else ''}{said}"
     said = {
         "ok": "the machine was observed",
         "empty": "the query ran and matched nothing",
@@ -694,7 +715,7 @@ def _outcome_text(envelope: dict[str, Any]) -> str:
         "denied": "not observed: Windows refused",
         "timeout": "not observed: the query did not finish",
     }.get(outcome)
-    return f"{outcome} — {said}" if said else str(outcome)
+    return f"{outcome} — {'the envelope says ' if voice == 'envelope' else ''}{said}" if said else str(outcome)
 
 
 def _records(envelope: dict[str, Any]) -> list[dict[str, Any]] | None:

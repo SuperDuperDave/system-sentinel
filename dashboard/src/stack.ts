@@ -20,7 +20,8 @@ export interface StackItem {
   rank: number;
   verbosity: Verbosity;
   provenance: { reading: string | null; params: Record<string, unknown> | null; asked_at: string | null;
-    outcome: string | null; count: number | null } | null;
+    outcome: string | null; count: number | null; origin: 'taken' | 'supplied' | null;
+    sentinel_version: string | null } | null;
   ids: (number | string)[] | null;
   note: string | null;
 }

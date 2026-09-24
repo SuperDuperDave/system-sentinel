@@ -13,6 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import sentinel.capture as capture
+from sentinel import __version__
 from sentinel.app import State, create_app
 from sentinel.bridge import BridgeResult
 from sentinel.capture import MAX_LIST_MANIFEST_BYTES, STALE_PENDING_SECONDS, listing
@@ -71,6 +72,7 @@ def test_a_capture_holds_automatic_readings_the_stack_and_the_handoff(client: Te
     assert listed["composed.md"]["prompt"]["state"] == "included"
     assert "exact WHEA fields" in listed["readings/whea.json"]["scope"]
     assert json.loads(files["readings/events.json"])["sections"][0]["data"][0]["Id"] == 41
+    assert json.loads(files["readings/events.json"])["sentinel_version"] == __version__
     assert "it froze while idle" in files["composed.md"].decode()
     assert json.loads(files["stack.json"])["items"][0]["note"] == "it froze while idle"
 

@@ -212,8 +212,9 @@ function Item({ item, onChange, onRemove }: { item: StackItem; onChange: (c: { r
         {item.kind}
         {item.kind === 'selection' ? ` · ${selectedCount} ${selectedNoun}${selectedCount === 1 ? '' : 's'}` : ''}
         {provenance?.reading ? ` · ${provenance.reading}` : ''}
+        {provenance?.origin === 'supplied' ? ' · held' : provenance && provenance.origin == null ? ' · origin unknown' : ''}
         {provenance ? <span className={lost ? styles.lost : styles.fine}> · {provenance.outcome == null ? 'outcome unknown' : lost ? `not observed: ${provenance.outcome}` : provenance.outcome}</span> : null}
-        {observedAt ? ` · observed ${observedAt}` : ''}
+        {observedAt ? ` · ${provenance?.origin === 'taken' && !lost ? 'observed' : 'asked'} ${observedAt}` : ''}
         {` · added ${ago(item.added_at)}`}
       </p>
       <div className={styles.itemControls}>

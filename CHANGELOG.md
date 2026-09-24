@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.9.17] - 2026-09-24
+
+### Improved
+- New reading envelopes identify the System Sentinel version that produced them. The stamp follows the reading through HTTP, MCP, Stack and captures, so later readers can interpret old timing and field contracts. A supplied envelope's stamp remains its own claim.
+- Stack records whether Sentinel took a reading for this Stack or a client supplied a held envelope. The index, handoff and dashboard show that origin; supplied and old unknown-origin outcomes are attributed to their saved envelopes instead of asserted as new machine observations. Clients cannot set the origin through HTTP or MCP. Existing items with no origin remain unknown through edits.
+
+### Limits
+- Origin describes the Stack add path, not proof that a saved file was never edited outside the API. Older builds may drop the new origin on a rewrite; the current build then treats it as unknown. Version stamps in supplied envelopes are not authenticated.
+
 ## [1.9.16] - 2026-09-24
 
 ### Improved

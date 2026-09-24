@@ -16,6 +16,7 @@ from fastapi.testclient import TestClient
 from mcp import types
 from mcp.shared.exceptions import MCPError
 
+from sentinel import __version__
 from sentinel.app import State, create_app
 from sentinel.bridge import BridgeResult
 from sentinel.reading import take
@@ -513,7 +514,8 @@ def test_stack_index_keeps_provenance_without_looking_like_a_partial_reading(cli
         assert "reading" not in item and "sections" not in item and "method" not in item
     saved = full_item(client, reading["id"])["reading"]
     assert reading["provenance"] == {"reading": "events", "params": saved["params"],
-                                     "asked_at": saved["asked_at"], "outcome": "ok", "count": 2}
+                                     "asked_at": saved["asked_at"], "outcome": "ok", "count": 2,
+                                     "origin": "taken", "sentinel_version": __version__}
     assert note["provenance"] is None
     listed = client.get("/api/stack", headers=AUTH).json()
     assert listed["items"] == [{key: value for key, value in item.items() if key != "redacted"} for item in (reading, note)]
@@ -550,6 +552,7 @@ def test_malformed_saved_reading_has_unknown_index_fields_without_losing_the_ite
     listed = client.get("/api/stack", headers=AUTH).json()["items"][0]
     assert listed["id"] == item["id"] and listed["provenance"] == {
         "reading": "events", "params": None, "asked_at": None, "outcome": None, "count": None,
+        "origin": "taken", "sentinel_version": __version__,
     }
     assert full_item(client, item["id"])["reading"]["params"] == ["wrong shape"]
     assert path.read_bytes() == before
@@ -559,6 +562,7 @@ def test_malformed_saved_reading_has_unknown_index_fields_without_losing_the_ite
     missing = client.get("/api/stack", headers=AUTH).json()["items"][0]
     assert missing["kind"] == "reading" and missing["provenance"] == {
         "reading": None, "params": None, "asked_at": None, "outcome": None, "count": None,
+        "origin": "taken", "sentinel_version": None,
     }
     assert full_item(client, item["id"])["reading"] is None
 
@@ -1120,6 +1124,56 @@ def test_an_envelope_the_caller_holds_is_stored_as_given(client: TestClient):
     assert item["title"] == "What I already had"
     assert item["provenance"]["asked_at"] == held["asked_at"]
     assert full_item(client, item["id"])["reading"]["asked_at"] == held["asked_at"]
+    assert item["provenance"]["origin"] == "supplied"
+    assert item["provenance"]["sentinel_version"] == __version__
+
+
+def test_stack_names_who_supplied_an_outcome_without_claiming_it_as_an_observation(client: TestClient):
+    held = client.get("/api/readings/events?count=1", headers=AUTH).json()
+    held["sentinel_version"] = "a-client-claim"
+    held["origin"] = "taken"
+    added = add(client, kind="reading", envelope=held, origin="taken")
+    assert added["provenance"]["origin"] == "supplied"
+    assert added["provenance"]["sentinel_version"] == "a-client-claim"
+    saved = full_item(client, added["id"])
+    assert saved["origin"] == "supplied" and saved["reading"] == held
+    text = client.get("/api/stack/composed", headers=AUTH).json()["text"]
+    assert "- origin: held reading, stored as received" in text
+    assert "- outcome as held: ok — the envelope says the machine was observed" in text
+    assert "- outcome: ok — the machine was observed" not in text
+
+    denied = {**held, "asked_at": "2026-09-24T18:00:00Z", "outcome": "denied", "error": {"kind": "denied", "detail": "Access refused"}}
+    add(client, kind="reading", envelope=denied)
+    text = client.get("/api/stack/composed", headers=AUTH).json()["text"]
+    assert "- outcome as held: denied — the envelope says not observed: Windows refused" in text
+    assert "The envelope says the machine was not observed: Access refused." in text
+
+
+def test_legacy_stack_origin_stays_unknown_after_edit(client: TestClient):
+    item = add(client, kind="reading", take={"name": "events", "params": {"count": 1}})
+    path = client.app.state.sentinel.stack.store.path
+    state = json.loads(path.read_text())
+    state["items"][0].pop("origin")
+    state["items"][0]["reading"].pop("sentinel_version")
+    path.write_text(json.dumps(state))
+    listed = client.get("/api/stack", headers=AUTH).json()["items"][0]
+    assert listed["provenance"]["origin"] is None and listed["provenance"]["sentinel_version"] is None
+    assert "- outcome as saved: ok — the envelope says the machine was observed" in client.get("/api/stack/composed", headers=AUTH).json()["text"]
+    edited = client.patch(f"/api/stack/items/{item['id']}", headers=AUTH, json={"rank": 1}).json()
+    assert edited["provenance"]["origin"] is None
+    assert json.loads(path.read_text())["items"][0]["origin"] is None
+
+
+@pytest.mark.parametrize("bad_origin", [None, 7, "forged", ["taken"]])
+def test_unknown_saved_origin_is_not_promoted_to_taken(client: TestClient, bad_origin):
+    item = add(client, kind="reading", take={"name": "events", "params": {"count": 1}})
+    path = client.app.state.sentinel.stack.store.path
+    state = json.loads(path.read_text())
+    state["items"][0]["origin"] = bad_origin
+    path.write_text(json.dumps(state))
+    assert client.get("/api/stack", headers=AUTH).json()["items"][0]["provenance"]["origin"] is None
+    client.patch(f"/api/stack/items/{item['id']}", headers=AUTH, json={"rank": 1})
+    assert json.loads(path.read_text())["items"][0]["origin"] is None
 
 
 def test_rank_verbosity_and_title_change_and_items_go_away(client: TestClient):
@@ -1338,7 +1392,9 @@ def test_fault_summary_carries_grouped_meaning_and_retention(client: TestClient)
     assert add(client, kind="reading", envelope=envelope)["verbosity"] == "summary"
     routed = client.get("/api/stack/composed", headers=AUTH)
     assert routed.status_code == 200 and '"by_kind"' in routed.json()["text"]
-    assert len(summary) < len(full) / 2
+    summary_evidence = summary[summary.index("\n```json\n"):]
+    full_evidence = full[full.index("\n```json\n"):]
+    assert len(summary_evidence) < len(full_evidence) / 2
     assert '"by_kind"' in summary and '"applications"' in summary
     assert '"name": "example.exe"' in summary and "ucrtbase.dll" in summary
     assert '"name": "access violation"' in summary and '"code": "0x141"' in summary
@@ -1436,6 +1492,7 @@ def test_the_composed_handoff(client: TestClient):
     assert text.index("QUANTUM DIAGNOSTICIAN") < text.index(f"## 1. {summary['title']}") < text.index("## 2.") < text.index("## 3.")
     assert "- reading: `events` (log=System, levels=1,2, count=2, order=newest)" in text
     assert "- outcome: ok — the machine was observed" in text and "- reading count: 2" in text
+    assert "- origin: taken by Sentinel for this Stack" in text
     assert "- record cutoff: limit=2, returned=2, truncated=" in text
     assert "- method: powershell" in text and "- class: raw" in text and "- kind: selection" in text
 
@@ -1492,6 +1549,15 @@ def call(client: TestClient, name: str, arguments: dict | None = None) -> dict:
     response = client.post("/mcp", json={"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": name, "arguments": arguments or {}}}, headers=MCP_HEADERS)
     assert response.status_code == 200, response.text
     return response.json()["result"]
+
+
+def test_mcp_stack_add_cannot_claim_a_held_envelope_was_taken(client: TestClient):
+    held = client.get("/api/readings/events?count=1", headers=AUTH).json()
+    held["origin"] = "taken"
+    added = json.loads(call(client, "stack_add", {"kind": "reading", "origin": "taken", "envelope": held})["content"][0]["text"])
+    assert added["provenance"]["origin"] == "supplied"
+    exact = json.loads(call(client, "stack_item", {"id": added["id"]})["content"][0]["text"])
+    assert exact["origin"] == "supplied" and exact["reading"]["origin"] == "taken"
 
 
 def test_the_agent_sees_the_same_stack(client: TestClient):

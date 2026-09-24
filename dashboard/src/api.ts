@@ -17,6 +17,8 @@ export interface Section<T = unknown> {
 
 export interface Reading<T = unknown> {
   reading: string;
+  /** The producing Sentinel version when recorded; old or held envelopes may omit or claim it. */
+  sentinel_version?: string;
   params: Record<string, unknown>;
   asked_at: string;
   took_ms: number;

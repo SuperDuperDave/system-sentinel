@@ -21,6 +21,7 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Any, Literal
 
+from . import __version__
 from .bridge import Bridge, BridgeResult, Outcome
 
 Class = Literal["raw", "derived", "invariant", "inferred"]
@@ -69,6 +70,7 @@ class Reading:
         # useful prefix before reaching the bulk of the answer.
         return {
             "reading": self.reading,
+            "sentinel_version": __version__,
             "params": self.params,
             "outcome": self.outcome,
             "count": self.count,

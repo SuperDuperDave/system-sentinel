@@ -90,6 +90,7 @@ ENVELOPE_SCHEMA: dict[str, Any] = {
     "description": "The reading envelope: what was asked, whether the machine was observed, and the evidence kept apart by class.",
     "properties": {
         "reading": {"type": "string", "description": "The reading's name in the catalog."},
+        "sentinel_version": {"type": "string", "description": "The System Sentinel version that produced this envelope. Older stored envelopes may omit it."},
         "params": {"type": "object", "description": "What was asked for, after the catalog's defaults and coercion."},
         "asked_at": {"type": "string", "description": "Stamped when the reading was composed near its answer, UTC by this computer's clock; not when collection began."},
         "took_ms": {"type": "integer", "description": "Milliseconds from Sentinel accepting the reading to its completed evidence, including Sentinel's own waiting. Excludes redaction and response encoding."},
@@ -253,7 +254,7 @@ STACK_TOOLS: dict[str, RouteTool] = {
                         "properties": {"name": {"type": "string"}, "params": {"type": "object"}},
                         "required": ["name"],
                     },
-                    "envelope": {"type": "object", "description": "A reading you already hold, stored with its own provenance."},
+                    "envelope": {"type": "object", "description": "A reading you already hold, stored as supplied and marked held. Sentinel checks its shape, not its content."},
                 },
             },
             _stack_add,
