@@ -119,7 +119,7 @@ _ONE_SHOT_COMMAND = base64.b64encode(_ONE_SHOT_BOOTSTRAP.encode("utf-16le")).dec
 
 
 class SlotTimeout(Exception):
-    """Nothing came free within the question's own timeout — a WSL launch slot held by another
+    """Nothing came free within the question's wait limit — a WSL launch slot held by another
     launch, or a session another question is using — so the question is reported as
     ``unavailable`` rather than waited for without end."""
 
@@ -180,7 +180,7 @@ def _launch_slot(timeout: float) -> Iterator[None]:
                 break
             else:
                 if time.monotonic() >= deadline:
-                    raise SlotTimeout(f"no WSL launch slot came free within {timeout:g}s; another launch held it")
+                    raise SlotTimeout("no WSL launch slot came free; another launch held it")
                 time.sleep(_SLOT_POLL)
         yield
     finally:
@@ -284,29 +284,30 @@ class Bridge:
         """
         if self.exe is None:
             return BridgeResult("unavailable", error="powershell.exe was not found")
-        result = self._answer(script, timeout=timeout, depth=depth)
+        wait_until = time.monotonic() + timeout
+        result = self._answer(script, timeout=timeout, depth=depth, wait_until=wait_until)
         for attempt in range(1, WSL_INTEROP_ATTEMPTS):
             if not (result.outcome == "unavailable" and result.error and _wsl_interop_error(result.error)):
                 break
             time.sleep(0.5 * attempt)
-            result = self._answer(script, timeout=timeout, depth=depth)
+            result = self._answer(script, timeout=timeout, depth=depth, wait_until=wait_until)
         return result
 
-    def _answer(self, script: str, *, timeout: float, depth: int) -> BridgeResult:
+    def _answer(self, script: str, *, timeout: float, depth: int, wait_until: float) -> BridgeResult:
         """One attempt, through whichever transport can take it: a live session for preference, a
         launch of its own when the pool is switched off or no session would start. Terminal
         shutdown refuses a new launch."""
         started = time.perf_counter()
         pool = _pool_for(self)
         if pool is not None:
-            answered = pool.ask(script, timeout=timeout, depth=depth)
+            answered = pool.ask(script, timeout=timeout, depth=depth, wait_until=wait_until)
             if answered is not None:
                 return answered
         with _POOLS_LOCK:
             if _SESSIONS_ENDED:
                 return BridgeResult("unavailable", error="the bridge is shutting down")
         try:
-            with _launch_slot(timeout):
+            with _launch_slot(_remaining_wait(wait_until)):
                 with _POOLS_LOCK:
                     if _SESSIONS_ENDED:
                         return BridgeResult("unavailable", error="the bridge is shutting down")
@@ -475,19 +476,21 @@ class Session:
         self.discarded: str | None = None
 
     @classmethod
-    def start(cls, bridge: Bridge, *, timeout: float) -> Session:
+    def start(cls, bridge: Bridge, *, timeout: float, slot_wait: float | None = None) -> Session:
         """Start one, and prove it answers before anyone's question is bound to it.
 
         The launch slot is held across the whole of it — the process, the prelude and the first
         question — because starting a session is a launch through WSL's interop layer like any
-        other, and because a session that is half up is not one. A session that will not answer
-        raises, and the question that wanted it goes to the one-shot transport.
+        other, and because a session that is half up is not one. ``slot_wait`` limits that wait;
+        direct callers default to ``timeout``. A held slot raises ``SlotTimeout`` so the question
+        reports busy without a pointless fallback to another launch. A session that starts but
+        will not answer raises ``SessionStartFailed`` and its question can fall back.
         """
         if bridge.exe is None:
             raise SessionStartFailed("missing_executable", "powershell.exe was not found")
         cmd = [bridge.exe, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", "-"]
         try:
-            with _launch_slot(timeout):
+            with _launch_slot(timeout if slot_wait is None else slot_wait):
                 proc = _spawn_child(cmd, bridge.cwd)
                 session: Session | None = None
                 try:
@@ -519,8 +522,6 @@ class Session:
                 session.answered = 0  # the probe is nobody's question
                 session._watching_startup = False
                 return session
-        except SlotTimeout as exc:
-            raise SessionStartFailed("launch_slot_timeout", str(exc)) from exc
         except BridgeStopping as exc:
             raise SessionStartFailed("shutdown", str(exc)) from exc
         except OSError as exc:
@@ -700,12 +701,12 @@ class Pool:
         self.last_start_failure: str | None = None
         self.discarded: dict[str, int] = {}
 
-    def ask(self, script: str, *, timeout: float, depth: int) -> BridgeResult | None:
+    def ask(self, script: str, *, timeout: float, depth: int, wait_until: float | None = None) -> BridgeResult | None:
         """Answer one question from a live session, or return ``None`` to say it could not: no
         session would start, and the question belongs to the one-shot transport."""
         started = time.perf_counter()
         try:
-            session = self._checkout(timeout)
+            session = self._checkout(timeout, wait_until if wait_until is not None else time.monotonic() + timeout)
         except SlotTimeout as exc:
             return BridgeResult("unavailable", took_ms=_ms(started), error=f"Sentinel's bridge was busy: {exc}; this attempt could not reach Windows", cause="busy")
         if session is None:
@@ -767,8 +768,7 @@ class Pool:
         the lock: it is what the pool's size bounds."""
         return len(self._sessions) + self._starting
 
-    def _checkout(self, timeout: float) -> Session | None:
-        deadline = time.monotonic() + timeout
+    def _checkout(self, timeout: float, wait_until: float) -> Session | None:
         dead: list[tuple[Session, str]] = []
         chosen: Session | None = None
         start_new = False
@@ -793,9 +793,9 @@ class Pool:
                         break
                     if self._live == 0:
                         break  # nothing is alive and starting one is on cooldown: the launch path
-                    remaining = deadline - time.monotonic()
+                    remaining = _remaining_wait(wait_until)
                     if remaining <= 0:
-                        raise SlotTimeout(f"no bridge session came free within {timeout:g}s")
+                        raise SlotTimeout("no bridge session came free before the question's wait limit")
                     self._lock.wait(remaining)
         finally:
             # Ending a process is not done under the lock: no other question waits on it.
@@ -806,7 +806,7 @@ class Pool:
         if not start_new:
             return None
         try:
-            started = Session.start(self.bridge, timeout=timeout)
+            started = Session.start(self.bridge, timeout=timeout, slot_wait=_remaining_wait(wait_until))
         except SessionStartFailed as exc:
             with self._lock:
                 self._starting -= 1
@@ -814,8 +814,13 @@ class Pool:
                     self.start_failures += 1
                     self.last_start_failure = exc.reason
                     self._cooldown_until = time.monotonic() + START_RETRY_SECONDS
-                self._lock.notify()
+                self._lock.notify_all()
             return None
+        except BaseException:
+            with self._lock:
+                self._starting -= 1
+                self._lock.notify_all()
+            raise
         with self._lock:
             self._starting -= 1
             if not self._closed:
@@ -1037,6 +1042,14 @@ def _working_directory() -> str | None:
 
 def _ms(started: float) -> int:
     return int((time.perf_counter() - started) * 1000)
+
+
+def _remaining_wait(wait_until: float) -> float:
+    """Time left on the question's wait deadline, including failed starts and lost sessions.
+
+    Windows execution still gets the question's full timeout after it begins.
+    """
+    return max(0.0, wait_until - time.monotonic())
 
 
 def _mark_code(line: str, mark: str) -> int | None:

@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.9.13] - 2026-09-24
+
+### Fixed
+- A cold PowerShell session waiting for a held WSL launch slot now reports `unavailable` with `error.kind=busy` after one wait. Slot contention no longer counts as a failed session start, triggers a 30-second startup cooldown, or sends the same question to another launch that needs the same slot. Direct `Session.start` callers remain protected by the slot.
+- Queueing for a session, waiting for its launch slot, and waiting for a one-shot fallback slot now share the question's wait limit, including WSL interop retries. Once Windows execution begins, the script still receives its full timeout. A genuine session-start failure wakes every queued question to reconsider its path, and an unexpected startup error gives the pool its reserved capacity back.
+- Health now says that fallback questions went to one-shot launches without claiming each one received an answer. Each reading's outcome remains the source of that truth.
+
+### Limits
+- A synthetic held-slot gate and portable pool lifecycle tests verified these paths; they do not measure how often slot contention occurs on a Windows host. The shared deadline limits waiting for bridge resources, not total execution time. Session-start slot contention is visible on the affected reading as `busy` rather than in `last_start_failure`.
+
 ## [1.9.12] - 2026-09-24
 
 ### Fixed

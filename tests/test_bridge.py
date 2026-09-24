@@ -21,7 +21,7 @@ from pathlib import Path
 import pytest
 
 import sentinel.bridge
-from sentinel.bridge import WSL_LAUNCH_SLOTS, Bridge, BridgeResult, Pool, classify, clean_stderr, sessions_report
+from sentinel.bridge import WSL_LAUNCH_SLOTS, Bridge, BridgeResult, Pool, Session, SlotTimeout, classify, clean_stderr, sessions_report
 from sentinel.readings.health import take_health
 
 
@@ -528,6 +528,68 @@ def test_a_slot_held_elsewhere_for_longer_than_the_timeout_is_unavailable_not_a_
             fcntl.flock(holder, fcntl.LOCK_UN)
     assert result.outcome == "unavailable" and result.cause == "busy" and "launch slot" in (result.error or "")
     assert result.took_ms >= 250
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="launch slots exist only under WSL")
+def test_a_cold_session_waits_once_without_recording_a_false_start_failure(fake_powershell: Path, monkeypatch, tmp_path):
+    import fcntl
+
+    monkeypatch.setenv("TMPDIR", str(tmp_path))
+    monkeypatch.setattr(sentinel.bridge, "POOL_SIZE", 1)
+    bridge = Bridge(exe=str(fake_powershell))
+    slot = sentinel.bridge._launch_slot
+    calls = []
+
+    def counted_slot(timeout):
+        calls.append(timeout)
+        return slot(timeout)
+
+    monkeypatch.setattr(sentinel.bridge, "_launch_slot", counted_slot)
+    spawn = sentinel.bridge._spawn_child
+
+    def forbidden_spawn(*args, **kwargs):
+        raise AssertionError("the held slot must prevent a child launch")
+
+    monkeypatch.setattr(sentinel.bridge, "_spawn_child", forbidden_spawn)
+    with open(tmp_path / "system-sentinel-launch-0.lock", "w") as holder:
+        fcntl.flock(holder, fcntl.LOCK_EX)
+        started = time.monotonic()
+        result = bridge.run("# fake: ok-object", timeout=0.25)
+        elapsed = time.monotonic() - started
+        fcntl.flock(holder, fcntl.LOCK_UN)
+
+    pool = sentinel.bridge._pool_for(bridge)
+    assert pool is not None
+    assert result.outcome == "unavailable" and result.cause == "busy"
+    assert "launch slot" in (result.error or "")
+    assert elapsed >= 0.20 and result.took_ms >= 200
+    assert len(calls) == 1 and 0 <= calls[0] <= 0.25
+    assert pool._starting == 0 and pool._cooldown_until == 0.0
+    assert pool.stats()["start_failures"] == pool.stats()["fell_back"] == 0
+    assert pool.stats()["last_start_failure"] is None
+
+    monkeypatch.setattr(sentinel.bridge, "_spawn_child", spawn)
+    answered = bridge.run("# fake: ok-object", timeout=2)
+    assert answered.outcome == "ok" and answered.items == [{"CPU": "x"}]
+    assert pool.stats()["answered"] == 1
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="launch slots exist only under WSL")
+def test_a_direct_session_start_keeps_its_own_launch_slot_protection(fake_powershell: Path, monkeypatch, tmp_path):
+    import fcntl
+
+    monkeypatch.setenv("TMPDIR", str(tmp_path))
+    bridge = Bridge(exe=str(fake_powershell))
+
+    def forbidden_spawn(*args, **kwargs):
+        raise AssertionError("the held slot must prevent a direct session launch")
+
+    monkeypatch.setattr(sentinel.bridge, "_spawn_child", forbidden_spawn)
+    with open(tmp_path / "system-sentinel-launch-0.lock", "w") as holder:
+        fcntl.flock(holder, fcntl.LOCK_EX)
+        with pytest.raises(SlotTimeout, match="launch slot"):
+            Session.start(bridge, timeout=0.1)
+        fcntl.flock(holder, fcntl.LOCK_UN)
 
 
 def test_a_bridge_without_a_slot_still_launches(one_shot_bridge: Bridge, monkeypatch):

@@ -82,8 +82,8 @@ def test_a_session_finishing_start_after_shutdown_does_not_serve_a_reading(monke
     errors: list[BaseException] = []
     script = "[pscustomobject]@{ Answer = 'after-shutdown' }"
 
-    def held_start(cls, located, *, timeout):
-        session = real_start(located, timeout=timeout)
+    def held_start(cls, located, *, timeout, slot_wait=None):
+        session = real_start(located, timeout=timeout, slot_wait=slot_wait)
         late.append(session)
         pid = session.ask("[pscustomobject]@{ Pid = $PID }", timeout=10, depth=2)
         assert pid.outcome == "ok" and len(pid.items) == 1, pid

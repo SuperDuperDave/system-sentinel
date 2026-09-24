@@ -1,5 +1,6 @@
 """Portable bridge lifecycle races, without starting an executable or querying Windows."""
 
+import time
 from contextlib import contextmanager, nullcontext
 from io import BytesIO
 from threading import Event, Thread
@@ -38,8 +39,9 @@ def test_a_session_finishing_start_after_shutdown_is_discarded_before_lending(mo
     script = "the pending question"
     fallback = BridgeResult("ok", items=[{"answer": 42}], took_ms=5, returncode=0)
 
-    def start(cls, located, *, timeout):
+    def start(cls, located, *, timeout, slot_wait=None):
         assert located is bridge and timeout == 10
+        assert slot_wait is not None and 0 < slot_wait <= timeout
         startup_entered.set()
         assert finish_startup.wait(10), "the test did not release controlled startup"
         return session
@@ -86,6 +88,142 @@ def test_a_session_finishing_start_after_shutdown_is_discarded_before_lending(mo
     assert stats["last_start_failure"] is None
     pool.shutdown()
     assert pool.stats() == stats  # the late child is retired exactly once
+
+
+def test_a_failed_start_wakes_every_queued_question(monkeypatch):
+    bridge = Bridge(exe="controlled-powershell")
+    monkeypatch.setattr(bridge_module, "POOL_SIZE", 2)
+    monkeypatch.setattr(bridge_module, "_launch_slot", lambda timeout: nullcontext())
+    monkeypatch.setattr(Bridge, "_run_once", lambda self, script, *, timeout, depth: BridgeResult("ok", items=[script]))
+    pool = bridge_module._pool_for(bridge)
+    assert pool is not None
+    starters_ready, waiters_ready, release = Event(), Event(), Event()
+    starts = 0
+    waits = 0
+    original_wait = pool._lock.wait
+
+    def failed_start(cls, located, *, timeout, slot_wait=None):
+        nonlocal starts
+        with pool._lock:
+            starts += 1
+            if starts == 2:
+                starters_ready.set()
+        assert release.wait(5)
+        raise bridge_module.SessionStartFailed("probe_lost", "synthetic failed probe")
+
+    def counted_wait(timeout=None):
+        nonlocal waits
+        waits += 1
+        if waits >= 3:
+            waiters_ready.set()
+        return original_wait(timeout)
+
+    monkeypatch.setattr(Session, "start", classmethod(failed_start))
+    monkeypatch.setattr(pool._lock, "wait", counted_wait)
+    results = []
+    errors = []
+
+    def ask():
+        try:
+            results.append(bridge.run("queued", timeout=5))
+        except BaseException as exc:
+            errors.append(exc)
+
+    workers = [Thread(target=ask, daemon=True) for _ in range(5)]
+    for worker in workers:
+        worker.start()
+    try:
+        assert starters_ready.wait(5) and waiters_ready.wait(5)
+    finally:
+        release.set()
+    for worker in workers:
+        worker.join(2)
+    assert all(not worker.is_alive() for worker in workers)
+    assert errors == []
+    assert len(results) == 5 and all(result.outcome == "ok" for result in results)
+    assert pool.stats()["start_failures"] == 2
+
+
+def test_unexpected_start_error_releases_the_pool_capacity(monkeypatch):
+    bridge = Bridge(exe="controlled-powershell")
+    monkeypatch.setattr(bridge_module, "POOL_SIZE", 1)
+    pool = bridge_module._pool_for(bridge)
+    assert pool is not None
+
+    def broken_start(cls, located, *, timeout, slot_wait=None):
+        raise RuntimeError("synthetic startup bug")
+
+    monkeypatch.setattr(Session, "start", classmethod(broken_start))
+    with pytest.raises(RuntimeError, match="synthetic startup bug"):
+        bridge.run("question")
+    assert pool._starting == 0 and pool.stats()["start_failures"] == 0
+
+    class AnsweringSession:
+        alive = True
+        answered = 0
+        age = 0.0
+        discarded = None
+
+        def ask(self, script, *, timeout, depth):
+            return BridgeResult("ok", items=[{"answer": script}])
+
+        def discard(self, why, *, grace=0.0):
+            pass
+
+    monkeypatch.setattr(Session, "start", classmethod(lambda cls, located, *, timeout, slot_wait=None: AnsweringSession()))
+    answer = bridge.run("question")
+    assert answer.outcome == "ok" and answer.items == [{"answer": "question"}]
+    assert pool._starting == 0 and pool.stats()["answered"] == 1
+
+
+def test_queue_and_session_start_share_the_question_wait_budget(monkeypatch):
+    bridge = Bridge(exe="controlled-powershell")
+    monkeypatch.setattr(bridge_module, "POOL_SIZE", 1)
+    pool = bridge_module._pool_for(bridge)
+    assert pool is not None
+    queued, slot_waits = Event(), []
+
+    class RetiringSession:
+        alive = True
+        answered = 0
+        discarded = None
+        age = 0.0
+
+        def discard(self, why, *, grace=0.0):
+            self.discarded = why
+
+    old = RetiringSession()
+    with pool._lock:
+        pool._sessions.append(old)
+    original_wait = pool._lock.wait
+
+    def observed_wait(timeout=None):
+        queued.set()
+        return original_wait(timeout)
+
+    def slot_refused(cls, located, *, timeout, slot_wait=None):
+        slot_waits.append((timeout, slot_wait))
+        raise bridge_module.SlotTimeout("synthetic held launch slot")
+
+    monkeypatch.setattr(pool._lock, "wait", observed_wait)
+    monkeypatch.setattr(Session, "start", classmethod(slot_refused))
+    monkeypatch.setattr(Bridge, "_run_once", lambda *args, **kwargs: pytest.fail("a held slot must not fall back"))
+    results = []
+    started = time.monotonic()
+    worker = Thread(target=lambda: results.append(bridge.run("queued question", timeout=0.5)), daemon=True)
+    worker.start()
+    assert queued.wait(2)
+    time.sleep(0.15)
+    old.discard("timeout")
+    pool._release(old)
+    worker.join(2)
+
+    assert not worker.is_alive() and len(results) == 1
+    assert results[0].outcome == "unavailable" and results[0].cause == "busy"
+    assert len(slot_waits) == 1 and slot_waits[0][0] == 0.5
+    assert slot_waits[0][1] is not None and 0 < slot_waits[0][1] < 0.4
+    assert time.monotonic() - started >= 0.15
+    assert pool.stats()["fell_back"] == pool.stats()["start_failures"] == 0
 
 
 def test_shutdown_between_checkout_and_write_falls_back(monkeypatch):
@@ -164,7 +302,7 @@ def test_final_shutdown_does_not_start_a_new_session(monkeypatch):
         launches.append(script)
         raise AssertionError("a final shutdown must not launch one-shot PowerShell")
 
-    def forbidden_start(cls, located, *, timeout):
+    def forbidden_start(cls, located, *, timeout, slot_wait=None):
         raise AssertionError("a final shutdown must not start a new session")
 
     monkeypatch.setattr(bridge_module, "POOL_SIZE", 1)

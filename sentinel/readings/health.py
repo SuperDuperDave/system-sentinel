@@ -44,11 +44,10 @@ def take_health(bridge: Bridge, params: dict[str, Any]) -> Reading:
     outcome = facts["outcome"]
     reading = Reading(reading="health", params={}, outcome=outcome, method={"kind": "powershell", "query": IDENTITY_SCRIPT}, took_ms=facts.get("took_ms", 0))
     reading.sections = [Section("bridge", "raw", data)]
-    # A question that had to be launched because no live session would start is not a failure — the
-    # machine still answered — but it is the difference between a reading that costs milliseconds
-    # and one that costs a fifth of a second, so it is said out loud rather than left in a count.
+    # A question that falls back to a one-shot launch may or may not answer. The outcome of each
+    # reading is the evidence; this warning only explains the transport and its possible cost.
     if sessions["fell_back"] or sessions["start_failures"]:
-        reading.warnings.append("a live session did not start, so some questions fell back to one-shot launches; the machine still answered")
+        reading.warnings.append("some questions went to one-shot launches; each reading's outcome says whether Windows answered")
     if outcome not in ("ok", "empty"):
         reading.error = {"kind": facts.get("cause") or outcome, "detail": facts.get("error") or ""}
     return reading
