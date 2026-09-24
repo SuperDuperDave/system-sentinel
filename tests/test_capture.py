@@ -7,6 +7,7 @@ import os
 import threading
 import time
 import zipfile
+from dataclasses import replace
 from datetime import UTC, datetime
 
 import pytest
@@ -18,7 +19,8 @@ from sentinel.app import State, create_app
 from sentinel.bridge import BridgeResult
 from sentinel.capture import MAX_LIST_MANIFEST_BYTES, STALE_PENDING_SECONDS, listing
 from sentinel.paths import captures_dir
-from sentinel.reading import REGISTRY, Reading
+from sentinel.reading import REGISTRY, Reading, Section, take
+from sentinel.readings.diagnostics import SIGNAL_INPUTS
 from sentinel.redact import Redactor
 from sentinel.stack import Item, Prompts, Stack
 from tests.conftest import FakeBridge, LogBridge, identity_result, real_bridge_or_skip
@@ -76,6 +78,151 @@ def test_a_capture_holds_automatic_readings_the_stack_and_the_handoff(client: Te
     assert json.loads(files["readings/events.json"])["sentinel_version"] == __version__
     assert "it froze while idle" in files["composed.md"].decode()
     assert json.loads(files["stack.json"])["items"][0]["note"] == "it froze while idle"
+
+
+def test_capture_takes_each_signals_source_once_at_its_cited_scope(monkeypatch: pytest.MonkeyPatch):
+    called: dict[str, list[dict]] = {name: [] for name, _ in SIGNAL_INPUTS}
+    for name, _ in SIGNAL_INPUTS:
+        spec = REGISTRY[name]
+
+        def counted(bridge, params, *, original=spec.take, source=name):
+            called[source].append(dict(params))
+            return original(bridge, params)
+
+        monkeypatch.setitem(REGISTRY, name, replace(spec, take=counted))
+
+    result = asyncio.run(capture.create(LogBridge(result=BridgeResult("ok", items=EVENTS, took_ms=5)), Stack(), Prompts()))
+    files = members(result.path.read_bytes())
+    manifest = {item["reading"]: item for item in json.loads(files["manifest.json"])["members"] if "reading" in item}
+    signals = json.loads(files["readings/signals.json"])
+    inputs = {item["name"]: item for item in signals["method"]["readings"]}
+    for name, want in SIGNAL_INPUTS:
+        assert len(called[name]) == 1
+        assert all(called[name][0][key] == value for key, value in want.items())
+        source = json.loads(files[f"readings/{name}.json"])
+        assert manifest[name]["observed_by"] == "signals" and manifest[name]["params"] == source["params"]
+        assert source["asked_at"] == inputs[name]["asked_at"]
+    assert manifest["crash"]["params"]["count"] == 20
+    assert manifest["events"]["params"]["count"] == 200
+
+
+def test_capture_crash_references_resolve_inside_its_own_zip(monkeypatch: pytest.MonkeyPatch):
+    times = [f"2026-09-{24 - i:02d}T12:00:00.0000000Z" for i in range(6)]
+    rows = [{"Log": "System", "RecordId": 100 + i, "TimeCreated": at, "MachineName": "TESTBOX"} for i, at in enumerate(times)]
+    stops = [{"started_at": at, "bugcheck": {"code": "0x133", "name": "DPC_WATCHDOG_VIOLATION"},
+              "records": {"power_41": 100 + i}} for i, at in enumerate(times)]
+    calls: list[int] = []
+
+    def crash_at_scope(_bridge, params):
+        count = params["count"]
+        calls.append(count)
+        return Reading("crash", params, "ok", {"kind": "synthetic"}, sections=[
+            Section("records", "raw", rows[:count]), Section("stops", "derived", stops[:count]),
+            Section("collection", "raw", {"system": {"outcome": "ok", "bound_reached": False},
+                                          "reports": {"outcome": "ok", "bound_reached": False}}),
+        ], count=min(count, len(stops)))
+
+    monkeypatch.setitem(REGISTRY, "crash", replace(REGISTRY["crash"], take=crash_at_scope))
+    result = asyncio.run(capture.create(FakeBridge(), Stack(), Prompts(), redactor=Redactor()))
+    files = members(result.path.read_bytes())
+    assert b"TESTBOX" not in files["readings/crash.json"]
+    saved_crash = json.loads(files["readings/crash.json"])
+    saved_signals = json.loads(files["readings/signals.json"])
+    raw = next(section["data"] for section in saved_crash["sections"] if section["name"] == "records")
+    leads = next(section["data"] for section in saved_signals["sections"] if section["name"] == "signals")
+    repeated = next(lead for lead in leads if lead["id"] == "transition:repeated-stop:0x133")
+    assert calls == [20] and len(repeated["evidence"]["refs"]) == 6
+    assert all(any(row["Log"] == ref["params"]["log"] and row["RecordId"] == ref["params"]["record_id"]
+                   and row["TimeCreated"] == ref["params"]["time_created"] for row in raw)
+               for ref in repeated["evidence"]["refs"])
+
+
+def test_capture_keeps_a_signals_input_exception_without_retry(monkeypatch: pytest.MonkeyPatch):
+    calls = 0
+
+    def transient_power(_bridge, params):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("synthetic first attempt stopped")
+        return Reading("power", params, "empty", {"kind": "synthetic"})
+
+    monkeypatch.setitem(REGISTRY, "power", replace(REGISTRY["power"], take=transient_power))
+    result = asyncio.run(capture.create(FakeBridge(), Stack(), Prompts()))
+    files = members(result.path.read_bytes())
+    saved_power = json.loads(files["readings/power.json"])
+    saved_signals = json.loads(files["readings/signals.json"])
+    sources = {item["name"]: item for item in saved_signals["method"]["readings"]}
+    assert calls == 1 and saved_power["outcome"] == "failed"
+    assert "synthetic first attempt stopped" in saved_power["error"]["detail"]
+    assert "synthetic first attempt stopped" in sources["power"]["outcome"]
+
+
+def test_capture_keeps_gathered_sources_when_signals_composition_raises(monkeypatch: pytest.MonkeyPatch):
+    calls = 0
+
+    def counted_power(_bridge, params):
+        nonlocal calls
+        calls += 1
+        return Reading("power", params, "empty", {"kind": "synthetic"})
+
+    def broken_compose(*_args):
+        raise RuntimeError("PRIVATE_CANARY_42 synthetic composition failure")
+
+    monkeypatch.setitem(REGISTRY, "power", replace(REGISTRY["power"], take=counted_power))
+    monkeypatch.setattr(capture, "compose_signals", broken_compose)
+    result = asyncio.run(capture.create(FakeBridge(), Stack(), Prompts()))
+    files = members(result.path.read_bytes())
+    assert b"PRIVATE_CANARY_42" not in b"".join(files.values())
+    signals = json.loads(files["readings/signals.json"])
+    power = json.loads(files["readings/power.json"])
+    assert signals["outcome"] == "failed" and "Signals composition raised RuntimeError" in signals["error"]["detail"]
+    assert power["outcome"] == "empty" and calls == 1
+
+
+def test_capture_does_not_retry_a_source_after_the_gather_itself_raises(monkeypatch: pytest.MonkeyPatch):
+    calls = 0
+
+    def counted_power(_bridge, params):
+        nonlocal calls
+        calls += 1
+        return Reading("power", params, "empty", {"kind": "synthetic"})
+
+    async def broken_gather(bridge):
+        await take("power", bridge, {})
+        raise RuntimeError("PRIVATE_CANARY_42 synthetic gather lost its result")
+
+    monkeypatch.setitem(REGISTRY, "power", replace(REGISTRY["power"], take=counted_power))
+    monkeypatch.setattr(capture, "gather_signal_inputs", broken_gather)
+    result = asyncio.run(capture.create(FakeBridge(), Stack(), Prompts()))
+    files = members(result.path.read_bytes())
+    assert b"PRIVATE_CANARY_42" not in b"".join(files.values())
+    signals = json.loads(files["readings/signals.json"])
+    power = json.loads(files["readings/power.json"])
+    events = json.loads(files["readings/events.json"])
+    assert calls == 1 and signals["outcome"] == "failed"
+    assert power["outcome"] == events["outcome"] == "failed"
+    assert "did not retry" in power["error"]["detail"]
+
+
+def test_cancel_during_signals_gather_discards_the_pending_archive(monkeypatch: pytest.MonkeyPatch):
+    entered = asyncio.Event()
+
+    async def held_gather(_bridge):
+        entered.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(capture, "gather_signal_inputs", held_gather)
+
+    async def cancel():
+        task = asyncio.create_task(capture.create(FakeBridge(), Stack(), Prompts()))
+        await entered.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    asyncio.run(cancel())
+    assert not list(captures_dir().iterdir())
 
 
 def test_capture_handoff_uses_the_same_stack_snapshot_as_its_saved_member(client: TestClient, monkeypatch: pytest.MonkeyPatch):

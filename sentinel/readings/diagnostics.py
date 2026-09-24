@@ -1230,6 +1230,12 @@ async def take_signals(bridge: Bridge, params: dict[str, Any]) -> Reading:
     as long as the basis says what is missing from it. Nothing here re-reads the machine;
     every fact comes from an input's envelope, with its provenance attached.
     """
+    readings, reasons = await gather_signal_inputs(bridge)
+    return compose_signals(readings, reasons, params)
+
+
+async def gather_signal_inputs(bridge: Bridge) -> tuple[dict[str, Reading | None], dict[str, str]]:
+    """Take the seven Signals scopes once; capture can keep these exact observations."""
     wanted = list(SIGNAL_INPUTS)
     # Limit this reading's share of the bridge. Other callers can still occupy the remaining
     # session; this is a per-call bound, not a global priority lane or a free-session guarantee.
@@ -1246,7 +1252,12 @@ async def take_signals(bridge: Bridge, params: dict[str, Any]) -> Reading:
         readings[name] = reading
         if reason:
             reasons[name] = reason
+    return readings, reasons
 
+
+def compose_signals(readings: dict[str, Reading | None], reasons: dict[str, str], params: dict[str, Any]) -> Reading:
+    """Infer leads from held input envelopes; never issue a second machine question."""
+    wanted = list(SIGNAL_INPUTS)
     signals, basis = take_signals_sync(readings, reasons)
     observed = [name for name, r in readings.items() if r is not None and r.observed]
     input_sources = []

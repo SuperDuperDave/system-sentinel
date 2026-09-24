@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.9.21] - 2026-09-24
+
+### Improved
+- A person-triggered capture now gathers Signals' seven source readings once and writes those same observed envelopes as its ZIP members. A crash reference in `signals.json` can be checked against `crash.json` from that observation, including repeated stops beyond the five shown in the summary. The seven members use Signals' actual scopes: Events up to 200 System rows at levels 1–4 and Crash up to 20 stops. Their manifest entries name `observed_by: signals` and list the saved parameters. Other readings keep their existing automatic scopes.
+- An input that raises during Signals gathering becomes a failed capture member with its original reason, without a hidden retry. If Signals composition fails after gathering, those source members remain available and the Signals member records the failure. Cancellation during gathering still removes the unfinished ZIP.
+
+### Limits
+- Captures now retain the broader Events and Crash evidence that Signals already queried, so a ZIP may grow while machine questions fall. In reproducible synthetic fixtures, source questions fell from 32 to 25. The ordinary ZIP stayed near 71–72 kB; a saturated 200-event, 20-stop fixture grew from about 120 kB to 299 kB. These are synthetic sizes, not host timing or a typical archive size. The archive still includes full raw event messages and properties within those fixed source row caps; the person chooses when to create and share it. See the [measurement](docs/measurements/capture-coherence.md).
+- If gathering itself fails unexpectedly before it can return its source observations, the capture records a failed Signals member and failed placeholders for all seven inputs rather than guessing which source was reached or silently retrying them. Other reading members continue. The seven source readings use Signals' plain reading path, which presently has the same data as the shared service for these names; a future service extension will need to review that parity.
+
 ## [1.9.20] - 2026-09-24
 
 ### Improved

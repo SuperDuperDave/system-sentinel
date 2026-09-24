@@ -1,8 +1,9 @@
 """Captures: readings that can be taken without a selection, written to one ZIP on disk.
 
 A capture is what a person hands to someone who is not at the machine, or keeps for the day the
-machine will not start. It holds one envelope per automatically selectable reading. It takes them
-in turn, heavy ones included, so their costs add up. It also holds the stack as it stands, the composed handoff, and
+machine will not start. It holds one envelope per automatically selectable reading. Signals'
+seven source envelopes become those readings' ZIP members; the other readings are taken in turn,
+heavy ones included, so their costs add up. It also holds the stack as it stands, the composed handoff, and
 a manifest that lists exactly the members with each reading's outcome and size. A reading that
 needs an exact event or file reference is listed as omitted in that manifest. A reading that was
 attempted but could not answer is written with its outcome, never hidden.
@@ -34,6 +35,7 @@ from . import __version__
 from .bridge import OUTCOMES, Bridge
 from .paths import captures_dir
 from .reading import REGISTRY, Reading, ReadingCall, automatic_params, take
+from .readings.diagnostics import SIGNAL_INPUTS, compose_signals, gather_signal_inputs
 from .redact import Redactor
 from .serialization import json_safe_integers
 from .stack import Prompts, Stack, StoreUnavailable, compose
@@ -81,10 +83,39 @@ async def create(bridge: Bridge, stack: Stack, prompts: Prompts, redactor: Redac
         raise
 
     try:
+        signal_inputs: dict[str, Reading | None] = {}
+        signal_reasons: dict[str, str] = {}
+        signal_reading: Reading | None = None
+        signal_gather_error: str | None = None
+        signal_scopes = dict(SIGNAL_INPUTS)
+        if "signals" in REGISTRY and all(name in REGISTRY and not REGISTRY[name].requires_selection for name in signal_scopes):
+            signal_started = time.perf_counter()
+            try:
+                signal_inputs, signal_reasons = await gather_signal_inputs(bridge)
+            except Exception as exc:  # noqa: BLE001 - preserve the rest of the capture if gathering itself fails
+                signal_gather_error = f"Signals input gathering raised {type(exc).__name__}; which sources answered is unknown."
+                signal_reading = _failed_envelope("signals", {}, signal_gather_error)
+            else:
+                try:
+                    signal_reading = compose_signals(signal_inputs, signal_reasons, {})
+                except Exception as exc:  # noqa: BLE001 - keep gathered sources without asking them again
+                    signal_reading = _failed_envelope("signals", {}, f"Signals composition raised {type(exc).__name__}; its gathered source members remain available.")
+            signal_reading.took_ms = int((time.perf_counter() - signal_started) * 1000)
+
         for name, spec in list(REGISTRY.items()):
             if spec.requires_selection:
                 continue
-            reading = await _take(name, bridge, started, reader)
+            observed_by_signals = name in signal_inputs
+            if name == "signals" and signal_reading is not None:
+                reading = signal_reading
+            elif observed_by_signals:
+                reading = signal_inputs[name] or _failed_envelope(name, signal_scopes[name], signal_reasons.get(name, "Signals did not obtain this input"))
+            elif name in signal_scopes and signal_gather_error is not None:
+                # Gathering might have asked this source before failing. Never re-query it
+                # silently or claim to know which of the seven attempts completed.
+                reading = _failed_envelope(name, signal_scopes[name], "Signals input gathering stopped before this source's result could be retained; this capture did not retry it.")
+            else:
+                reading = await _take(name, bridge, started, reader)
             body = reading.to_dict()
             if redactor is not None:
                 body, taken_out = redactor.redact(body)
@@ -93,6 +124,9 @@ async def create(bridge: Bridge, stack: Stack, prompts: Prompts, redactor: Redac
                 removed.update(taken_out)
             member = READINGS_MEMBER.format(name=name)
             entry = {"path": member, "reading": name, "outcome": body["outcome"], "took_ms": body["took_ms"], "bytes": _write(archive, member, json.dumps(json_safe_integers(body), ensure_ascii=False, indent=1))}
+            if observed_by_signals:
+                entry["observed_by"] = "signals"
+                entry["params"] = body["params"]
             if name == "whea":
                 entry["scope"] = "bounded newest-record preview; exact WHEA fields, full CPER bytes and decoded detail require whea_record and are not in this capture"
             elif name == "whea_reports":
@@ -183,13 +217,13 @@ async def _take(name: str, bridge: Bridge, at: datetime, reader: ReadingCall | N
     try:
         return await reader(name, params) if reader else await take(name, bridge, params)
     except Exception as exc:  # noqa: BLE001 - one reading's failure must not end the capture
-        return Reading(
-            reading=name,
-            params=params,
-            outcome="failed",
-            method={"kind": "none", "query": ""},
-            error={"kind": "failed", "detail": f"the capture could not take this reading: {exc}"},
-        )
+        return _failed_envelope(name, params, f"the capture could not take this reading: {exc}")
+
+
+def _failed_envelope(name: str, params: dict[str, Any], detail: str) -> Reading:
+    """Save an attempted source failure without silently asking the machine again."""
+    return Reading(reading=name, params=params, outcome="failed", method={"kind": "none", "query": ""},
+                   error={"kind": "failed", "detail": detail})
 
 
 def listing() -> list[dict[str, Any]]:
