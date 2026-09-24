@@ -100,6 +100,12 @@ export class Unauthorized extends Error {
   }
 }
 
+export class HttpError extends Error {
+  constructor(readonly status: number, detail: string) {
+    super(`${status}: ${detail}`);
+  }
+}
+
 export const observed = (r: Reading | null | undefined): boolean => !!r && (r.outcome === 'ok' || r.outcome === 'empty');
 
 export function section<T>(r: Reading<T> | null | undefined, name: string): T | null {
@@ -120,7 +126,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     } catch {
       /* the status is the message */
     }
-    throw new Error(`${res.status}: ${detail}`);
+    throw new HttpError(res.status, detail);
   }
   return (await res.json()) as T;
 }

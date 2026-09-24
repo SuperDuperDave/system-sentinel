@@ -97,7 +97,7 @@ Every claim the page at mainthread.ai/work/system-sentinel/ could make about the
 | Heavy readings are taken only when asked | `dashboard/src/views/Machine.tsx`, `Diagnostics.tsx` ("Take the reading"); `useReading(..., enabled)` |
 | Works at phone width over the same boundary | Verified on glass 2026-09-20 at 390x844 and 1440x900, every view, no horizontal overflow; `docs/screens/` holds the sanitized captures with the commit, sizes and the fixture pipeline that reproduces them |
 | The identity is in the tool: the tokens, Azeret Mono, JetBrains Mono, DM Sans self-hosted under the OFL, the mark, the graticule in one zone, the phosphor as light only | `dashboard/src/identity.css`, `dashboard/src/Mark.tsx`, `dashboard/src/App.module.css`, `dashboard/public/fonts/`; owned by `docs/design/IDENTITY-DIRECTIONS-2026-09-20.md` |
-| One lit word: `live` while the stream is connected | `dashboard/src/Live.tsx` |
+| One lit word: `live` after Sentinel returns its latest Health reading; `checking`, `issue` and `offline` stay unlit and say why it is not yet live. The nearby readout states the bridge outcome; hidden tabs check again when shown | `dashboard/src/Live.tsx` |
 
 ## Running it
 

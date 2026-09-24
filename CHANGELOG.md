@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.9.16] - 2026-09-24
+
+### Improved
+- The dashboard's Live header now refreshes the existing Health reading instead of opening a full event-record stream and discarding its records. Visible tabs ask again after each completed check; hidden tabs stop asking and check promptly when shown. Record-stream clients and their no-replay contract are unchanged.
+- The header distinguishes *checking* from *offline*. *Live* means Sentinel returned the latest Health reading; the nearby readout says whether its Windows bridge answered. An HTTP check error says *issue* without claiming whether Sentinel or a gateway sent it, a network failure says *offline*, and an expired session returns to sign-in. A busy bridge is named in the readout.
+
+### Limits
+- The header checks the bridge with a small identity question, not the event logs or every collector. Read a log view or use the record stream to see whether a particular log answers. On this WSL host, two warmed Health readings took 18/16 ms after a 383 ms cold first read; three empty full preset stream polls took 254/238/214 ms. These small samples do not predict another machine's speed, and the header checks every five seconds after a successful answer, not continuously.
+
 ## [1.9.15] - 2026-09-24
 
 ### Added

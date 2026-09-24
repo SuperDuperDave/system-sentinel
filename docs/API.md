@@ -258,6 +258,8 @@ Then `record` with `before` set to that stop's `started_at` returns System recor
 
 `GET /api/stream` is server-sent events, polled from the logs every few seconds with one query per poll.
 
+The dashboard header checks `health` while visible and does not consume this record stream. Its lit *live* word means Sentinel returned the latest Health reading; the readout gives the bridge outcome. While waiting it says *checking*; an HTTP error says *issue* without assuming whether Sentinel or a gateway answered, and a network failure says *offline*. A hidden tab checks again when shown. The stream remains available to clients that need matching event records; its workload counters therefore describe those record clients rather than dashboard tabs.
+
 | Event | Data |
 | --- | --- |
 | `record` | `{ "log": "System", "record": { ...the record shape... } }` for each new record matching the tool's presets: crash and power (Kernel-Power 41, EventLog 6008, WER 1001, volmgr 46, disk 161 and 162), WHEA (1, 17 to 20, 46, 47), storage (7, 11, 51, 55, 57, 129, 153), driver and service (219, 7000 to 7034, 10110, 10111), application crashes (1000 to 1002), TPM (1796, 1801) |

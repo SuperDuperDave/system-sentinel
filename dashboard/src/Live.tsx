@@ -1,80 +1,116 @@
 import { useEffect, useState } from 'react';
-import { take } from './api';
+import { HttpError, Unauthorized, take } from './api';
 import { firstLine } from './Outcome';
+import { useApp } from './store';
 import styles from './Live.module.css';
 
 interface Health {
-  bridge: { available: boolean; powershell?: string; took_ms?: number; outcome: string };
+  bridge: { powershell?: string };
 }
 
-/**
- * The one lit word on the surface, and the bridge readout beside it.
- *
- * `live` means the log stream is connected: the tool is polling both logs and would say so if a
- * poll stopped observing the machine. A silent stream is not a healthy machine, so the word is
- * about the connection and the readout is about the machine — two facts, never conflated.
- *
- * The frames of one poll arrive in order: a `bridge` frame only when that poll did not observe
- * the machine, then always a `heartbeat`. So the heartbeat is what settles the readout, showing
- * the verdict of the poll that just finished rather than the last trouble seen at any time.
- */
+const CHECK_MS = 5_000;
+const RETRY_MS = 20_000;
+type Status = 'checking' | 'live' | 'issue' | 'offline';
+
+/** The header checks Sentinel's bridge; log records belong to the record stream's consumers. */
 export function Live() {
-  const [connected, setConnected] = useState(false);
-  const [health, setHealth] = useState('');
-  const [trouble, setTrouble] = useState<string | null>(null);
+  const setSession = useApp((s) => s.setSession);
+  const [status, setStatus] = useState<Status>('checking');
+  const [readout, setReadout] = useState('bridge · checking…');
 
   useEffect(() => {
-    take<Health>('health')
-      .then((r) => {
-        const b = r.sections[0]?.data.bridge;
-        setHealth(r.outcome === 'ok' && b ? `bridge · PowerShell ${b.powershell} · ${b.took_ms} ms` : `bridge · ${r.outcome}`);
-      })
-      .catch(() => setHealth('bridge · unreachable'));
-  }, []);
+    let active = true;
+    let pending = false;
+    let refreshOnVisible = false;
+    let timer: number | undefined;
+    let lastChecked: string | null = null;
 
-  useEffect(() => {
-    const source = new EventSource('/api/stream');
-    let pending: string | null = null;
+    function schedule(delay: number) {
+      if (!active || document.hidden) return;
+      timer = window.setTimeout(() => { void check(); }, delay);
+    }
 
-    source.onopen = () => setConnected(true);
-    source.onerror = () => setConnected(false);
-    source.addEventListener('bridge', (event) => {
-      const data = parse(event);
-      const detail = data.error ? ` · ${firstLine(String(data.error))}` : '';
-      pending = `bridge · ${data.outcome ?? 'not observed'}${detail}`;
-    });
-    source.addEventListener('heartbeat', () => {
-      setConnected(true);
-      setTrouble(pending);
-      pending = null;
-    });
+    async function check() {
+      if (!active || pending || document.hidden) return;
+      pending = true;
+      refreshOnVisible = false;
+      let delay = CHECK_MS;
+      try {
+        const reading = await take<Health>('health');
+        if (!active || refreshOnVisible) return;
+        lastChecked = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+        setStatus('live'); // Sentinel answered; its bridge outcome is stated separately.
+        if (reading.outcome === 'ok') {
+          const bridge = reading.sections[0]?.data.bridge;
+          setReadout(`bridge · PowerShell ${bridge?.powershell ?? 'answered'} · ${reading.took_ms} ms`);
+        } else {
+          const busy = reading.error?.kind === 'busy' ? ' (Sentinel busy)' : '';
+          const detail = reading.error?.detail ? ` · ${firstLine(reading.error.detail)}` : '';
+          setReadout(`bridge · ${reading.outcome}${busy}${detail}`);
+          delay = RETRY_MS;
+        }
+      } catch (error) {
+        if (!active) return;
+        if (error instanceof Unauthorized) {
+          active = false;
+          setSession('closed');
+          return;
+        }
+        if (!refreshOnVisible) {
+          if (error instanceof HttpError) {
+            setStatus('issue');
+            setReadout(`bridge · check failed (${error.status})`);
+          } else {
+            setStatus('offline');
+            setReadout(lastChecked ? `bridge · not checked since ${lastChecked}` : 'bridge · unreachable');
+          }
+        }
+        delay = RETRY_MS;
+      } finally {
+        pending = false;
+        if (refreshOnVisible && active && !document.hidden) {
+          refreshOnVisible = false;
+          void check();
+        } else {
+          schedule(delay);
+        }
+      }
+    }
 
-    return () => source.close();
-  }, []);
+    function onVisibility() {
+      if (timer !== undefined) window.clearTimeout(timer);
+      timer = undefined;
+      if (document.hidden) return;
+      setStatus('checking');
+      setReadout('bridge · checking…');
+      if (pending) refreshOnVisible = true;
+      else void check();
+    }
+
+    document.addEventListener('visibilitychange', onVisibility);
+    void check();
+    return () => {
+      active = false;
+      if (timer !== undefined) window.clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [setSession]);
 
   return (
     <span className={styles.zone}>
       <span
-        className={`${styles.word} ${connected ? styles.lit : styles.dark} readout`}
+        className={`${styles.word} ${status === 'live' ? styles.lit : styles.dark} readout`}
         role="status"
-        title={connected ? 'the log stream is connected; each poll reports whether it observed the machine' : 'the log stream is not connected'}
+        title={status === 'live' ? 'Sentinel returned the latest Health reading; see the readout for the bridge outcome' : status === 'checking' ? 'Checking Sentinel now' : status === 'issue' ? 'The Health check returned an HTTP error; Sentinel or a gateway may have answered' : 'Sentinel did not answer the latest check'}
       >
-        {connected ? 'live' : 'offline'}
+        {status}
       </span>
-      <span className={`${styles.bridge} readout`} title={trouble ?? undefined}>{trouble ? shorten(trouble) : health}</span>
+      <span className={`${styles.bridge} readout`} title={readout}>{shorten(readout)}</span>
     </span>
   );
 }
 
-/** The header carries one line. What a failure said in full stays on the readout, one hover away. */
+/** The header carries one line. A longer failure stays on the readout, one hover away. */
 function shorten(text: string): string {
   return text.length > 76 ? `${text.slice(0, 75)}…` : text;
-}
-
-function parse(event: Event): Record<string, unknown> {
-  try {
-    return JSON.parse((event as MessageEvent).data);
-  } catch {
-    return {};
-  }
 }
