@@ -139,8 +139,23 @@ def failed(name: str, outcome: str = "failed", error: str = "There is not an eve
     return {**source(name, [], outcome=outcome, error=error, oldest_state="failed", log_state="failed"), "truncated": None}
 
 
+def preview(source_result: dict[str, Any]) -> dict[str, Any]:
+    """Project old raw fixtures as the list collector now projects them on Windows."""
+    projected = []
+    for record in source_result["records"]:
+        raw = record.get("RawData")
+        message = record.get("Message")
+        projected.append({
+            **{key: record.get(key) for key in whea.WHEA_PREVIEW_KEYS - {"HeaderHex", "PayloadBytes", "MessageChars"}},
+            "HeaderHex": raw[:256] if isinstance(raw, str) else None,
+            "PayloadBytes": len(raw) // 2 if isinstance(raw, str) else None,
+            "MessageChars": whea._utf16_chars(message) if isinstance(message, str) else None,
+        })
+    return {**source_result, "records": projected}
+
+
 def take_both(system: dict[str, Any] | None, channel: dict[str, Any] | None, count: int = 30):
-    sources = [value for value in (system, channel) if value is not None]
+    sources = [preview(value) for value in (system, channel) if value is not None]
     return asyncio.run(take("whea", FakeBridge(BridgeResult("ok", items=[{"sources": sources}], took_ms=11)), {"count": count}))
 
 
@@ -162,7 +177,7 @@ def canned_decoder(monkeypatch):
     monkeypatch.setattr(whea, "_run_decoder", lambda payload, timeout: ("{}", "", 0, None))
 
 
-def test_the_query_asks_both_logs_for_the_payload_and_treats_a_no_match_as_empty():
+def test_the_query_asks_both_logs_for_bounded_headers_and_treats_a_no_match_as_empty():
     script = whea.whea_script(12)
     assert "Provider[@Name='Microsoft-Windows-WHEA-Logger']" in script and "'system' 'System'" in script
     assert "'kernel_whea' 'Microsoft-Windows-Kernel-WHEA/Errors'" in script
@@ -170,7 +185,8 @@ def test_the_query_asks_both_logs_for_the_payload_and_treats_a_no_match_as_empty
     assert script.count("Read-WheaSource '") == 2 and script.endswith("12)) }\n")
     assert "-MaxEvents ($limit + 1)" in script and "-ErrorAction Stop" in script
     assert "NoMatchingEventsFound" in script and "Read-LogMetadata $log" in script
-    assert "Log = $_.LogName" in script and "RawData" in script and "byte[]" in script
+    assert "Log = $event.LogName" in script and "HeaderHex" in script and "byte[]" in script
+    assert "RawData =" not in script and "Properties =" not in script
 
 
 def test_both_logs_merge_newest_first_to_the_exact_global_limit(no_decoder_launch):
@@ -204,7 +220,7 @@ def test_a_record_id_shared_by_both_logs_stays_two_records(no_decoder_launch):
     reading = take_both(source("system", [row(whea.LOG, 5, stamp(1))]), source("kernel_whea", [row(whea.CHANNEL, 5, stamp(2), raw=cper(77))]))
     data = sections(reading)
     assert reading.count == 2 and [(r["Log"], r["RecordId"]) for r in data["records"]] == [(whea.LOG, 5), (whea.CHANNEL, 5)]
-    assert [(e["Log"], e["RecordId"]) for e in data["decoded"]] == [(whea.LOG, 5), (whea.CHANNEL, 5)]
+    assert "decoded" not in data
     assert [(e["Log"], e["RecordId"]) for e in data["identity"]] == [(whea.LOG, 5), (whea.CHANNEL, 5)]
     envelope = reading.to_dict()
     with pytest.raises(ValueError, match="ambiguous across logs"):
@@ -212,7 +228,7 @@ def test_a_record_id_shared_by_both_logs_stays_two_records(no_decoder_launch):
     assert _selection_ids(envelope, [f"{whea.CHANNEL}:5"]) == [f"{whea.CHANNEL}:5"]
 
 
-def test_the_decoder_runs_for_whea_logger_records_and_never_for_the_channel(monkeypatch):
+def test_the_preview_never_launches_the_decoder_or_carries_full_bytes(monkeypatch):
     system_payload = cper(3, severity=2, flags=0)
     launched: list[str] = []
     monkeypatch.setattr(whea, "DECODER", str(FIXTURE))
@@ -221,11 +237,10 @@ def test_the_decoder_runs_for_whea_logger_records_and_never_for_the_channel(monk
         source("system", [row(whea.LOG, 3, stamp(1), raw=system_payload)]),
         source("kernel_whea", [row(whea.CHANNEL, 1, stamp(2), raw=cper(9)), row(whea.CHANNEL, 2, stamp(3), raw=system_payload)]),
     )
-    decoded = sections(reading)["decoded"]
-    assert launched == [system_payload]  # one launch, for the System record only, even for an identical channel payload
-    assert decoded[0] == {"Log": whea.LOG, "RecordId": 3, "decoded": {"Header": {"Signature": "CPER"}}}
-    assert decoded[1:] == [{"Log": whea.CHANNEL, "RecordId": 1, "error": whea.DEFERRED}, {"Log": whea.CHANNEL, "RecordId": 2, "error": whea.DEFERRED}]
-    assert sections(reading)["records"][1]["RawData"] == cper(9)  # the raw bytes stay available
+    assert launched == []
+    assert "decoded" not in sections(reading)
+    assert all("RawData" not in record and "Properties" not in record for record in sections(reading)["records"])
+    assert sections(reading)["records"][1]["HeaderHex"] == cper(9)[:256]
     assert reading.warnings == []
 
 
@@ -233,15 +248,15 @@ def test_channel_records_need_no_decoder_and_warn_of_none(monkeypatch):
     monkeypatch.setattr(whea, "DECODER", str(FIXTURE.parent / "no-decoder-here.exe"))
     reading = take_both(source("system", []), source("kernel_whea", [row(whea.CHANNEL, 1, stamp(1), raw=cper(1))]))
     assert reading.outcome == "ok" and reading.warnings == []
-    assert sections(reading)["decoded"] == [{"Log": whea.CHANNEL, "RecordId": 1, "error": whea.DEFERRED}]
+    assert "decoded" not in sections(reading)
 
 
-def test_authenticated_boundary_withholds_cper_by_default_and_serves_exact_bytes_when_named(no_decoder_launch):
+def test_authenticated_preview_withholds_header_by_default_and_never_sends_full_bytes(no_decoder_launch):
     payload = cper(77)
     event = row(whea.CHANNEL, 7, stamp(1), raw=payload)
     event["Properties"] = [payload]
     bridge = FakeBridge(
-        BridgeResult("ok", items=[{"sources": [source("system", []), source("kernel_whea", [event])]}]),
+        BridgeResult("ok", items=[{"sources": [preview(source("system", [])), preview(source("kernel_whea", [event]))]}]),
         by_marker={"$env:COMPUTERNAME": identity_result("SENTINEL-FIXTURE", "person")},
     )
     token = "synthetic-test-token-0123456789"
@@ -254,9 +269,9 @@ def test_authenticated_boundary_withholds_cper_by_default_and_serves_exact_bytes
     original = exact.json()
     hidden = next(s["data"][0] for s in redacted["sections"] if s["name"] == "records")
     raw = next(s["data"][0] for s in original["sections"] if s["name"] == "records")
-    assert "cper" in redacted["redacted"] and hidden["RawData"].startswith("<cper bytes withheld")
-    assert hidden["Properties"][0].startswith("<cper bytes withheld") and payload not in json.dumps(redacted)
-    assert raw["RawData"] == raw["Properties"][0] == payload
+    assert "cper" in redacted["redacted"] and hidden["HeaderHex"].startswith("<cper bytes withheld")
+    assert "RawData" not in hidden and "Properties" not in hidden and payload not in json.dumps(redacted)
+    assert raw["HeaderHex"] == payload[:256] and "RawData" not in raw
     assert next(s["data"][0]["cper"]["severity"] for s in redacted["sections"] if s["name"] == "identity") == "fatal"
 
 
@@ -457,7 +472,7 @@ def test_no_records_and_a_source_that_did_not_answer_is_not_an_empty_log(no_deco
     reading = take_both(make("system", system), make("kernel_whea", channel))
     assert reading.outcome == outcome
     if outcome == "empty":
-        assert reading.count == 0 and sections(reading)["records"] == [] and sections(reading)["decoded"] == []
+        assert reading.count == 0 and sections(reading)["records"] == [] and "decoded" not in sections(reading)
         assert sections(reading)["coverage"]["complete"] is True
         return
     assert reading.count is None and not reading.observed
@@ -505,10 +520,11 @@ def test_a_source_truncated_at_its_limit_bounds_the_list_even_when_nothing_is_cu
     "returned count", "limit", "truncated without a full page", "empty with rows", "ok without rows",
     "stopped with truncated", "stopped without detail", "error on an answer", "wrong log", "duplicate source",
     "row from another log", "row from another provider", "channel event id", "boolean record id",
-    "unreadable time", "unexpected field",
+    "unreadable time", "unexpected field", "raw payload leaked", "missing message length",
+    "wrong header length", "shorter original message",
 ])
 def test_a_source_that_breaks_its_contract_fails_closed(no_decoder_launch, damage):
-    good = [row(whea.CHANNEL, 2, stamp(1), raw=cper(2)), row(whea.CHANNEL, 1, stamp(2), raw=cper(1))]
+    good = preview(source("kernel_whea", [row(whea.CHANNEL, 2, stamp(1), raw=cper(2)), row(whea.CHANNEL, 1, stamp(2), raw=cper(1))]))["records"]
     channel = source("kernel_whea", good)
     system = source("system", [])
     if damage == "returned count":
@@ -541,6 +557,14 @@ def test_a_source_that_breaks_its_contract_fails_closed(no_decoder_launch, damag
         good[0]["TimeCreated"] = "yesterday"
     elif damage == "unexpected field":
         good[0]["Serial"] = "x"
+    elif damage == "raw payload leaked":
+        good[0]["RawData"] = cper(2)
+    elif damage == "missing message length":
+        good[0].pop("MessageChars")
+    elif damage == "wrong header length":
+        good[0]["HeaderHex"] = "43"
+    elif damage == "shorter original message":
+        good[0]["MessageChars"] = 1
     sources = [system, channel, channel] if damage == "duplicate source" else [system, channel]
     reading = asyncio.run(take("whea", FakeBridge(BridgeResult("ok", items=[{"sources": sources}])), {"count": 30}))
     assert reading.outcome == "failed" and reading.count is None
@@ -587,7 +611,7 @@ def test_an_empty_log_has_no_reach_and_a_disabled_log_is_not_evidence(no_decoder
     assert reading.warnings == [f"{whea.CHANNEL} is disabled: Windows is not recording new events there, so its absence of records is not evidence"]
 
 
-def test_each_record_carries_its_decoded_structure_or_the_reason_there_is_none(monkeypatch):
+def test_exact_system_record_carries_its_decoded_structure_or_reason(monkeypatch):
     records = [{**r, "Log": whea.LOG} for r in load(groups={"burst"})[:2]]
     records[0]["RawData"] = minimal_cper()
     other = bytearray.fromhex(minimal_cper())
@@ -600,20 +624,15 @@ def test_each_record_carries_its_decoded_structure_or_the_reason_there_is_none(m
     }
     monkeypatch.setattr(whea, "_run_decoder", lambda payload, timeout: answers[payload])
 
-    reading = take_both(source("system", records, limit=2), source("kernel_whea", [], limit=2), count=2)
-    assert reading.outcome == "ok" and reading.count == 2
-    assert [(s.name, s.cls) for s in reading.sections] == [("records", "raw"), ("collection", "raw"), ("coverage", "derived"), ("identity", "derived"), ("groups", "derived"), ("decoded", "derived")]
-    data = sections(reading)
-    assert data["collection"] | {"sources": None} == {"limit": 2, "returned": 2, "truncated": False, "sources": None}
-    assert "RawData" in data["records"][0]
-    assert reading.section("decoded").basis.startswith(whea.DECODED_BASIS)
-    by_id = {entry["RecordId"]: entry for entry in data["decoded"]}
-    assert [entry["RecordId"] for entry in data["decoded"]] == [r["RecordId"] for r in data["records"]]
-    assert by_id[records[0]["RecordId"]] == {"Log": whea.LOG, "RecordId": records[0]["RecordId"], "decoded": {"SectionCount": 1, "ErrorSeverity": "Corrected"}}
-    assert by_id[records[1]["RecordId"]]["error"] == "Hexadecimal string is not a valid CPER record"
+    first = exact_record(source("system", [records[0]], limit=1), record_id=records[0]["RecordId"], source_name="system")
+    second = exact_record(source("system", [records[1]], limit=1), record_id=records[1]["RecordId"], source_name="system")
+    assert first.outcome == second.outcome == "ok"
+    assert first.section("decoded").basis.startswith(whea.DECODED_BASIS)
+    assert sections(first)["decoded"] == [{"Log": whea.LOG, "RecordId": records[0]["RecordId"], "decoded": {"SectionCount": 1, "ErrorSeverity": "Corrected"}}]
+    assert sections(second)["decoded"][0]["error"] == "Hexadecimal string is not a valid CPER record"
 
 
-def test_a_truncated_source_decodes_only_the_records_it_returned(monkeypatch):
+def test_a_truncated_preview_does_not_decode_its_records(monkeypatch):
     records = [{**r, "Log": whea.LOG, "RawData": minimal_cper()} for r in load(groups={"burst"})[:2]]
     calls = []
     monkeypatch.setattr(whea, "DECODER", str(FIXTURE))
@@ -621,7 +640,7 @@ def test_a_truncated_source_decodes_only_the_records_it_returned(monkeypatch):
     reading = take_both(source("system", records, limit=2, truncated=True), source("kernel_whea", [], limit=2), count=2)
     assert reading.count == 2 and sorted(r["RecordId"] for r in sections(reading)["records"]) == sorted(r["RecordId"] for r in records)
     assert sections(reading)["collection"]["truncated"] is True
-    assert len(sections(reading)["decoded"]) == 2 and len(calls) == 1  # repeated payload decoded once
+    assert "decoded" not in sections(reading) and calls == []
 
 
 def test_identical_cper_payloads_are_decoded_once_and_keep_their_own_record_ids(monkeypatch):
@@ -654,13 +673,13 @@ def test_a_spent_budget_stops_decoding_without_failing_the_reading(monkeypatch):
     assert entry["RecordId"] == 7 and "budget" in entry["error"]
 
 
-def test_a_missing_decoder_is_a_warning_on_the_reading_not_a_failure(monkeypatch):
+def test_a_missing_decoder_does_not_affect_the_preview(monkeypatch):
     records = [{**r, "Log": whea.LOG} for r in load(groups={"burst"})[:2]]
     monkeypatch.setattr(whea, "DECODER", str(FIXTURE.parent / "no-decoder-here.exe"))
     reading = take_both(source("system", records), source("kernel_whea", []))
     assert reading.outcome == "ok"
-    assert [e["error"] for e in sections(reading)["decoded"]] == ["the decoder is not present"] * 2
-    assert reading.warnings == ["the CPER decoder is not present: the records were read but not decoded"]
+    assert "decoded" not in sections(reading)
+    assert reading.warnings == []
 
 
 def test_a_failed_query_decodes_nothing_and_says_what_failed():
@@ -1330,16 +1349,14 @@ def _observed(reading):
 
 
 @pytest.mark.host
-def test_whea_answers_from_both_logs_on_this_machine(monkeypatch: pytest.MonkeyPatch):
-    # No real record from this machine is handed to the external decoder here (see the decoder test
-    # below): a System record gets a canned answer, and the channel's records never reach it.
-    monkeypatch.setattr(whea, "_run_decoder", lambda payload, timeout: ("{}", "", 0, None))
+def test_whea_answers_from_both_logs_on_this_machine():
     reading = _observed(asyncio.run(take("whea", real_bridge_or_skip(), {"count": 5})))
     sources = reading.section("collection").data["sources"]
     assert set(sources) == {"system", "kernel_whea"}
     assert all(sources[name]["outcome"] in ("ok", "empty") for name in sources), {name: s["outcome"] for name, s in sources.items()}
-    assert len(reading.section("decoded").data) == len(reading.section("records").data) == len(reading.section("identity").data)
-    assert all(entry["error"] == whea.DEFERRED for entry in reading.section("decoded").data if entry["Log"] == whea.CHANNEL)
+    assert reading.section("decoded") is None
+    assert len(reading.section("records").data) == len(reading.section("identity").data)
+    assert all("RawData" not in row and "Properties" not in row and set(row) == whea.WHEA_PREVIEW_KEYS for row in reading.section("records").data)
     assert all(row["Log"] in (whea.LOG, whea.CHANNEL) for row in reading.section("records").data)
     if reading.outcome == "empty":
         assert reading.count == 0 and reading.section("coverage").data["complete"] is True
@@ -1357,7 +1374,10 @@ def test_exact_whea_record_answers_from_its_own_log_on_this_machine(monkeypatch:
     source_name = next(spec.name for spec in whea.WHEA_SOURCES if spec.log == selected["Log"])
     exact = _observed(asyncio.run(take("whea_record", bridge, {"source": source_name, "record_id": selected["RecordId"]})))
     assert exact.count == 1 and exact.section("records").data[0]["RecordId"] == selected["RecordId"]
-    assert exact.section("records").data[0]["RawData"] == selected["RawData"]
+    exact_row = exact.section("records").data[0]
+    assert exact_row["TimeCreated"] == selected["TimeCreated"]
+    assert exact_row["RawData"][:256] == selected["HeaderHex"]
+    assert len(exact_row["RawData"]) // 2 == selected["PayloadBytes"]
     assert exact.section("collection").data["source"]["outcome"] == "ok"
 
 
@@ -1387,6 +1407,45 @@ function Get-WinEvent {
     source_result = result.items[0]["source"]
     assert source_result["outcome"] == "failed" and source_result["records"] == []
     assert "8-byte exact-read limit" in source_result["error"]
+
+
+@pytest.mark.host
+def test_native_whea_preview_bounds_large_binary_message_and_property_list(monkeypatch: pytest.MonkeyPatch):
+    import sentinel.bridge
+
+    monkeypatch.setattr(sentinel.bridge, "POOL_SIZE", 0)
+    bridge = real_bridge_or_skip()
+    fake = r"""
+function Get-WinEvent {
+    [CmdletBinding()]
+    param([xml]$FilterXml, [string]$ListLog, [string]$LogName, [switch]$Oldest, [int]$MaxEvents)
+    if ($ListLog) { [pscustomobject]@{ IsEnabled = $true; LogMode = 'Circular' }; return }
+    if ($Oldest) { [pscustomobject]@{ TimeCreated = [datetime]::UtcNow.AddDays(-2) }; return }
+    $log = [string]$FilterXml.QueryList.Query.Path
+    if ($log -ne 'System') { Write-Error 'synthetic empty' -ErrorId 'NoMatchingEventsFound' -ErrorAction Stop }
+    $bytes = [byte[]]::new(20480)
+    $bytes[0] = 0x43; $bytes[1] = 0x50; $bytes[2] = 0x45; $bytes[3] = 0x52
+    $properties = @([pscustomobject]@{ Value = $bytes })
+    for ($i = 0; $i -lt 79; $i++) { $properties += [pscustomobject]@{ Value = ('extra' * 1000) } }
+    [pscustomobject]@{
+        RecordId = [int64]77; Id = 18; Level = 2; ProviderName = 'Microsoft-Windows-WHEA-Logger'
+        LogName = 'System'; TimeCreated = [datetime]::UtcNow
+        Message = ('a' * 1023) + [char]::ConvertFromUtf32(0x1F642) + ('z' * 19000)
+        Properties = $properties
+    }
+}
+"""
+    result = bridge.run(fake + whea.whea_script(5), depth=whea.WHEA_DEPTH)
+    assert result.outcome == "ok" and len(result.items) == 1, result
+    system, channel = result.items[0]["sources"]
+    assert channel["outcome"] == "empty" and system["outcome"] == "ok"
+    entry = system["records"][0]
+    assert set(entry) == whea.WHEA_PREVIEW_KEYS
+    assert entry["MessageChars"] == 20025 and entry["Message"] == "a" * 1023
+    assert entry["PayloadBytes"] == 20480 and len(entry["HeaderHex"]) == 256
+    assert "RawData" not in entry and "Properties" not in entry
+    assert whea.valid_whea_preview_row(whea.WHEA_SOURCES[0], entry)
+    assert len(json.dumps(result.items[0])) < 8000
 
 
 @pytest.mark.host
@@ -1420,7 +1479,7 @@ function Get-WinEvent {
     assert system["outcome"] == "empty" and system["truncated"] is False and system["records"] == []
     assert channel["outcome"] == "ok" and channel["returned"] == 3 and channel["truncated"] is None
     assert channel["stopped"] == {"kind": "failed", "detail": "synthetic interruption"}
-    assert [r["Log"] for r in channel["records"]] == [whea.CHANNEL] * 3 and channel["records"][0]["RawData"] == "435045"
+    assert [r["Log"] for r in channel["records"]] == [whea.CHANNEL] * 3 and channel["records"][0]["HeaderHex"] == "435045"
     reading = whea.take_whea(type("Canned", (), {"run": lambda self, script, depth=6: result})(), {"count": 5})
     assert reading.outcome == "ok" and reading.count == 3 and any("stopped after 3 returned records" in w for w in reading.warnings)
 

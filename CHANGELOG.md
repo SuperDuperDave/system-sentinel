@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.5.0] - 2026-09-23
+
+### Changed
+- `whea` is now a bounded newest-record preview across the two WHEA logs. Each row keeps its source, RecordId, report time, at most 1,024 UTF-16 message characters with the original length, and at most the first 128 bytes of its first binary property with the full payload length. The collector no longer serializes every binary property twice or launches a detail decoder for every list row. Source outcomes, cutoff, fixed-header facts and likely cross-log groups remain visible.
+- Opening a row in Hardware errors reads that exact retained event through `whea_record`, compares its source, RecordId and filing time with the preview, and shows full Windows fields, a structural CPER check and System WHEA-Logger decoded detail. Exact CPER bytes still require the explicit unredacted action.
+- Agent guidance points from the preview to `whea_record`. Capture manifests now state that `whea` in a ZIP is a preview and selected exact records are absent.
+
+### Compatibility and limits
+- New `whea.records` rows omit `Properties` and `RawData`, and `whea` no longer has a `decoded` section. Saved older Stack envelopes retain their original full shape. Agents and clients needing complete rows should use `whea_record(source, record_id)` and compare `TimeCreated` before relying on a re-read.
+- `whea_record` still refuses a row whose binary properties total over 1 MiB. The preview can show its reported length and fixed-header facts but cannot provide exact fields for a row above that bound. The preview's fixed-header facts do not certify the full CPER structure.
+
 ## [1.4.1] - 2026-09-23
 
 ### Added

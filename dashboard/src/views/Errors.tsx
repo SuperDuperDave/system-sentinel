@@ -191,7 +191,6 @@ export function Errors() {
       : `No Kernel-WHEA reports returned ${inWindow}; the channel does not cover the full window`;
 
   const records = part<EventRecord[]>(whea.reading, 'records') ?? [];
-  const decoded = part<Decoded[]>(whea.reading, 'decoded') ?? [];
   const identities = part<WheaIdentity[]>(whea.reading, 'identity') ?? [];
   const identityByRef = new Map(identities.map((entry) => [recordRef(entry), entry]));
   const collection = part<WheaCollection>(whea.reading, 'collection');
@@ -331,6 +330,7 @@ export function Errors() {
         }
       >
         <OutcomeLine taken={whea} noun="hardware error records" singular="hardware error record" emptyText="No hardware error records returned by either log" />
+        <p className={`${styles.windowNote} readout`}>This list keeps report identity, source coverage and a short message. Open a record for its exact Windows fields, full CPER structural check and decoded detail.</p>
         {collection ? <WheaSources collection={collection} coverage={wheaCoverage} /> : null}
         {observed(whea.reading) && records.length > 0 ? (
           <div className={`${styles.levelLegend} readout`}>
@@ -354,7 +354,7 @@ export function Errors() {
               return (
                 <>
                   <span className={`${styles.time} readout`} title={r.TimeCreated}><span>{recordDay.format(new Date(r.TimeCreated))}</span><span>{clock.format(new Date(r.TimeCreated))}</span></span>
-                  <span className={styles.level} title={severity ? `CPER severity: ${severity}` : `Windows event level: ${r.LevelDisplayName}`}>
+                  <span className={styles.level} title={severity ? `CPER severity: ${severity}` : `Windows event level: ${r.LevelDisplayName ?? `Level ${r.Level}`}`}>
                     <Glyph kind={markerKind(r, identity)} />
                     <span className={styles.srOnly}>{severity ? `CPER severity ${severity}` : r.LevelDisplayName || `Level ${r.Level}`}</span>
                   </span>
@@ -368,7 +368,7 @@ export function Errors() {
                 </>
               );
             }}
-            inspect={(r) => <RecordDetail record={r} identity={identityByRef.get(recordRef(r))} decoded={decoded.find((d) => recordRef(d) === recordRef(r))} envelope={whea.reading} />}
+            inspect={(r) => <ExactWheaDetail source={r.Log === KERNEL_WHEA ? 'kernel_whea' : 'system'} recordId={r.RecordId} reportedAt={r.TimeCreated} />}
           />
         ) : null}
       </Section>
@@ -642,25 +642,31 @@ function SignatureDetail({ signature }: { signature: Signature }) {
 
 /** One report reference can open its own exact, redacted reading without leaving the timeline. */
 export function ReportDetail({ report, showMomentLink = true }: { report: KernelReport; showMomentLink?: boolean }) {
-  const taken = useReading('whea_record', { source: 'kernel_whea', record_id: report.record_id });
+  return <ExactWheaDetail source="kernel_whea" recordId={report.record_id} reportedAt={report.reported_at} showMomentLink={showMomentLink} />;
+}
+
+function ExactWheaDetail({ source, recordId, reportedAt, showMomentLink = true }: { source: 'system' | 'kernel_whea'; recordId: EventRecord['RecordId']; reportedAt: string | null; showMomentLink?: boolean }) {
+  const taken = useReading('whea_record', { source, record_id: recordId });
   const record = part<EventRecord[]>(taken.reading, 'records')?.[0];
+  const log = source === 'kernel_whea' ? KERNEL_WHEA : 'System';
+  const label = source === 'kernel_whea' ? 'Kernel-WHEA report' : 'System WHEA-Logger report';
   const matches = observed(taken.reading) && taken.reading?.outcome === 'ok'
-    && record?.Log === KERNEL_WHEA && record.RecordId === report.record_id && record.TimeCreated === report.reported_at;
-  const identity = part<WheaIdentity[]>(taken.reading, 'identity')?.find((entry) => entry.Log === KERNEL_WHEA && entry.RecordId === report.record_id);
-  const decoded = part<Decoded[]>(taken.reading, 'decoded')?.find((entry) => entry.Log === KERNEL_WHEA && entry.RecordId === report.record_id);
+    && record?.Log === log && record.RecordId === recordId && record.TimeCreated === reportedAt;
+  const identity = part<WheaIdentity[]>(taken.reading, 'identity')?.find((entry) => entry.Log === log && entry.RecordId === recordId);
+  const decoded = part<Decoded[]>(taken.reading, 'decoded')?.find((entry) => entry.Log === log && entry.RecordId === recordId);
   const announcement = taken.state === 'taking' ? 'Reading exact report'
     : matches ? 'Exact report matches the timeline reference'
       : taken.reading?.outcome === 'empty' ? 'Report is no longer returned'
         : taken.state === 'lost' || taken.reading && !observed(taken.reading) ? 'Report could not be read'
           : taken.reading?.outcome === 'ok' ? 'Report no longer matches the timeline reference' : '';
   return <>
-    <p className={styles.srOnly} role="status">{announcement ? `${announcement} #${report.record_id}` : ''}</p>
-    <OutcomeLine taken={taken} noun="returned record" singular="returned record" emptyText={`The channel no longer holds RecordId ${report.record_id}`} />
-    {taken.reading?.outcome === 'empty' ? <p className={`${styles.notDecoded} readout`}>The channel may have rotated since this timeline was taken; this does not mean the report never existed.</p> : null}
+    <p className={styles.srOnly} role="status">{announcement ? `${announcement} #${recordId}` : ''}</p>
+    <OutcomeLine taken={taken} noun="returned record" singular="returned record" emptyText={`The ${source === 'kernel_whea' ? 'channel' : 'System log'} no longer holds RecordId ${recordId}`} />
+    {taken.reading?.outcome === 'empty' ? <p className={`${styles.notDecoded} readout`}>The log may have rotated since this list was taken; this does not mean the report never existed.</p> : null}
     {taken.reading && !observed(taken.reading) ? <p className={`${styles.notDecoded} readout`}>This report could not be read. The query outcome does not establish that the report is absent.</p> : null}
-    {taken.reading?.outcome === 'ok' && !matches ? <p className={`${styles.notDecoded} readout`}>This RecordId now names a different report. Take the timeline again before relying on it.</p> : null}
+    {taken.reading?.outcome === 'ok' && !matches ? <p className={`${styles.notDecoded} readout`}>This RecordId now names a different report. Take the list again before relying on it.</p> : null}
     {matches && record ? <RecordDetail record={record} identity={identity} decoded={decoded} envelope={taken.reading} showMomentLink={showMomentLink}
-      stackTitle={`Kernel-WHEA report #${report.record_id} · reported ${record.TimeCreated}${identity?.cper?.previous_session ? ' · earlier-session error' : ''}`} /> : null}
+      stackTitle={`${label} #${recordId} · reported ${record.TimeCreated}${identity?.cper?.previous_session ? ' · earlier-session error' : ''}`} /> : null}
   </>;
 }
 

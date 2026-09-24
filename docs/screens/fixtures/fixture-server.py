@@ -249,7 +249,7 @@ def answer_whea(script: str) -> BridgeResult:
     limit = int(match.group(1))
     now = WHEA_ANCHOR
     system = whea_records(now)
-    returned = system[:limit]
+    returned = [_whea_preview(row) for row in system[:limit]]
     source = {
         "name": "system", "log": "System", "outcome": "ok" if returned else "empty", "error": None,
         "returned": len(returned), "limit": limit, "truncated": len(system) > limit, "stopped": None, "records": returned,
@@ -257,7 +257,7 @@ def answer_whea(script: str) -> BridgeResult:
         "log_oldest": _powershell_stamp(now - 86400), "oldest_state": "ok", "oldest_error": None,
     }
     channel_rows = kernel_whea_records(now)
-    channel_returned = channel_rows[:limit]
+    channel_returned = [_whea_preview(row) for row in channel_rows[:limit]]
     channel = {
         "name": "kernel_whea", "log": "Microsoft-Windows-Kernel-WHEA/Errors", "outcome": "ok", "error": None,
         "returned": len(channel_returned), "limit": limit, "truncated": len(channel_rows) > limit, "stopped": None, "records": channel_returned,
@@ -265,6 +265,20 @@ def answer_whea(script: str) -> BridgeResult:
         "log_oldest": channel_rows[-1]["TimeCreated"], "oldest_state": "ok", "oldest_error": None,
     }
     return BridgeResult("ok", items=[{"sources": [source, channel]}], took_ms=412)
+
+
+def _whea_preview(row: dict[str, Any]) -> dict[str, Any]:
+    """Mirror the list's bounded fields; exact fixture rows remain for whea_record."""
+    raw = row.get("RawData")
+    message = row.get("Message")
+    return {
+        "RecordId": row["RecordId"], "Id": row["Id"], "Level": row["Level"],
+        "ProviderName": row["ProviderName"], "TimeCreated": row["TimeCreated"],
+        "Message": message[:1024] if isinstance(message, str) else None,
+        "MessageChars": len(message.encode("utf-16-le")) // 2 if isinstance(message, str) else None,
+        "Log": row["Log"], "HeaderHex": raw[:256] if isinstance(raw, str) else None,
+        "PayloadBytes": len(raw) // 2 if isinstance(raw, str) else None,
+    }
 
 
 def answer_whea_record(script: str) -> BridgeResult:

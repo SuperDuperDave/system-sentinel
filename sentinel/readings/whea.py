@@ -1,5 +1,5 @@
-"""Hardware errors: ``whea`` (the records from both logs Windows keeps them in, each with its CPER
-header read locally and, for WHEA-Logger, its payload decoded beside it) and ``storms`` (the
+"""Hardware errors: ``whea`` previews records from both logs with fixed CPER-header facts;
+``whea_record`` retrieves one exact row and decodes System WHEA-Logger detail. ``storms`` maps the
 System log's WHEA-Logger records over a window in wall-clock buckets, by signature, with burst
 and acceleration flags).
 
@@ -53,6 +53,7 @@ from .health import DECODER
 PROVIDER = "Microsoft-Windows-WHEA-Logger"
 MAX_WHEA_RECORDS = 500
 MAX_EXACT_BINARY_BYTES = 1024 * 1024
+PREVIEW_MESSAGE_CHARS = 1024
 MAX_RECORD_ID = (1 << 53) - 1  # exact across JSON number clients
 LOG = "System"
 CHANNEL = "Microsoft-Windows-Kernel-WHEA/Errors"
@@ -169,13 +170,37 @@ function Read-WheaSource([string]$name, [string]$log, [string]$select, [int]$lim
 }
 """
 
-# The shared record shape, plus the log the record came from (a RecordId is only unique within its
-# log) and the CPER payload.
+# The exact read keeps the Windows record shape. The list is a bounded reference: its first
+# binary property's fixed header is enough for identity, and one exact read supplies the rest.
 WHEA_FIELDS = RECORD_FIELDS + ";\n        Log = $_.LogName;\n        " + RAW_DATA
+WHEA_PREVIEW_PROJECTION = r"""
+            $event = $_
+            $bytes = $null
+            foreach ($property in $event.Properties) {
+                if ($property.Value -is [byte[]]) { $bytes = $property.Value; break }
+            }
+            $message = $event.Message
+            $messageChars = if ($null -ne $message) { $message.Length } else { $null }
+            if ($null -ne $messageChars -and $messageChars -gt {message_limit}) {
+                $kept = {message_limit}
+                if ([char]::IsHighSurrogate($message[$kept - 1])) { $kept-- }
+                $message = $message.Substring(0, $kept)
+            }
+            [pscustomobject]@{
+                RecordId = $event.RecordId; Id = $event.Id; Level = $event.Level
+                ProviderName = $event.ProviderName
+                TimeCreated = $(if ($null -ne $event.TimeCreated) { $event.TimeCreated.ToUniversalTime().ToString('o') } else { $null })
+                Message = $message; MessageChars = $messageChars; Log = $event.LogName
+                HeaderHex = $(if ($null -ne $bytes) { [System.BitConverter]::ToString($bytes, 0, [Math]::Min(128, $bytes.Length)).Replace('-','') } else { $null })
+                PayloadBytes = $(if ($null -ne $bytes) { $bytes.Length } else { $null })
+            }
+"""
 WHEA_ROW_KEYS = {
     "RecordId", "Id", "Level", "LevelDisplayName", "ProviderName", "ProviderId", "Version", "MachineName",
     "TaskDisplayName", "TimeCreated", "Message", "Properties", "Log", "RawData",
 }
+WHEA_PREVIEW_KEYS = {"RecordId", "Id", "Level", "ProviderName", "TimeCreated",
+                     "Message", "MessageChars", "Log", "HeaderHex", "PayloadBytes"}
 
 
 def whea_script(count: int) -> str:
@@ -186,7 +211,8 @@ def whea_script(count: int) -> str:
     nothing matched, which is exactly the case the tool has to be quick about.
     """
     calls = ", ".join(f"(Read-WheaSource '{s.name}' '{s.log}' \"{s.select()}\" {int(count)})" for s in WHEA_SOURCES)
-    return LOG_METADATA_SCRIPT + WHEA_SOURCE_SCRIPT.replace("{fields}", WHEA_FIELDS) + f"[pscustomobject]@{{ sources = @({calls}) }}\n"
+    script = WHEA_SOURCE_SCRIPT.replace("[pscustomobject]@{ {fields} }", WHEA_PREVIEW_PROJECTION.replace("{message_limit}", str(PREVIEW_MESSAGE_CHARS)))
+    return LOG_METADATA_SCRIPT + script + f"[pscustomobject]@{{ sources = @({calls}) }}\n"
 
 
 def whea_record_script(spec: WheaSource, record_id: int) -> str:
@@ -196,7 +222,7 @@ def whea_record_script(spec: WheaSource, record_id: int) -> str:
             + f"[pscustomobject]@{{ source = Read-WheaSource '{spec.name}' '{spec.log}' \"{select}\" 1 {MAX_EXACT_BINARY_BYTES} }}\n")
 
 
-COLLECTION_BASIS = "each source's own answer: outcome, the records it returned against its limit of count + 1 asked, whether it was truncated or stopped part way, and its log's metadata"
+COLLECTION_BASIS = "each source's own answer: outcome, bounded preview records against its limit of count + 1 asked, whether it was truncated or stopped part way, and its log's metadata; take whea_record for one exact retained row"
 EXACT_COLLECTION_BASIS = "one selected log and EventRecordID, with its provider and event-ID filter; the collector asks for two matches to detect ambiguity, enforces a binary-byte bound before projection, and reports that log's outcome and retention metadata"
 WHEA_COVERAGE_BASIS = (
     "records holds the newest `limit` records across both logs, newest first; ties are ordered by source "
@@ -208,8 +234,8 @@ WHEA_COVERAGE_BASIS = (
     "a log that wrapped meanwhile can reach less far; it is null when it could not be read or the log "
     "holds nothing, and absence before it says nothing about what happened then."
 )
-IDENTITY_BASIS = (
-    "Read locally from each payload's 128-byte CPER header after the structural check: the record id "
+_IDENTITY_FIELDS_BASIS = (
+    "The record id "
     "(which Windows documents as unique only on the machine that created it), severity, section count, "
     "notification type, flags, and the eight header time bytes when their valid bit is set. The "
     "header_time object keeps integer and BCD calendar interpretations separately; its reading "
@@ -218,8 +244,16 @@ IDENTITY_BASIS = (
     "record's claim that the time correlates to the error event. previous_session is the header's "
     "PreviousError flag: the error occurred in an earlier session and was reported after a restart, "
     "so the Windows event's TimeCreated is that report, not "
-    "the moment of the error. PlatformId, PartitionId and CreatorId are not reported here; the full "
-    "payload stays in records."
+    "the moment of the error. PlatformId, PartitionId and CreatorId are not reported here."
+)
+IDENTITY_BASIS = (
+    "Read locally from each payload's bounded 128-byte CPER header after the fixed-header check; "
+    "the full CPER structure and section directory are not checked by this preview. "
+    + _IDENTITY_FIELDS_BASIS + " The full payload is available through whea_record for one exact retained row."
+)
+EXACT_IDENTITY_BASIS = (
+    "Read locally from each payload's CPER header after checking the full payload's structural bounds. "
+    + _IDENTITY_FIELDS_BASIS + " The full payload stays in records."
 )
 GROUPS_BASIS = (
     "A pair of returned records, one from each log, whose CPER headers agree on a nonzero record id, "
@@ -250,11 +284,11 @@ def take_whea(bridge: Bridge, params: dict[str, Any]) -> Reading:
                 by_name[value["name"]].append(value)
         rows: list[dict[str, Any]] = []
         for spec in WHEA_SOURCES:
-            source, returned = whea_source(spec, by_name[spec.name][0] if len(by_name[spec.name]) == 1 else None, count)
+            source, returned = whea_source(spec, by_name[spec.name][0] if len(by_name[spec.name]) == 1 else None, count, preview=True)
             sources[spec.name] = source
             rows.extend(returned)
         kept.extend(merge_newest(rows, count))
-        identities = [record_identity(record) for record in kept]
+        identities = [record_identity(record, preview=True) for record in kept]
         return [
             Section("records", "raw", kept),
             Section("collection", "raw", {"limit": count, "returned": len(kept), "truncated": len(rows) > count or any(s["truncated"] is True for s in sources.values()), "sources": sources}, basis=COLLECTION_BASIS),
@@ -288,9 +322,8 @@ def take_whea(bridge: Bridge, params: dict[str, Any]) -> Reading:
         return reading
     else:
         reading.outcome, reading.count = "empty", 0
-    decoded, warnings = decode_all(kept)
-    reading.sections.append(Section("decoded", "derived", decoded, basis=DEFERRED_BASIS))
-    reading.warnings.extend(warnings)
+    if any(record["MessageChars"] is not None and record["MessageChars"] > _utf16_chars(record["Message"]) for record in kept):
+        reading.warnings.append("Some WHEA messages were shortened in this preview; take whea_record for the complete Windows fields and CPER detail")
     reading.took_ms = _ms(started)
     return reading
 
@@ -326,7 +359,7 @@ def take_whea_record(bridge: Bridge, params: dict[str, Any]) -> Reading:
             return sections
         return sections + [
             Section("records", "raw", rows),
-            Section("identity", "derived", [record_identity(row) for row in rows], basis=IDENTITY_BASIS),
+            Section("identity", "derived", [record_identity(row) for row in rows], basis=EXACT_IDENTITY_BASIS),
         ]
 
     reading = from_object("whea_record", params, script, result, build)
@@ -352,7 +385,7 @@ def take_whea_record(bridge: Bridge, params: dict[str, Any]) -> Reading:
     return reading
 
 
-def whea_source(spec: WheaSource, value: Any, limit: int) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+def whea_source(spec: WheaSource, value: Any, limit: int, *, preview: bool = False) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """One source's answer, validated whole before any of its records is counted."""
     base = {"log": spec.log, "provider": spec.provider, "event_ids": list(spec.event_ids) if spec.event_ids else None, "limit": limit}
     failed = {**log_metadata({}), **base, "outcome": "failed", "error": "the collector did not return a valid source result", "returned": 0, "truncated": None, "stopped": None}
@@ -377,7 +410,7 @@ def whea_source(spec: WheaSource, value: Any, limit: int) -> tuple[dict[str, Any
         and (outcome == "empty") == (len(rows) == 0)
         and (stopped is None or outcome == "ok")
         and value.get("error") is None
-        and all(valid_whea_row(spec, row) for row in rows)
+        and all(valid_whea_preview_row(spec, row) if preview else valid_whea_row(spec, row) for row in rows)
     )
     if not valid:
         return {**failed, **metadata, "outcome": "failed", "error": "the source result or its records failed validation", "returned": 0, "truncated": None, "stopped": None}, []
@@ -394,6 +427,29 @@ def valid_whea_row(spec: WheaSource, row: Any) -> bool:
         and stamp_key(row.get("TimeCreated")) is not None
         and (row.get("RawData") is None or isinstance(row["RawData"], str))
         and (row.get("Message") is None or isinstance(row["Message"], str))
+        and (row.get("Level") is None or type(row["Level"]) is int)
+    )
+
+
+def _utf16_chars(value: str | None) -> int:
+    return len(value.encode("utf-16-le", errors="surrogatepass")) // 2 if value is not None else 0
+
+
+def valid_whea_preview_row(spec: WheaSource, row: Any) -> bool:
+    """No full payload or property array may enter the list response by accident."""
+    if not isinstance(row, dict) or set(row) != WHEA_PREVIEW_KEYS:
+        return False
+    message, original = row.get("Message"), row.get("MessageChars")
+    size = _utf16_chars(message) if isinstance(message, str) else 0
+    return (
+        row.get("Log") == spec.log and row.get("ProviderName") == spec.provider
+        and type(row.get("RecordId")) is int and row["RecordId"] > 0
+        and type(row.get("Id")) is int and (spec.event_ids is None or row["Id"] in spec.event_ids)
+        and stamp_key(row.get("TimeCreated")) is not None
+        and (message is None and original is None or isinstance(message, str) and type(original) is int
+             and 0 <= size <= PREVIEW_MESSAGE_CHARS and original >= size
+             and (original == size or size in (PREVIEW_MESSAGE_CHARS, PREVIEW_MESSAGE_CHARS - 1)))
+        and valid_fixed_header_projection(row.get("HeaderHex"), row.get("PayloadBytes"))
         and (row.get("Level") is None or type(row["Level"]) is int)
     )
 
@@ -446,7 +502,10 @@ def cper_header(payload: Any) -> tuple[dict[str, Any] | None, str | None]:
     checked, reason = checked_cper(text)
     if reason:
         return None, reason
-    data = bytes.fromhex(checked[:256])
+    return _cper_identity(bytes.fromhex(checked[:256])), None
+
+
+def _cper_identity(data: bytes) -> dict[str, Any]:
     severity = int.from_bytes(data[12:16], "little")
     valid = int.from_bytes(data[16:20], "little")
     flags = int.from_bytes(data[104:108], "little")
@@ -461,7 +520,7 @@ def cper_header(payload: Any) -> tuple[dict[str, Any] | None, str | None]:
         "recovered": bool(flags & 0x1),
         "previous_session": bool(flags & 0x2),
         "simulated": bool(flags & 0x4),
-    }, None
+    }
 
 
 def _cper_time(raw: bytes) -> dict[str, Any]:
@@ -502,8 +561,17 @@ def _cper_time(raw: bytes) -> dict[str, Any]:
     }
 
 
-def record_identity(record: dict[str, Any]) -> dict[str, Any]:
-    header, reason = cper_header(record.get("RawData"))
+def record_identity(record: dict[str, Any], *, preview: bool = False) -> dict[str, Any]:
+    if preview:
+        raw, payload_bytes = record.get("HeaderHex"), record.get("PayloadBytes")
+        fixed, reason = fixed_cper_header(raw, payload_bytes)
+        header = _cper_identity(bytes.fromhex(raw)) if fixed is not None and isinstance(raw, str) else None
+        if raw is None and payload_bytes is None:
+            reason = "the record carries no binary payload"
+        elif type(payload_bytes) is int and payload_bytes < 128:
+            reason = "the CPER header is shorter than 128 bytes"
+    else:
+        header, reason = cper_header(record.get("RawData"))
     entry: dict[str, Any] = {"Log": record.get("Log"), "RecordId": record.get("RecordId")}
     if header is None:
         return {**entry, "cper": None, "error": reason}
@@ -522,7 +590,7 @@ def group_identities(identities: list[dict[str, Any]], records: list[dict[str, A
         ref = f"{entry['Log']}:{entry['RecordId']}"
         # Invalid timestamp fields have no time meaning, but their bytes still distinguish two
         # records. A zero CPER id has no useful identity; never collapse such records by accident.
-        raw_time = str(record.get("RawData") or "")[48:64].upper()
+        raw_time = str(record.get("HeaderHex") if "HeaderHex" in record else record.get("RawData") or "")[48:64].upper()
         key = (header["record_id"], raw_time, header["severity"], header["section_count"], header["notify_type"])
         by_key.setdefault(key, []).append((str(entry["Log"]), ref))
         by_id.setdefault(header["record_id"], set()).add(key)
@@ -1394,15 +1462,17 @@ register(
         description=(
             "Hardware error records from both places Windows keeps them: WHEA-Logger in the System log and "
             "the Kernel-WHEA CPER events in Microsoft-Windows-Kernel-WHEA/Errors, newest first across both, "
-            "each with its log, its raw payload and its CPER header identity. Each source reports its own "
+            "as bounded previews with log-local RecordId, at most 1024 message UTF-16 characters, "
+            "the first 128 CPER header bytes and payload length. No full Properties, RawData or decoded "
+            "detail is collected in this list; use whea_record for one exact retained row. Each source reports its own "
             "outcome and how far its log reaches back; a source that did not answer is never an empty log. "
-            "Records that are likely one error reported in both logs are grouped, never merged. WHEA-Logger "
-            "payloads are decoded beside them; channel records are not decoded yet."
+            "Records that are likely one error reported in both logs are grouped, never merged. "
+            "Preview header facts do not certify the complete CPER structure."
         ),
         classes=("raw", "derived"),
         take=take_whea,
         params=(Param("count", "int", 30, "How many of the most recent records across both logs.", minimum=1, maximum=MAX_WHEA_RECORDS),),
-        private=("MachineName", "user names inside Message", "CPER bytes in RawData and Properties", "serial and UUID fields inside the decoded structure"),
+        private=("user names inside Message", "CPER fixed-header bytes in HeaderHex"),
     )
 )
 
@@ -1410,7 +1480,8 @@ register(
     Spec(
         name="whea_record",
         description=(
-            "One exact hardware-error event by its required log source and RecordId, including its raw CPER payload "
+            "One exact hardware-error event by its required log source and RecordId, including full Windows fields, "
+            "a structural CPER check and System WHEA-Logger decoded detail. Its raw CPER payload is included "
             "when explicitly unredacted. Works for a retained report older than whea's newest 500 rows. "
             "Use source=system for Log=System or source=kernel_whea for Log=Microsoft-Windows-Kernel-WHEA/Errors; "
             "compare the returned TimeCreated with the original reference because log-local IDs can be reused. "

@@ -540,6 +540,8 @@ def _item_lines(position: int, item: dict[str, Any]) -> list[str]:
         compact = item.get("verbosity") == "summary"
         if compact:
             lines.append("CPER severity and previous-session status come from the record header; Windows event level can differ. Set this item to full for its stored fields. Default redaction may withhold CPER bytes.")
+            if envelope.get("reading") == "whea" and records and isinstance(records[0], dict) and "RawData" not in records[0]:
+                lines.append("This stored WHEA list is a bounded preview. Full verbosity expands only the stored preview; take whea_record with a selected source and RecordId for exact fields and decoded detail, then compare TimeCreated.")
             if len(records) > SUMMARY_LOG_LIMIT:
                 lines.append(f"Showing the first and last {SUMMARY_LOG_EDGE} of {len(records)} returned records.")
             lines.append("")
@@ -952,7 +954,7 @@ def _whea_handoff_sections(envelope: dict[str, Any], records: list[dict[str, Any
     raw = named.get("records")
     if isinstance(raw, dict):
         if compact:
-            fields = ("Log", "RecordId", "TimeCreated", "Id", "LevelDisplayName", "ProviderName", "Message")
+            fields = ("Log", "RecordId", "TimeCreated", "Id", "Level", "LevelDisplayName", "ProviderName", "Message", "MessageChars", "PayloadBytes")
             display = []
             for row in chosen:
                 entry = {key: row[key] for key in fields if key in row}

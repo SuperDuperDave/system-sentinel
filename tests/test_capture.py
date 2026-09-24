@@ -67,6 +67,7 @@ def test_a_capture_holds_automatic_readings_the_stack_and_the_handoff(client: Te
     for path, member in listed.items():
         assert member["bytes"] == len(files[path]) > 0
     assert listed["readings/events.json"]["outcome"] == "ok"
+    assert "exact WHEA fields" in listed["readings/whea.json"]["scope"]
     assert json.loads(files["readings/events.json"])["sections"][0]["data"][0]["Id"] == 41
     assert "it froze while idle" in files["composed.md"].decode()
     assert json.loads(files["stack.json"])["items"][0]["note"] == "it froze while idle"

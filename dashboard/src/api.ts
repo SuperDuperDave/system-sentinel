@@ -40,13 +40,17 @@ export interface EventRecord {
   ProviderId?: string | null;
   Version?: number | null;
   Level: number;
-  LevelDisplayName: string;
+  LevelDisplayName?: string;
   ProviderName: string;
   MachineName: string;
   TaskDisplayName: string | null;
   TimeCreated: string;
   Message: string | null;
-  Properties: unknown[] | null;
+  /** Exact rows include Properties; bounded WHEA previews leave them for whea_record. */
+  Properties?: unknown[] | null;
+  MessageChars?: number | null;
+  HeaderHex?: string | null;
+  PayloadBytes?: number | null;
 }
 
 export interface CatalogEntry {

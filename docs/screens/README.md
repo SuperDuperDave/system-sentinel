@@ -15,8 +15,8 @@ over records built for this purpose:
 - [`tests/fixtures/whea-records.json`](../../tests/fixtures/whea-records.json) — the WHEA-Logger
   fixture already in the test suite (a baseline, a tail, a burst and one fatal record). The
   screenshot server gives every record with binary data a real, decodable CPER payload built the way
-  `tests/test_whea.py`'s `minimal_cper()` builds one, so the decoded structure is genuine decoder
-  output, not invented JSON.
+  `tests/test_whea.py`'s `minimal_cper()` builds one. An exact System row opened from that fixture
+  receives genuine decoder output, not invented JSON; the list itself is a bounded preview.
 
 **The caption the studio may use:**
 

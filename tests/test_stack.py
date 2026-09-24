@@ -177,11 +177,32 @@ def test_whea_handoff_keeps_header_severity_with_exact_cross_log_selection(clien
     summary = "\n".join(_item_lines(1, {"kind": "reading", "title": "Hardware errors", "reading": envelope, "verbosity": "summary"}))
     assert '"severity": "fatal"' in summary and '"previous_session": true' in summary
     assert payload not in summary and "SYSTEM-BYTES" not in summary
+    assert "bounded preview" not in summary  # saved full rows keep their original meaning
 
     add(client, kind="selection", ids=[f"{channel}:42"], envelope=envelope)
     composed = client.get("/api/stack/composed", headers=AUTH).json()["text"]
     assert '"severity": "fatal"' in composed and '"previous_session": true' in composed
     assert payload not in composed and "<cper bytes withheld" in composed
+
+
+def test_whea_preview_handoff_names_the_exact_read_and_original_lengths():
+    envelope = {
+        "reading": "whea", "params": {"count": 100}, "asked_at": "2026-09-23T03:00:00Z",
+        "method": {"kind": "powershell"}, "outcome": "ok", "count": 1, "warnings": [],
+        "sections": [
+            {"name": "records", "class": "raw", "data": [{"Log": "System", "RecordId": 9,
+                "TimeCreated": "2026-09-23T02:00:00Z", "Id": 18, "Level": 2,
+                "Message": "short preview", "MessageChars": 2000, "PayloadBytes": 20480,
+                "HeaderHex": "43504552"}]},
+            {"name": "identity", "class": "derived", "data": [{"Log": "System", "RecordId": 9,
+                "cper": {"severity": "fatal", "previous_session": False}}]},
+            {"name": "collection", "class": "raw", "data": {"limit": 100, "returned": 1}},
+            {"name": "coverage", "class": "derived", "data": {"complete": True}},
+        ],
+    }
+    summary = "\n".join(_item_lines(1, {"kind": "reading", "title": "Preview", "reading": envelope, "verbosity": "summary"}))
+    assert "bounded preview" in summary and "take whea_record" in summary
+    assert '"MessageChars": 2000' in summary and '"PayloadBytes": 20480' in summary
 
 
 def test_an_exact_whea_report_keeps_previous_session_meaning_in_compact_and_selected_handoffs():

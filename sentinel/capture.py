@@ -79,7 +79,10 @@ async def create(bridge: Bridge, stack: Stack, prompts: Prompts, redactor: Redac
                     body["redacted"] = taken_out
                     removed.update(taken_out)
                 member = READINGS_MEMBER.format(name=name)
-                members.append({"path": member, "reading": name, "outcome": body["outcome"], "took_ms": body["took_ms"], "bytes": _write(archive, member, json.dumps(json_safe_integers(body), ensure_ascii=False, indent=1))})
+                entry = {"path": member, "reading": name, "outcome": body["outcome"], "took_ms": body["took_ms"], "bytes": _write(archive, member, json.dumps(json_safe_integers(body), ensure_ascii=False, indent=1))}
+                if name == "whea":
+                    entry["scope"] = "bounded newest-record preview; exact WHEA fields, full CPER bytes and decoded detail require whea_record and are not in this capture"
+                members.append(entry)
 
             try:
                 state: dict[str, Any] = stack.state()
