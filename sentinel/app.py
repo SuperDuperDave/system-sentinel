@@ -31,7 +31,7 @@ from .readings.health import learn_identity
 from .redact import Identity, Redactor
 from .serialization import json_safe_integers
 from .service import ReadingService
-from .stack import Duplicate, Prompts, Stack, StoreUnavailable, compose, new_item
+from .stack import Duplicate, Prompts, Stack, StoreUnavailable, compose, index_entry, index_state, new_item
 from .stream import Stream
 
 STATIC = Path(__file__).parent / "static"
@@ -402,21 +402,21 @@ def create_app(state: State | None = None, mcp: bool = True) -> FastAPI:
 
     @app.get("/api/stack", tags=["stack"])
     def stack_state(unredacted: bool = False) -> Response:
-        """The evidence chosen for handoff, in the order it was added, with the prompt it leads with."""
-        return guarded(state.stack.state(), unredacted)
+        """A compact index of saved evidence and the prompt it leads with."""
+        return guarded(index_state(state.stack.state()), unredacted)
 
     @app.patch("/api/stack", tags=["stack"])
     def stack_choose(choice: StackChoice, unredacted: bool = False) -> Response:
         """Change which prompt leads the handoff, or whether one does at all."""
         changed = state.stack.choose(prompt_id=choice.prompt_id, system_prompt=choice.system_prompt, set_prompt="prompt_id" in choice.model_fields_set)
         handoff_changed_from_route()
-        return guarded(changed, unredacted)
+        return guarded(index_state(changed), unredacted)
 
     @app.delete("/api/stack", tags=["stack"])
     def stack_clear() -> Response:
         state.stack.clear()
         handoff_changed_from_route()
-        return guarded(state.stack.state())
+        return guarded(index_state(state.stack.state()))
 
     @app.post("/api/stack/items", tags=["stack"], status_code=201)
     async def stack_add(item: NewStackItem, unredacted: bool = False) -> Response:
@@ -424,7 +424,7 @@ def create_app(state: State | None = None, mcp: bool = True) -> FastAPI:
         records, or a note. The same observation and selection are refused."""
         try:
             added = await new_item(state.stack, state.bridge, item.model_dump(exclude_unset=True), reader=state.readings.take)
-            response = guarded(state.stack.add(added).to_dict(), unredacted, status_code=201)
+            response = guarded(index_entry(state.stack.add(added).to_dict()), unredacted, status_code=201)
             await handoff_changed()
             return response
         except Duplicate as exc:
@@ -432,10 +432,18 @@ def create_app(state: State | None = None, mcp: bool = True) -> FastAPI:
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
+    @app.get("/api/stack/items/{item_id}", tags=["stack"])
+    def stack_item(item_id: str, unredacted: bool = False) -> Response:
+        """One exact stored item, including its complete reading when it has one."""
+        try:
+            return guarded(state.stack.item(item_id), unredacted)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=f"no item {item_id!r}") from exc
+
     @app.patch("/api/stack/items/{item_id}", tags=["stack"])
     def stack_change(item_id: str, change: ItemChange, unredacted: bool = False) -> Response:
         try:
-            response = guarded(state.stack.update(item_id, rank=change.rank, verbosity=change.verbosity, title=change.title), unredacted)
+            response = guarded(index_entry(state.stack.update(item_id, rank=change.rank, verbosity=change.verbosity, title=change.title)), unredacted)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=f"no item {item_id!r}") from exc
         except ValueError as exc:
@@ -450,7 +458,7 @@ def create_app(state: State | None = None, mcp: bool = True) -> FastAPI:
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=f"no item {item_id!r}") from exc
         handoff_changed_from_route()
-        return guarded(state.stack.state())
+        return guarded(index_state(state.stack.state()))
 
     @app.get("/api/stack/composed", tags=["stack"])
     def stack_composed(unredacted: bool = False) -> dict[str, Any]:

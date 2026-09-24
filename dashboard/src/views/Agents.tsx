@@ -86,7 +86,7 @@ export function Agents() {
         <p className={styles.what}>
           <a href="/api/docs" target="_blank" rel="noreferrer">The API document</a> is live at <code className={styles.inline}>/api/docs</code>, and its
           machine-readable form at <code className={styles.inline}>/api/openapi.json</code>. Beside the readings, the stack is reachable as tools of its
-          own — <code className={styles.inline}>stack_list</code>, <code className={styles.inline}>stack_add</code>, <code className={styles.inline}>stack_remove</code>,{' '}
+          own — <code className={styles.inline}>stack_list</code>, <code className={styles.inline}>stack_item</code>, <code className={styles.inline}>stack_add</code>, <code className={styles.inline}>stack_remove</code>,{' '}
           <code className={styles.inline}>stack_clear</code>, <code className={styles.inline}>prompts_list</code> and <code className={styles.inline}>compose</code> — so an
           agent composes the same handoff a person copies here, and needs no clipboard to read it.
         </p>

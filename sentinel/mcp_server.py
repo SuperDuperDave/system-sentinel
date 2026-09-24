@@ -37,7 +37,7 @@ from . import __version__, capture, readings  # noqa: F401  (readings registers 
 from .reading import REGISTRY, Spec
 from .redact import Redactor
 from .serialization import json_safe_integers
-from .stack import Duplicate, StoreUnavailable, compose, new_item
+from .stack import Duplicate, StoreUnavailable, compose, index_entry, index_state, new_item
 
 if TYPE_CHECKING:
     from .app import State
@@ -54,7 +54,8 @@ INSTRUCTIONS = (
     "'faults' for what went wrong while it kept running, 'storms' for System WHEA report traffic, "
     "'whea' for a bounded newest-record preview across both WHEA logs, 'whea_window' for one source's exact filing-time window in either direction, and 'whea_record' for one exact retained report's raw fields and decoded detail; 'signals' last. "
     "A burst, a gap or a correlation is a lead, never a diagnosis. "
-    "The stack tools hold the evidence you have chosen; 'compose' returns it as the handoff text, with each item's provenance. "
+    "Stack list and change tools return a provenance index; 'stack_item' returns one complete stored item, "
+    "and 'compose' returns the handoff at each item's chosen verbosity. "
     "The catalog and that handoff are also resources: sentinel://catalog and sentinel://handoff."
 )
 
@@ -150,22 +151,26 @@ class RouteTool:
 
 
 async def _stack_list(state: State, _arguments: dict[str, Any], redactor: Redactor | None) -> Any:
-    return _redacted(state.stack.state(), redactor)
+    return _redacted(index_state(state.stack.state()), redactor)
+
+
+async def _stack_item(state: State, arguments: dict[str, Any], redactor: Redactor | None) -> Any:
+    return _redacted(state.stack.item(str(arguments.get("id") or "")), redactor)
 
 
 async def _stack_add(state: State, arguments: dict[str, Any], redactor: Redactor | None) -> Any:
     item = await new_item(state.stack, state.bridge, arguments, reader=state.readings.take)
-    return _redacted(state.stack.add(item).to_dict(), redactor)
+    return _redacted(index_entry(state.stack.add(item).to_dict()), redactor)
 
 
 async def _stack_remove(state: State, arguments: dict[str, Any], redactor: Redactor | None) -> Any:
     state.stack.remove(str(arguments.get("id") or ""))
-    return _redacted(state.stack.state(), redactor)
+    return _redacted(index_state(state.stack.state()), redactor)
 
 
 async def _stack_clear(state: State, _arguments: dict[str, Any], redactor: Redactor | None) -> Any:
     state.stack.clear()
-    return _redacted(state.stack.state(), redactor)
+    return _redacted(index_state(state.stack.state()), redactor)
 
 
 async def _compose(state: State, _arguments: dict[str, Any], redactor: Redactor | None) -> Any:
@@ -179,12 +184,12 @@ async def _prompts_list(state: State, _arguments: dict[str, Any], _redactor: Red
 
 async def _stack_update(state: State, arguments: dict[str, Any], redactor: Redactor | None) -> Any:
     item = state.stack.update(str(arguments.get("id") or ""), rank=arguments.get("rank"), verbosity=arguments.get("verbosity"), title=arguments.get("title"))
-    return _redacted(item, redactor)
+    return _redacted(index_entry(item), redactor)
 
 
 async def _stack_prompt(state: State, arguments: dict[str, Any], redactor: Redactor | None) -> Any:
     chosen = state.stack.choose(prompt_id=arguments.get("prompt_id"), system_prompt=arguments.get("system_prompt"), set_prompt="prompt_id" in arguments)
-    return _redacted(chosen, redactor)
+    return _redacted(index_state(chosen), redactor)
 
 
 async def _capture_create(state: State, arguments: dict[str, Any], redactor: Redactor | None) -> Any:
@@ -205,13 +210,16 @@ async def _capture_list(_state: State, _arguments: dict[str, Any], _redactor: Re
 STACK_TOOLS: dict[str, RouteTool] = {
     tool.name: tool
     for tool in (
-        RouteTool("stack_list", "The evidence currently chosen for handoff, with the prompt it leads with.", _NO_ARGUMENTS, _stack_list),
+        RouteTool("stack_list", "A compact provenance index of evidence chosen for handoff, with its prompt. Use stack_item for one complete stored item.", _NO_ARGUMENTS, _stack_list),
+        RouteTool("stack_item", "One complete saved Stack item by id, including its reading; redacted unless explicitly requested with a reason.",
+                  {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}, _stack_item),
         RouteTool(
             "stack_add",
             "Add evidence to the stack: a reading the tool takes now ('take'), a reading you already hold ('envelope'), "
             "some of its records or signals ('selection' with 'ids'), or a note you wrote. Re-adding the same observed "
-            "envelope and selected ids is refused; a new take is a new observation. After an uncertain add, inspect the Stack; "
-            "if you supplied an envelope, retry with that original envelope.",
+            "envelope and selected ids is refused; a new take is a new observation. After an uncertain add, inspect the Stack. "
+            "If the item appears in its index, the add succeeded; do not re-add it. If absent, retry with an original held "
+            "envelope when possible; retrying a 'take' makes a new observation. A redacted saved reading is not a retry key.",
             {
                 "type": "object",
                 "properties": {

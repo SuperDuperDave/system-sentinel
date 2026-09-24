@@ -20,7 +20,7 @@ from sentinel.reading import take
 from sentinel.readings.crash import STOPS_BASIS
 from sentinel.readings.event_coverage import LOG_WINDOW_COVERAGE_BASIS
 from sentinel.readings.events import RECORD_COVERAGE_BASIS
-from sentinel.stack import PRESET_PROMPTS, STOP_REF_LOGS, Prompts, Stack, _item_lines
+from sentinel.stack import PRESET_PROMPTS, STOP_REF_LOGS, Item, Prompts, Stack, _item_lines
 from tests.conftest import FakeBridge, LogBridge, identity_result, log_collector_result
 from tests.test_crash import collection_for, faults_fixture, payload
 from tests.test_crash import crash as take_crash_fixture
@@ -76,6 +76,12 @@ def client(bridge: FakeBridge):
 def add(client: TestClient, **body) -> dict:
     response = client.post("/api/stack/items", headers=AUTH, json=body)
     assert response.status_code == 201, response.text
+    return response.json()
+
+
+def full_item(client: TestClient, item_id: str) -> dict:
+    response = client.get(f"/api/stack/items/{item_id}", headers=AUTH)
+    assert response.status_code == 200, response.text
     return response.json()
 
 
@@ -481,13 +487,108 @@ def test_the_stack_starts_empty_with_a_prompt_chosen(client: TestClient):
     assert state["prompt_id"] == "quantum-diagnostician"
 
 
+def test_stack_index_keeps_provenance_without_looking_like_a_partial_reading(client: TestClient):
+    reading = add(client, kind="reading", take={"name": "events", "params": {"count": 2}})
+    note = add(client, kind="note", note="Compare the two stops")
+    expected = {"id", "added_at", "kind", "title", "rank", "verbosity", "ids", "note", "provenance"}
+    for item in (reading, note):
+        assert set(item) == expected | {"redacted"}
+        assert "reading" not in item and "sections" not in item and "method" not in item
+    saved = full_item(client, reading["id"])["reading"]
+    assert reading["provenance"] == {"reading": "events", "params": saved["params"],
+                                     "asked_at": saved["asked_at"], "outcome": "ok", "count": 2}
+    assert note["provenance"] is None
+    listed = client.get("/api/stack", headers=AUTH).json()
+    assert listed["items"] == [{key: value for key, value in item.items() if key != "redacted"} for item in (reading, note)]
+    assert full_item(client, reading["id"])["reading"]["sections"]
+    assert client.get("/api/stack/items/nope", headers=AUTH).status_code == 404
+
+
+def test_stack_index_redacts_its_own_fields_while_exact_item_keeps_full_evidence(client: TestClient):
+    held = client.get("/api/readings/events?count=1", headers=AUTH).json()
+    held["params"]["path"] = r"C:\Users\tester\dump.dmp"
+    item = add(client, kind="reading", envelope=held, title=r"TESTBOX C:\Users\tester\dump.dmp")
+    default = client.get("/api/stack", headers=AUTH).json()
+    assert "TESTBOX" not in json.dumps(default) and "tester" not in json.dumps(default)
+    assert "<host>" in default["items"][0]["title"] and "<user>" in default["items"][0]["title"]
+    assert "redacted" in default and "reading" not in default["items"][0]
+    exact = full_item(client, item["id"])
+    assert "TESTBOX" not in json.dumps(exact)
+    raw = client.get(f"/api/stack/items/{item['id']}?unredacted=true", headers=AUTH).json()
+    assert "TESTBOX" in raw["title"] and raw["reading"]["params"]["path"] == held["params"]["path"]
+    assert raw == client.app.state.sentinel.stack.item(item["id"])
+
+
+def test_malformed_saved_reading_has_unknown_index_fields_without_losing_the_item(client: TestClient):
+    item = add(client, kind="reading", take={"name": "events", "params": {"count": 2}})
+    path = client.app.state.sentinel.stack.store.path
+    state = json.loads(path.read_text())
+    reading = state["items"][0]["reading"]
+    reading["params"] = ["wrong shape"]
+    reading["asked_at"] = 17
+    reading.pop("outcome")
+    reading["count"] = "3"
+    path.write_text(json.dumps(state))
+    before = path.read_bytes()
+    listed = client.get("/api/stack", headers=AUTH).json()["items"][0]
+    assert listed["id"] == item["id"] and listed["provenance"] == {
+        "reading": "events", "params": None, "asked_at": None, "outcome": None, "count": None,
+    }
+    assert full_item(client, item["id"])["reading"]["params"] == ["wrong shape"]
+    assert path.read_bytes() == before
+
+    state["items"][0]["reading"] = None
+    path.write_text(json.dumps(state))
+    missing = client.get("/api/stack", headers=AUTH).json()["items"][0]
+    assert missing["kind"] == "reading" and missing["provenance"] == {
+        "reading": None, "params": None, "asked_at": None, "outcome": None, "count": None,
+    }
+    assert full_item(client, item["id"])["reading"] is None
+
+
+def test_stack_index_size_does_not_scale_with_stored_record_rows(client: TestClient):
+    state = client.app.state.sentinel.stack
+    reading = {"reading": "record", "params": {"log": "System", "count": 2000},
+               "asked_at": "2026-09-24T00:00:00Z", "outcome": "ok", "count": 2000,
+               "method": {"query": "Get-WinEvent"},
+               "sections": [{"name": "records", "class": "raw", "data": [
+                   {"RecordId": number, "Message": "M" * 1024, "Properties": ["AA" * 128]}
+                   for number in range(2000)
+               ]}]}
+    for number in range(3):
+        state.add(Item(id=f"synthetic-{number}", added_at="2026-09-24T00:00:00Z", kind="selection",
+                       title=f"Selected {number}", reading=reading, ids=[number]))
+    full_bytes = len(json.dumps(state.state(), separators=(",", ":")).encode())
+    response = client.get("/api/stack", headers=AUTH)
+    index_bytes = len(response.content)
+    mcp = call(client, "stack_list")["content"][0]["text"]
+    assert response.status_code == 200 and len(mcp.encode()) < 2_000
+    assert full_bytes > 7_000_000 and index_bytes < 2_000
+    assert index_bytes < full_bytes // 1000
+
+    def compact(payload: dict) -> None:
+        entries = payload["items"] if "items" in payload else [payload]
+        assert len(json.dumps(payload).encode()) < 2_000
+        assert all("reading" not in entry and "sections" not in entry and "method" not in entry for entry in entries)
+
+    compact(client.patch("/api/stack", headers=AUTH, json={"system_prompt": False}).json())
+    compact(client.patch("/api/stack/items/synthetic-0", headers=AUTH, json={"title": "First selection"}).json())
+    compact(json.loads(call(client, "stack_update", {"id": "synthetic-0", "rank": 1})["content"][0]["text"]))
+    compact(json.loads(call(client, "stack_prompt", {"system_prompt": True})["content"][0]["text"]))
+    compact(json.loads(call(client, "stack_remove", {"id": "synthetic-0"})["content"][0]["text"]))
+    compact(client.delete("/api/stack/items/synthetic-1", headers=AUTH).json())
+    compact(json.loads(call(client, "stack_clear")["content"][0]["text"]))
+
+
 def test_adding_a_reading_takes_it_now_and_keeps_its_provenance(client: TestClient):
     item = add(client, kind="reading", take={"name": "events", "params": {"count": 2}})
     assert item["kind"] == "reading" and item["rank"] == 3 and item["verbosity"] == "full"
     assert item["title"] == "events (log=System, levels=1,2, count=2)"
-    assert item["reading"]["outcome"] == "ok" and item["reading"]["method"]["kind"] == "powershell"
-    assert item["reading"]["asked_at"] and item["reading"]["params"]["count"] == 2
-    assert item["reading"]["sections"][0]["data"][0]["MachineName"] == "<host>"
+    assert "reading" not in item and item["provenance"]["outcome"] == "ok"
+    assert item["provenance"]["asked_at"] and item["provenance"]["params"]["count"] == 2
+    saved = full_item(client, item["id"])
+    assert saved["reading"]["method"]["kind"] == "powershell"
+    assert saved["reading"]["sections"][0]["data"][0]["MachineName"] == "<host>"
 
 
 def test_one_observation_is_idempotent_but_a_new_take_is_new_evidence(client: TestClient, monkeypatch: pytest.MonkeyPatch):
@@ -496,16 +597,17 @@ def test_one_observation_is_idempotent_but_a_new_take_is_new_evidence(client: Te
     stamps = iter(("2026-09-20T18:00:00.000Z", "2026-09-20T18:00:01.000Z", "2026-09-20T18:00:02.000Z"))
     monkeypatch.setattr(reading_module, "_now", lambda: next(stamps))
     first = add(client, kind="reading", take={"name": "events", "params": {"count": 2}})
-    again = client.post("/api/stack/items", headers=AUTH, json={"kind": "reading", "envelope": first["reading"]})
+    held = full_item(client, first["id"])["reading"]
+    again = client.post("/api/stack/items", headers=AUTH, json={"kind": "reading", "envelope": held})
     assert again.status_code == 409 and again.json()["id"] == first["id"]
-    assert again.json()["asked_at"] == first["reading"]["asked_at"]
+    assert again.json()["asked_at"] == first["provenance"]["asked_at"]
     later = add(client, kind="reading", take={"name": "events", "params": {"count": 2}})
     assert later["id"] != first["id"]
-    assert first["reading"]["asked_at"] in client.get("/api/stack/composed", headers=AUTH).json()["text"]
-    assert later["reading"]["asked_at"] in client.get("/api/stack/composed", headers=AUTH).json()["text"]
+    assert first["provenance"]["asked_at"] in client.get("/api/stack/composed", headers=AUTH).json()["text"]
+    assert later["provenance"]["asked_at"] in client.get("/api/stack/composed", headers=AUTH).json()["text"]
     # Different parameters and a selection of the same reading are distinct too.
     assert client.post("/api/stack/items", headers=AUTH, json={"kind": "reading", "take": {"name": "events", "params": {"count": 5}}}).status_code == 201
-    assert client.post("/api/stack/items", headers=AUTH, json={"kind": "selection", "ids": [307001], "envelope": first["reading"]}).status_code == 201
+    assert client.post("/api/stack/items", headers=AUTH, json={"kind": "selection", "ids": [307001], "envelope": held}).status_code == 201
 
 
 def test_equivalent_time_and_record_id_forms_are_one_observation(client: TestClient):
@@ -533,6 +635,7 @@ def test_unreadable_stack_is_reported_and_never_overwritten(client: TestClient, 
     path.write_bytes(contents)
     for method, route, body in (
         ("get", "/api/stack", None),
+        ("get", "/api/stack/items/one", None),
         ("get", "/api/stack/composed", None),
         ("post", "/api/stack/items", {"kind": "note", "note": "new evidence"}),
         ("patch", "/api/stack", {"system_prompt": False}),
@@ -757,7 +860,8 @@ def test_an_envelope_the_caller_holds_is_stored_as_given(client: TestClient):
     held = client.get("/api/readings/events?count=1", headers=AUTH).json()
     item = add(client, kind="reading", envelope=held, title="What I already had")
     assert item["title"] == "What I already had"
-    assert item["reading"]["asked_at"] == held["asked_at"]
+    assert item["provenance"]["asked_at"] == held["asked_at"]
+    assert full_item(client, item["id"])["reading"]["asked_at"] == held["asked_at"]
 
 
 def test_rank_verbosity_and_title_change_and_items_go_away(client: TestClient):
@@ -1122,14 +1226,18 @@ def call(client: TestClient, name: str, arguments: dict | None = None) -> dict:
 def test_the_agent_sees_the_same_stack(client: TestClient):
     listed = client.post("/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"}, headers=MCP_HEADERS).json()["result"]["tools"]
     names = {t["name"] for t in listed}
-    assert {"stack_list", "stack_add", "stack_remove", "stack_clear", "compose", "prompts_list"} <= names
+    assert {"stack_list", "stack_item", "stack_add", "stack_remove", "stack_clear", "compose", "prompts_list"} <= names
     assert "unredacted" in next(t for t in listed if t["name"] == "compose")["inputSchema"]["properties"]
 
     added = json.loads(call(client, "stack_add", {"kind": "reading", "verbosity": "summary", "take": {"name": "events", "params": {"count": 2}}})["content"][0]["text"])
-    assert added["reading"]["outcome"] == "ok" and "TESTBOX" not in json.dumps(added)
+    assert added["provenance"]["outcome"] == "ok" and "reading" not in added and "TESTBOX" not in json.dumps(added)
     assert json.loads(call(client, "stack_list")["content"][0]["text"])["items"][0]["id"] == added["id"]
 
-    refused = call(client, "stack_add", {"kind": "reading", "envelope": added["reading"]})
+    exact = json.loads(call(client, "stack_item", {"id": added["id"]})["content"][0]["text"])
+    assert exact["reading"]["outcome"] == "ok" and "TESTBOX" not in json.dumps(exact)
+    needs_reason = call(client, "stack_item", {"id": added["id"], "unredacted": True})
+    assert needs_reason["isError"] is True and "reason" in needs_reason["content"][0]["text"]
+    refused = call(client, "stack_add", {"kind": "reading", "envelope": exact["reading"]})
     assert refused["isError"] is True and added["id"] in refused["content"][0]["text"]
 
     composed = call(client, "compose")["content"][0]["text"]

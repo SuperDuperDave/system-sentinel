@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.9.0] - 2026-09-24
+
+### Changed
+- Routine Stack list, add, update, remove, clear and prompt-choice answers now return a compact item index with separate `provenance` fields instead of copying every saved reading. The dashboard reads that index, and agent calls receive the same compact shape. The Stack file, composed handoff, captures and duplicate-refusal behavior still use the complete saved evidence.
+- `GET /api/stack/items/{id}` and the read-only `stack_item(id)` MCP tool return one complete stored item on request. The default remains redacted; unredacted MCP access requires a reason. An old saved item with malformed reading provenance keeps its item and shows null for each unknown index field.
+
+### Compatibility and limits
+- Clients that read `items[].reading` from `GET /api/stack` or Stack mutation responses must read `items[].provenance` for the index and request the selected full item by ID. `stack_add(take=…)` now returns provenance, so an agent needing the taken evidence should call the reading directly or `stack_item`. An uncertain add can be checked in the index; an already saved envelope can be retrieved through the exact item path.
+- This removes repeated response transfers but does not change the full Stack file read or atomic rewrite cost of a mutation. A large number of items, long titles or parameters, or long selection ID lists can still enlarge the index; actual user Stack sizes and latency remain unmeasured.
+
 ## [1.8.0] - 2026-09-24
 
 ### Changed

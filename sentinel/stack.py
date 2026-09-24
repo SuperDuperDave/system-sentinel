@@ -114,6 +114,28 @@ def item_from_dict(raw: dict[str, Any]) -> Item:
     )
 
 
+def index_entry(item: dict[str, Any]) -> dict[str, Any]:
+    """Describe a stored item without copying its evidence into routine answers."""
+    reading = item.get("reading")
+    provenance = None
+    if item.get("kind") != "note":
+        fields = reading if isinstance(reading, dict) else {}
+        provenance = {
+            "reading": fields.get("reading") if isinstance(fields.get("reading"), str) else None,
+            "params": fields.get("params") if isinstance(fields.get("params"), dict) else None,
+            "asked_at": fields.get("asked_at") if isinstance(fields.get("asked_at"), str) else None,
+            "outcome": fields.get("outcome") if isinstance(fields.get("outcome"), str) else None,
+            "count": fields.get("count") if type(fields.get("count")) is int and fields["count"] >= 0 else None,
+        }
+    return {key: item.get(key) for key in ("id", "added_at", "kind", "title", "rank", "verbosity", "ids", "note")} | {"provenance": provenance}
+
+
+def index_state(state: dict[str, Any]) -> dict[str, Any]:
+    """Keep prompt choice and item provenance; full stored readings remain in Stack.state."""
+    return {"items": [index_entry(item) for item in state["items"]],
+            "prompt_id": state["prompt_id"], "system_prompt": state["system_prompt"]}
+
+
 class Store:
     """One JSON document, atomically replaced under a cross-process mutation lock."""
 
@@ -179,6 +201,14 @@ class Stack:
     def state(self) -> dict[str, Any]:
         with self.store.transaction():
             return self._state_locked()
+
+    def item(self, item_id: str) -> dict[str, Any]:
+        """An exact saved item, without rewriting the Stack or changing its handoff."""
+        with self.store.transaction():
+            for item in self._state_locked()["items"]:
+                if item["id"] == item_id:
+                    return item
+        raise KeyError(item_id)
 
     def _state_locked(self) -> dict[str, Any]:
         """Read and validate while the caller owns the Stack mutation lock."""

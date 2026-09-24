@@ -181,11 +181,11 @@ export function Stack() {
 
 /** One item: what it is, where it came from, where it sits in the handoff and how much of it is rendered. */
 function Item({ item, onChange, onRemove }: { item: StackItem; onChange: (c: { rank?: number; verbosity?: Verbosity }) => void; onRemove: () => void }) {
-  const envelope = item.reading;
-  const lost = envelope ? envelope.outcome !== 'ok' && envelope.outcome !== 'empty' : false;
+  const provenance = item.provenance;
+  const lost = provenance?.outcome != null && provenance.outcome !== 'ok' && provenance.outcome !== 'empty';
   const selectedCount = item.ids?.length ?? 0;
-  const selectedNoun = envelope?.reading === 'signals' ? 'signal' : 'record';
-  const askedAt = envelope?.asked_at ? new Date(envelope.asked_at) : null;
+  const selectedNoun = provenance?.reading === 'signals' ? 'signal' : 'record';
+  const askedAt = provenance?.asked_at ? new Date(provenance.asked_at) : null;
   const observedAt = askedAt && !Number.isNaN(askedAt.getTime()) ? `${day.format(askedAt)} ${clock.format(askedAt)}` : null;
   return (
     <li className={styles.item}>
@@ -193,8 +193,8 @@ function Item({ item, onChange, onRemove }: { item: StackItem; onChange: (c: { r
       <p className={`${styles.itemMeta} readout`}>
         {item.kind}
         {item.kind === 'selection' ? ` · ${selectedCount} ${selectedNoun}${selectedCount === 1 ? '' : 's'}` : ''}
-        {envelope ? ` · ${envelope.reading}` : ''}
-        {envelope ? <span className={lost ? styles.lost : styles.fine}> · {lost ? `not observed: ${envelope.outcome}` : envelope.outcome}</span> : null}
+        {provenance?.reading ? ` · ${provenance.reading}` : ''}
+        {provenance ? <span className={lost ? styles.lost : styles.fine}> · {provenance.outcome == null ? 'outcome unknown' : lost ? `not observed: ${provenance.outcome}` : provenance.outcome}</span> : null}
         {observedAt ? ` · observed ${observedAt}` : ''}
         {` · added ${ago(item.added_at)}`}
       </p>

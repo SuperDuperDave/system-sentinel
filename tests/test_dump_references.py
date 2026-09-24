@@ -242,9 +242,11 @@ def test_stack_takes_a_fresh_reference_inspection_and_preserves_its_selection(cl
     else:
         item = tool(client, "stack_add", **body)
     assert len(bridge.scripts) == 2
-    assert item["reading"]["outcome"] == "ok" and item["reading"]["params"]["ref"] == selected
-    assert section(item["reading"], "selection")["data"]["ref"] == selected
+    assert item["provenance"]["outcome"] == "ok" and item["provenance"]["params"]["ref"] == selected
+    exact = client.get(f"/api/stack/items/{item['id']}", headers=AUTH).json() if surface == "api" else tool(client, "stack_item", id=item["id"])
+    assert section(exact["reading"], "selection")["data"]["ref"] == selected
     assert_private_values_absent(item, state)
+    assert_private_values_absent(exact, state)
     composed = client.get("/api/stack/composed", headers=AUTH).json()
     assert selected in composed["text"] and "access violation" in composed["text"]
     assert_private_values_absent(composed, state)

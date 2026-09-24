@@ -64,7 +64,7 @@ def test_the_claims_note_counts_the_readings_the_registry_holds():
 def test_the_claims_note_counts_the_tools_the_mcp_server_lists():
     """The total, the readings inside it, and the families the sentence breaks the rest into.
 
-    The breakdown is read as whatever the sentence says it is — ``eight stack tools and two capture
+    The breakdown is read as whatever the sentence says it is — ``nine stack tools and two capture
     tools`` — so a family added to the projection can be named in prose without rewriting this test,
     but cannot be left out of the arithmetic.
     """

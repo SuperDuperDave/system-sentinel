@@ -2,8 +2,8 @@
  * The client of the stack, prompts and captures routes (docs/API.md, "The stack" and "Captures").
  *
  * The stack lives on the server, so every function here is a round trip and nothing is cached:
- * the desktop, the phone and the agent see one stack, and a view that holds a copy would be
- * showing a stack that may no longer exist. Each mutation returns what the server now holds.
+ * the desktop, the phone and the agent see one stack. Routine answers are a provenance index;
+ * the saved reading is fetched by item id when someone needs its complete evidence.
  *
  * Adding the same evidence twice is refused by the boundary, not by the caller, so the refusal
  * arrives as its own error and a view can say "already in the stack" instead of "failed".
@@ -19,7 +19,8 @@ export interface StackItem {
   title: string;
   rank: number;
   verbosity: Verbosity;
-  reading: Reading | null;
+  provenance: { reading: string | null; params: Record<string, unknown> | null; asked_at: string | null;
+    outcome: string | null; count: number | null } | null;
   ids: (number | string)[] | null;
   note: string | null;
 }
@@ -99,6 +100,10 @@ async function send<T>(path: string, init?: RequestInit): Promise<T> {
 const json = (method: string, body: unknown): RequestInit => ({ method, body: JSON.stringify(body) });
 
 export const getStack = (): Promise<StackState> => send<StackState>('/api/stack');
+
+/** Retrieve one full stored item, including the exact reading it held when stacked. */
+export const getStackItem = (id: string): Promise<Omit<StackItem, 'provenance'> & { reading: Reading | null }> =>
+  send<Omit<StackItem, 'provenance'> & { reading: Reading | null }>(`/api/stack/items/${encodeURIComponent(id)}`);
 
 /** Add evidence. The server takes the reading when the item carries a `take`, and stores the envelope as given when it carries one. */
 export const addItem = (item: NewItem): Promise<StackItem> => send<StackItem>('/api/stack/items', json('POST', item));

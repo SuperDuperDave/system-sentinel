@@ -183,14 +183,17 @@ def test_persisted_large_record_selection_survives_serving_and_browser_resubmiss
     assert response.status_code == 200
     held = browser_json(response.text)["items"][0]
     assert held["ids"] == [str(FIRST_ID)]
-    assert_exact_faults(held["reading"])
+    assert "reading" not in held and held["provenance"]["reading"] == "faults"
     assert tool(client, "stack_list")["items"][0] == held
+    full = browser_json(client.get(f"/api/stack/items/{held['id']}", headers=AUTH).text)
+    assert_exact_faults(full["reading"])
+    assert tool(client, "stack_item", id=held["id"]) == full
     assert state.stack.store.path.read_bytes() == original_file
 
     # The browser returns the held envelope and selects the adjacent record. These
     # two IDs would collapse together if either round trip used a JSON number.
     added = client.post("/api/stack/items", headers=AUTH, json={
-        "kind": "selection", "ids": [str(SECOND_ID)], "envelope": held["reading"],
+        "kind": "selection", "ids": [str(SECOND_ID)], "envelope": full["reading"],
     })
     assert added.status_code == 201, added.text
     assert added.json()["ids"] == [str(SECOND_ID)]
