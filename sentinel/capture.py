@@ -15,9 +15,11 @@ pending file is not a capture and is removed after cancellation or once stale.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import tempfile
+import threading
 import time
 import zipfile
 from collections import Counter
@@ -25,6 +27,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+import anyio
 
 from . import __version__
 from .bridge import OUTCOMES, Bridge
@@ -42,6 +46,7 @@ COMPOSED_MEMBER = "composed.md"
 MANIFEST_MEMBER = "manifest.json"
 MAX_LIST_MANIFEST_BYTES = 256 * 1024
 STALE_PENDING_SECONDS = 24 * 60 * 60
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -66,26 +71,62 @@ async def create(bridge: Bridge, stack: Stack, prompts: Prompts, redactor: Redac
     fd, temporary_name = tempfile.mkstemp(prefix=".capture-", suffix=".pending", dir=directory)
     os.close(fd)
     temporary = Path(temporary_name)
+    # The request owns the pending ZIP during reading takes. Once the tail worker claims it,
+    # cancellation must leave closing, publication and cleanup to that worker alone.
+    owner = threading.Lock()
+    try:
+        archive = zipfile.ZipFile(temporary, "w", zipfile.ZIP_DEFLATED)
+    except Exception:
+        temporary.unlink(missing_ok=True)
+        raise
 
     try:
-        with zipfile.ZipFile(temporary, "w", zipfile.ZIP_DEFLATED) as archive:
-            for name, spec in list(REGISTRY.items()):
-                if spec.requires_selection:
-                    continue
-                reading = await _take(name, bridge, started, reader)
-                body = reading.to_dict()
-                if redactor is not None:
-                    body, taken_out = redactor.redact(body)
-                    body["redacted"] = taken_out
-                    removed.update(taken_out)
-                member = READINGS_MEMBER.format(name=name)
-                entry = {"path": member, "reading": name, "outcome": body["outcome"], "took_ms": body["took_ms"], "bytes": _write(archive, member, json.dumps(json_safe_integers(body), ensure_ascii=False, indent=1))}
-                if name == "whea":
-                    entry["scope"] = "bounded newest-record preview; exact WHEA fields, full CPER bytes and decoded detail require whea_record and are not in this capture"
-                elif name == "whea_reports":
-                    entry["scope"] = "compact Kernel-WHEA report-time timeline; per-report references require references=true in a new reading, bounded previews require whea_window, and exact fields require whea_record"
-                members.append(entry)
+        for name, spec in list(REGISTRY.items()):
+            if spec.requires_selection:
+                continue
+            reading = await _take(name, bridge, started, reader)
+            body = reading.to_dict()
+            if redactor is not None:
+                body, taken_out = redactor.redact(body)
+                body["redacted"] = taken_out
+                removed.update(taken_out)
+            member = READINGS_MEMBER.format(name=name)
+            entry = {"path": member, "reading": name, "outcome": body["outcome"], "took_ms": body["took_ms"], "bytes": _write(archive, member, json.dumps(json_safe_integers(body), ensure_ascii=False, indent=1))}
+            if name == "whea":
+                entry["scope"] = "bounded newest-record preview; exact WHEA fields, full CPER bytes and decoded detail require whea_record and are not in this capture"
+            elif name == "whea_reports":
+                entry["scope"] = "compact Kernel-WHEA report-time timeline; per-report references require references=true in a new reading, bounded previews require whea_window, and exact fields require whea_record"
+            members.append(entry)
 
+        made = await anyio.to_thread.run_sync(
+            _finish, owner, archive, temporary, started, members, removed, unavailable, omitted, stack, prompts, redactor, reason
+        )
+        if made is None:
+            raise RuntimeError("capture tail was not claimed")  # unreachable unless ownership bookkeeping is broken
+        return made
+    finally:
+        if owner.acquire(blocking=False):
+            try:
+                archive.close()
+            except Exception:
+                # This ZIP is being discarded; cleanup must not replace cancellation or a reading error.
+                logger.exception("unfinished capture could not be closed")
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                logger.exception("unfinished capture could not be removed")
+
+
+def _finish(
+    owner: threading.Lock, archive: zipfile.ZipFile, temporary: Path, started: datetime,
+    members: list[dict[str, Any]], removed: set[str], unavailable: list[dict[str, str]],
+    omitted: list[dict[str, str]], stack: Stack, prompts: Prompts, redactor: Redactor | None, reason: str | None,
+) -> Capture | None:
+    """One worker owns the Stack tail, ZIP close, atomic publication and cleanup."""
+    if not owner.acquire(blocking=False):
+        return None  # cancellation claimed and removed the pending ZIP before this worker began
+    try:
+        with archive:
             try:
                 snapshot: dict[str, Any] = stack.state()
                 archive_state = snapshot
@@ -118,12 +159,15 @@ async def create(bridge: Bridge, stack: Stack, prompts: Prompts, redactor: Redac
                 manifest["reason"] = reason
             _write(archive, MANIFEST_MEMBER, json.dumps(json_safe_integers(manifest), ensure_ascii=False, indent=1))
 
-        # The ZIP central directory and manifest must be closed before a list or download can see it.
+        # The central directory and manifest must be closed before a list or download sees the ZIP.
         # Publication refuses an existing name, including another capture from this same second.
-        path = _publish(temporary, started)
-        return Capture(path=path, manifest=manifest)
+        return Capture(path=_publish(temporary, started), manifest=manifest)
     finally:
-        temporary.unlink(missing_ok=True)
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            # A published capture remains successful; an owner-only pending copy can be reaped later.
+            logger.exception("capture pending copy could not be removed")
 
 
 async def _take(name: str, bridge: Bridge, at: datetime, reader: ReadingCall | None = None) -> Reading:

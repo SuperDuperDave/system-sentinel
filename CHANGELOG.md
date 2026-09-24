@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.9.11] - 2026-09-24
+
+### Fixed
+- Capture keeps taking and writing readings one at a time, then moves its uninterrupted saved-Stack, handoff, manifest, ZIP close and publication work to one worker. A large saved investigation no longer holds the event loop while that tail runs; its Stack and handoff still come from one snapshot.
+- Cancellation while readings are being taken removes the pending capture. Once the tail worker owns it, that worker finishes a complete visible capture or closes and attempts to remove a failed one, even if the caller leaves. A late worker cannot touch a ZIP already cleaned up by the request. An OS refusal to remove a pending file is logged; it never appears as a completed capture.
+
+### Limits
+- A corrected, yielding synthetic Linux fixture with a default-size automatic Record measured median largest loop gaps of 6.8/445.5/2397.2 ms for zero/one/five saved 2,000-row items before this change, and 6.3/12.2/29.6 ms after it; three samples per case. Those are fixture measurements, not Windows timings or typical Stack sizes. Reading-member formatting and compression still run on the event loop between reading takes; their default and large-answer costs need separate measurement.
+
 ## [1.9.10] - 2026-09-24
 
 ### Fixed

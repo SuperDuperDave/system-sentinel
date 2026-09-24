@@ -4,6 +4,7 @@ import asyncio
 import io
 import json
 import os
+import threading
 import time
 import zipfile
 from datetime import UTC, datetime
@@ -242,6 +243,186 @@ def test_cancelled_capture_leaves_no_listed_or_pending_file(monkeypatch: pytest.
         assert not list(captures_dir().iterdir())
 
     asyncio.run(exercise())
+
+
+def test_cancelled_capture_preserves_cancellation_when_discarded_zip_close_fails(monkeypatch: pytest.MonkeyPatch, caplog):
+    monkeypatch.setattr(capture, "REGISTRY", {"health": REGISTRY["health"]})
+    entered = asyncio.Event()
+    pause = asyncio.Event()
+    original_zip = capture.zipfile.ZipFile
+
+    def zip_with_failed_close(*args, **kwargs):
+        archive = original_zip(*args, **kwargs)
+        original_close = archive.close
+
+        def close_once_then_fail():
+            archive.close = original_close
+            original_close()
+            raise OSError("synthetic discarded-ZIP close failure")
+
+        archive.close = close_once_then_fail
+        return archive
+
+    monkeypatch.setattr(capture.zipfile, "ZipFile", zip_with_failed_close)
+
+    async def reader(name, params):
+        entered.set()
+        await pause.wait()
+        return Reading(reading=name, params=params, outcome="empty", method={"kind": "synthetic"})
+
+    async def exercise():
+        task = asyncio.create_task(capture.create(FakeBridge(), Stack(), Prompts(), reader=reader))
+        await asyncio.wait_for(entered.wait(), 3)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert listing() == [] and not list(captures_dir().iterdir())
+
+    asyncio.run(exercise())
+    assert "unfinished capture could not be closed" in caplog.text
+
+
+def test_capture_stack_tail_keeps_the_event_loop_free(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(capture, "REGISTRY", {"health": REGISTRY["health"]})
+    stack = Stack()
+    stack.add(Item(id="seed", added_at="2026-09-24T00:00:00Z", kind="note", title="Seed", note="Keep evidence"))
+    entered, release = threading.Event(), threading.Event()
+    original_state = stack.state
+
+    def gated_state():
+        entered.set()
+        release.wait(3)
+        return original_state()
+
+    monkeypatch.setattr(stack, "state", gated_state)
+
+    async def reader(name, params):
+        await asyncio.sleep(0)
+        return Reading(reading=name, params=params, outcome="empty", method={"kind": "synthetic"})
+
+    async def exercise():
+        task = asyncio.create_task(capture.create(FakeBridge(), stack, Prompts(), reader=reader))
+        safety = threading.Timer(2, release.set)
+        safety.start()
+        try:
+            assert await asyncio.to_thread(entered.wait, 3), "capture did not reach saved Stack"
+            assert not release.is_set(), "capture assembly blocked the event loop"
+        finally:
+            release.set()
+            safety.cancel()
+        made = await task
+        with zipfile.ZipFile(made.path) as archive:
+            assert archive.testzip() is None
+            assert json.loads(archive.read("stack.json"))["items"][0]["note"] == "Keep evidence"
+            assert "Keep evidence" in archive.read("composed.md").decode()
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("cancel_kind", ["task", "anyio"])
+def test_cancelled_capture_tail_finishes_one_complete_archive(monkeypatch: pytest.MonkeyPatch, cancel_kind: str):
+    monkeypatch.setattr(capture, "REGISTRY", {"health": REGISTRY["health"]})
+    stack = Stack()
+    stack.add(Item(id="seed", added_at="2026-09-24T00:00:00Z", kind="note", title="Seed", note="Keep evidence"))
+    entered, release = threading.Event(), threading.Event()
+    original_state = stack.state
+
+    def gated_state():
+        entered.set()
+        release.wait(3)
+        return original_state()
+
+    monkeypatch.setattr(stack, "state", gated_state)
+
+    async def reader(name, params):
+        return Reading(reading=name, params=params, outcome="empty", method={"kind": "synthetic"})
+
+    async def exercise():
+        safety = threading.Timer(3, release.set)
+        safety.start()
+        try:
+            if cancel_kind == "anyio":
+                async def take_capture():
+                    await capture.create(FakeBridge(), stack, Prompts(), reader=reader)
+
+                async with capture.anyio.create_task_group() as group:
+                    group.start_soon(take_capture)
+                    assert await asyncio.to_thread(entered.wait, 4)
+                    group.cancel_scope.cancel()
+                    release.set()
+            else:
+                task = asyncio.create_task(capture.create(FakeBridge(), stack, Prompts(), reader=reader))
+                assert await asyncio.to_thread(entered.wait, 4)
+                task.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await task
+        finally:
+            release.set()
+            safety.cancel()
+        for _ in range(100):
+            files = listing()
+            if len(files) == 1 and not list(captures_dir().glob("*.pending")):
+                break
+            await asyncio.sleep(0.01)
+        assert len(files) == 1 and files[0]["manifest"]["status"] == "read"
+        assert not list(captures_dir().glob("*.pending"))
+        with zipfile.ZipFile(captures_dir() / files[0]["name"]) as archive:
+            assert archive.testzip() is None
+            assert set(archive.namelist()) == {"readings/health.json", "stack.json", "composed.md", "manifest.json"}
+            assert json.loads(archive.read("stack.json"))["items"][0]["note"] == "Keep evidence"
+            assert "Keep evidence" in archive.read("composed.md").decode()
+
+    asyncio.run(exercise())
+
+
+def test_capture_cancelled_before_tail_worker_claims_cleans_up(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(capture, "REGISTRY", {"health": REGISTRY["health"]})
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    held = {}
+    original_run = capture.anyio.to_thread.run_sync
+
+    async def delayed_run(func, *args):
+        held["call"] = (func, args)
+        entered.set()
+        await release.wait()
+        return await original_run(func, *args)
+
+    monkeypatch.setattr(capture.anyio.to_thread, "run_sync", delayed_run)
+
+    async def reader(name, params):
+        return Reading(reading=name, params=params, outcome="empty", method={"kind": "synthetic"})
+
+    async def exercise():
+        task = asyncio.create_task(capture.create(FakeBridge(), Stack(), Prompts(), reader=reader))
+        await asyncio.wait_for(entered.wait(), 3)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert listing() == [] and not list(captures_dir().iterdir())
+        func, args = held["call"]
+        assert await asyncio.to_thread(func, *args) is None  # a late worker cannot reopen the cleaned ZIP
+
+    asyncio.run(exercise())
+
+
+def test_capture_tail_write_failure_leaves_no_partial_file(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(capture, "REGISTRY", {"health": REGISTRY["health"]})
+    original_write = capture._write
+
+    def fail_stack_member(archive, member, text):
+        if member == "stack.json":
+            raise OSError("synthetic Stack member write failure")
+        return original_write(archive, member, text)
+
+    monkeypatch.setattr(capture, "_write", fail_stack_member)
+
+    async def reader(name, params):
+        return Reading(reading=name, params=params, outcome="empty", method={"kind": "synthetic"})
+
+    with pytest.raises(OSError, match="synthetic Stack member write failure"):
+        asyncio.run(capture.create(FakeBridge(), Stack(), Prompts(), reader=reader))
+    assert listing() == [] and not list(captures_dir().iterdir())
 
 
 def test_publish_failure_leaves_no_partial_capture(monkeypatch: pytest.MonkeyPatch):
