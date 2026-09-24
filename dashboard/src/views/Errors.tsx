@@ -22,7 +22,10 @@ interface TimelineBuckets {
 }
 
 interface Buckets extends TimelineBuckets {
-  active: (TimelineBuckets['active'][number] & { signatures: Record<string, number> })[];
+  previous_session?: number;
+  header_unreadable?: number;
+  header_unreadable_reasons?: { no_payload: number; short_payload: number; invalid_header: number };
+  active: (TimelineBuckets['active'][number] & { signatures: Record<string, number>; previous_session?: number; header_unreadable?: number })[];
 }
 
 interface ReportBuckets extends TimelineBuckets {
@@ -48,6 +51,9 @@ interface Status {
   baseline_buckets: number;
   recent_observed: number;
   baseline_observed: number;
+  recent_composition?: { previous_session: number; not_marked: number; header_unreadable: number };
+  not_marked_peak?: { at_least: number; at_most: number | null };
+  not_marked_burst?: boolean | null;
 }
 
 interface Signature {
@@ -61,10 +67,12 @@ interface Signature {
   vendor_id: string | null;
   device_id: string | null;
   count: number;
+  previous_session?: number;
+  header_unreadable?: number;
   first_seen: string;
   last_seen: string;
   event_ids: number[];
-  sample: { RecordId?: RecordId; TimeCreated?: string; Id?: number; LevelDisplayName?: string; Message?: string };
+  sample: { RecordId?: RecordId; TimeCreated?: string; Id?: number; LevelDisplayName?: string; Message?: string; previous_session?: boolean | null };
 }
 
 /** One entry of the decoded section: the CPER structure inside a record, or why there is none. */
@@ -163,6 +171,7 @@ export function Errors() {
 
   const buckets = part<Buckets>(storms.reading, 'buckets');
   const status = part<Status>(storms.reading, 'status');
+  const stormThreshold = typeof storms.reading?.params.burst_threshold === 'number' ? storms.reading.params.burst_threshold : 5;
   const coverage = part<Coverage>(storms.reading, 'coverage')?.system;
   const emptyStormText = coverage?.complete
     ? `System log timeline: no WHEA-Logger records ${inWindow}`
@@ -214,7 +223,7 @@ export function Errors() {
 
       {hours !== null && observed(storms.reading) && status ? (
         <Section
-          title="Status"
+          title="System report traffic"
           cls="inferred"
           basis={basisOf(storms.reading, 'status')}
           controls={storms.reading ? <AddToStack item={{ kind: 'reading', envelope: storms.reading, title: `Hardware error storms, ${windowLabel}` }} /> : null}
@@ -223,6 +232,23 @@ export function Errors() {
             <span className={`${styles.state} readout`}>{status.state}</span>
             <span className={styles.reason}>{status.reason}</span>
           </p>
+          {status.recent_composition && status.not_marked_peak ? (
+            <p className={`${styles.rates} readout`}>
+              CPER earlier-session flags, last {status.recent_buckets} buckets ({Math.round(status.recent_buckets * (buckets?.bucket_seconds ?? 60) / 60)} min):{' '}
+              {status.recent_composition.previous_session} earlier-session · {status.recent_composition.not_marked} not marked ·{' '}
+              {status.recent_composition.header_unreadable} unreadable headers.{' '}
+              {status.not_marked_burst === true
+                ? `Not-marked reports reach the threshold: at least ${status.not_marked_peak.at_least} in one bucket (threshold ${stormThreshold}).`
+                : status.not_marked_burst === false
+                  ? `Not-marked reports stay below the threshold, even counting unreadable headers (at most ${status.not_marked_peak.at_most}, threshold ${stormThreshold}).`
+                  : status.not_marked_peak.at_most === null
+                    ? buckets?.unplaced
+                      ? 'A returned report has no readable filing time, so the threshold cannot be settled.'
+                      : 'Recent coverage is incomplete, so the threshold cannot be settled.'
+                    : `Unreadable headers could change whether the threshold of ${stormThreshold} was reached.`}{' '}
+              Not marked does not date an error. The current bucket ends at query time.
+            </p>
+          ) : null}
           <p className={`${styles.rates} readout`}>
             recent {status.recent_rate?.toFixed(2) ?? 'unknown'} · baseline {status.baseline_rate?.toFixed(2) ?? 'unknown'} · acceleration {status.acceleration == null ? 'unknown' : `${status.acceleration.toFixed(2)}×`} ·{' '}
             {status.peak_rate == null ? (status.observed_peak ? `at least ${status.observed_peak} returned in one bucket` : 'peak unknown; no records returned in recent buckets') : `peak ${status.peak_rate} in one bucket`} — records per bucket of {buckets?.bucket_seconds ?? 60} s;{' '}
@@ -236,6 +262,13 @@ export function Errors() {
       {hours !== null && observed(storms.reading) && buckets ? (
         <Section title="The window" cls="derived" basis={basisOf(storms.reading, 'buckets')}>
           <Trace buckets={buckets} />
+          {buckets.previous_session !== undefined && buckets.header_unreadable !== undefined ? (
+            <p className={`${styles.rates} readout`}>
+              Across returned System reports: {buckets.previous_session} marked earlier-session · {buckets.header_unreadable} without readable fixed headers.
+              {buckets.header_unreadable > 0 && buckets.header_unreadable_reasons ? ` Reasons: ${buckets.header_unreadable_reasons.no_payload} without binary payload, ${buckets.header_unreadable_reasons.short_payload} too short, ${buckets.header_unreadable_reasons.invalid_header} invalid CPER headers.` : ''}
+              {buckets.unplaced > 0 ? ' These counts include reports whose filing time could not be placed in the trace.' : ''}
+            </p>
+          ) : null}
         </Section>
       ) : null}
 
@@ -574,21 +607,29 @@ function startOf(buckets: TimelineBuckets, bucketIndex: number): string | null {
 
 /** What the signature was made of, and the last record that matched it. */
 function SignatureDetail({ signature }: { signature: Signature }) {
+  const rows: [string, ReactNode][] = [
+    ['Error type', <Value value={signature.error_type} />],
+    ['Bank', <Value value={signature.bank} />],
+    ['APIC id', <Value value={signature.apic_id} />],
+    ['MCi status', <Value value={signature.mci_status} />],
+    ['PCI vendor:device', signature.vendor_id ? <Value value={`${signature.vendor_id}:${signature.device_id}`} /> : <Value value={null} />],
+    ['Event ids', <Value value={signature.event_ids} />],
+  ];
+  if (signature.previous_session !== undefined && signature.header_unreadable !== undefined) {
+    rows.push(['Earlier-session reports', <Value value={signature.previous_session} />]);
+    rows.push(['Unreadable CPER headers', <Value value={signature.header_unreadable} />]);
+  }
+  if (signature.sample && Object.prototype.hasOwnProperty.call(signature.sample, 'previous_session')) {
+    rows.push(['Last sample header', signature.sample.previous_session === true ? 'Earlier-session' : signature.sample.previous_session === false ? 'Not marked earlier-session' : 'Unreadable']);
+  }
+  rows.push(
+    ['First returned', <Value value={`${signature.first_seen} · ${ago(signature.first_seen)}`} />],
+    ['Last returned', <Value value={`${signature.last_seen} · ${ago(signature.last_seen)}`} />],
+    ['Key', <span className={styles.key}>{signature.key}</span>],
+  );
   return (
     <>
-      <Facts
-        rows={[
-          ['Error type', <Value value={signature.error_type} />],
-          ['Bank', <Value value={signature.bank} />],
-          ['APIC id', <Value value={signature.apic_id} />],
-          ['MCi status', <Value value={signature.mci_status} />],
-          ['PCI vendor:device', signature.vendor_id ? <Value value={`${signature.vendor_id}:${signature.device_id}`} /> : <Value value={null} />],
-          ['Event ids', <Value value={signature.event_ids} />],
-          ['First returned', <Value value={`${signature.first_seen} · ${ago(signature.first_seen)}`} />],
-          ['Last returned', <Value value={`${signature.last_seen} · ${ago(signature.last_seen)}`} />],
-          ['Key', <span className={styles.key}>{signature.key}</span>],
-        ]}
-      />
+      <Facts rows={rows} />
       {signature.sample?.Message ? (
         <>
           <p className={`${styles.sampleLabel} label`}>The last record that matched · raw</p>

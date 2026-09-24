@@ -245,6 +245,7 @@ def test_a_week_of_storm_buckets_has_a_bounded_default_handoff_with_full_evidenc
     assert '"bucket_count": 10080' in compact and '"active_buckets": 29' in compact
     assert '"other_active_buckets":' in compact and '"highlighted_active":' in compact and '"unknown_runs": 0' in compact
     assert '"top_signatures":' in compact and '"mci_status":' in compact
+    assert '"header_unreadable_reasons":' in compact and '"not_marked_burst":' in compact
     assert '"sample"' not in compact and '"sample"' in full
     assert compact.count('"sample_ref":') == 3 and '"record_id":' in compact
 
@@ -279,6 +280,31 @@ def test_historical_storm_handoff_preserves_anchor_and_coverage_without_live_urg
     assert '"state": "burst"' not in compact and '"name": "status"' not in compact
     assert "No live burst, acceleration or quiet status is inferred by design" in compact
     assert '"sample_ref":' in compact
+
+
+def test_old_saved_storm_handoff_keeps_missing_header_facts_unknown():
+    from tests.test_whea import load, storms
+
+    reading = storms(load()).to_dict()
+    for section in reading["sections"]:
+        data = section["data"]
+        if section["name"] == "status":
+            for key in ("recent_composition", "not_marked_peak", "not_marked_burst"):
+                data.pop(key, None)
+        elif section["name"] == "buckets":
+            for key in ("previous_session", "header_unreadable", "header_unreadable_reasons"):
+                data.pop(key, None)
+            for row in data["active"]:
+                row.pop("previous_session", None)
+                row.pop("header_unreadable", None)
+        elif section["name"] == "signatures":
+            for row in data:
+                row.pop("previous_session", None)
+                row.pop("header_unreadable", None)
+                row["sample"].pop("previous_session", None)
+    compact = "\n".join(_item_lines(1, {"kind": "reading", "title": "Older saved storm", "reading": reading, "verbosity": "summary"}))
+    assert '"previous_session": null' in compact and '"header_unreadable": null' in compact
+    assert '"not_marked_burst"' not in compact
 
 
 def test_a_kernel_report_timeline_has_a_bounded_default_handoff(client: TestClient):

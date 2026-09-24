@@ -60,7 +60,7 @@ async function openKernelPower41(page) {
     await waitSettled(page, 90000);
     const metrics = await page.evaluate(() => {
       const h2s = [...document.querySelectorAll('h2')].map((h) => ({ el: h, text: h.textContent.trim() }));
-      const statusH2 = h2s.find((h) => h.text === 'Status');
+      const statusH2 = h2s.find((h) => h.text === 'System report traffic');
       const trace = document.querySelector('svg[role="img"]');
       const ol = [...document.querySelectorAll('ol')].pop();
       const firstRow = ol ? ol.querySelector('li') : null;

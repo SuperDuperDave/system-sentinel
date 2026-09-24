@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.4.0] - 2026-09-23
+
+### Added
+- System WHEA-Logger storm readings now derive fixed CPER-header PreviousError and unreadable-header counts from a bounded 128-byte projection. Historical windows keep these aggregate facts; storm readings omit the projected bytes, and `whea_record` can retrieve exact evidence on demand. The Hardware errors screen and compact Stack handoffs expose the counts and their limits.
+- Live storm status remains about report traffic. A separate `not_marked_burst` is true, false or unknown according to readable flags, returned reports and recent-window coverage. A report not marked earlier-session is not assigned an error occurrence time.
+
+### Changed
+- Both WHEA timeline collectors find the first binary event property with a direct PowerShell loop, avoiding a nested pipeline and full payload enumeration for every returned report.
+
+### Limits
+- System WHEA-Logger events do not all promise a readable CPER header. Missing or invalid headers remain unknown. Native Windows projection was exercised with synthetic CPER, short, empty and absent binary properties; the synthetic 20,000-row cost check does not include real Event Log retrieval.
+
 ## [1.3.9] - 2026-09-23
 
 ### Added

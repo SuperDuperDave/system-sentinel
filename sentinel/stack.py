@@ -550,7 +550,7 @@ def _item_lines(position: int, item: dict[str, Any]) -> list[str]:
         lines += ["Bounded storm summary. Set this item to full for its stored buckets and signature samples; take `storms` again for a fresh observation.", ""]
         params = envelope.get("params")
         if isinstance(params, dict) and isinstance(params.get("before"), str) and params["before"].strip():
-            lines += ["Historical System WHEA-Logger filing-time window; `collection.window_end` is its actual exclusive end. No live burst, acceleration or quiet status is inferred by design. Reports filed after a restart may describe earlier errors.", ""]
+            lines += ["Historical System WHEA-Logger filing-time window; `collection.window_end` is its actual exclusive end. No live burst, acceleration or quiet status is inferred by design. Check `buckets.previous_session` and `buckets.header_unreadable` when present; reports filed after restart may describe earlier errors.", ""]
         lines += _json_block(_storm_handoff_sections(envelope))
     elif envelope.get("reading") == "whea_reports" and item.get("verbosity") == "summary":
         lines += ["Bounded Kernel-WHEA report-time summary. These are report times, not error occurrence times; PreviousError marks an earlier Windows session. Set this item to full for every stored report and bucket, or take `whea_reports` again for a fresh observation.", ""]
@@ -974,6 +974,23 @@ def _storm_handoff_sections(envelope: dict[str, Any]) -> list[dict[str, Any]]:
         if isinstance(section.get("name"), str)
     }
     output = [named[name] for name in ("status", "coverage", "collection") if name in named]
+    if output and output[0].get("name") == "status":
+        status_data = output[0].get("data")
+        header_lead = ("The separate not_marked_burst uses fixed CPER headers and can remain unknown; an unmarked report does not date an error. "
+                       if isinstance(status_data, dict) and "not_marked_burst" in status_data else
+                       "This saved reading predates the fixed-header lead. ")
+        output[0] = {**output[0], "basis": (
+            "Live System filing-time traffic: a bucket at threshold is a burst; "
+            "acceleration and quiet need coverage; the current bucket ends at query time. Quiet does not clear Kernel-WHEA/Errors. "
+            + header_lead +
+            "Full rule and evidence remain in the stored item."), "projection": "bounded summary"}
+    for index, section in enumerate(output):
+        if section.get("name") == "coverage":
+            output[index] = {**section, "basis": (
+                "System-log retained reach and exact query bounds. covered_from excludes unobserved older time; "
+                "covered_until is the observed exclusive end. complete needs an answered, uncapped query and retained "
+                "pre-window history in an enabled circular log; future time cannot be complete. Full rule remains in the stored item."),
+                "projection": "bounded summary"}
     buckets = named.get("buckets")
     if isinstance(buckets, dict) and isinstance(buckets.get("data"), dict):
         data = buckets["data"]
@@ -997,7 +1014,7 @@ def _storm_handoff_sections(envelope: dict[str, Any]) -> list[dict[str, Any]]:
         highlighted = {row["index"]: row for row in [*peak, *recent]}
         highlights = []
         for row in sorted(highlighted.values(), key=lambda row: row["index"]):
-            highlight = {key: row.get(key) for key in ("index", "start", "total", "complete")}
+            highlight = {key: row.get(key) for key in ("index", "start", "total", "complete", "previous_session", "header_unreadable")}
             signature_counts = row.get("signatures") if isinstance(row.get("signatures"), dict) else {}
             counted = [(signature_id, count) for signature_id, count in signature_counts.items() if isinstance(signature_id, str) and type(count) is int]
             ranked = sorted(counted, key=lambda entry: (-entry[1], entry[0]))[:3]
@@ -1017,7 +1034,7 @@ def _storm_handoff_sections(envelope: dict[str, Any]) -> list[dict[str, Any]]:
                 previous_unknown = True
             else:
                 previous_unknown = False
-        summary = {key: data.get(key) for key in ("from", "to", "bucket_seconds", "bucket_count", "total", "unplaced", "unknown_buckets")}
+        summary = {key: data.get(key) for key in ("from", "to", "bucket_seconds", "bucket_count", "total", "unplaced", "unknown_buckets", "previous_session", "header_unreadable", "header_unreadable_reasons")}
         summary.update(
             covered_buckets=sum(value is not None for value in totals) if totals_valid else None,
             active_buckets=len(active) if active_valid else None,
@@ -1030,10 +1047,11 @@ def _storm_handoff_sections(envelope: dict[str, Any]) -> list[dict[str, Any]]:
             last_unknown_index=last_unknown,
         )
         basis = (
-            "Bounded projection of the stored bucket array. Highlights unite the five highest returned counts "
-            "and five most recent active buckets; other_active_buckets counts the omitted active buckets. "
-            "unknown_runs counts contiguous null buckets, and the first/last indices are positions from `from`. "
-            "Computed fields are null if the stored array has the wrong shape; the full item retains the original arrays and basis."
+            "Five highest and five newest active buckets; other_active_buckets counts omissions. "
+            "Unknown runs and indices refer to null totals from `from`; malformed arrays yield null derived fields. "
+            + ("Top-level header counts include unplaced reports. PreviousError does not date an error. "
+               if type(data.get("previous_session")) is int else "Fixed-header counts are absent in this older saved reading. ")
+            + "Full arrays and basis remain in the stored item."
         )
         output.append({**buckets, "data": summary, "basis": basis, "projection": "bounded summary"})
     signatures = named.get("signatures")
@@ -1051,16 +1069,17 @@ def _storm_handoff_sections(envelope: dict[str, Any]) -> list[dict[str, Any]]:
             if matching is not None:
                 shown_rows.append(matching)
                 shown_ids.add(signature_id)
-        fields = ("id", "count", "description", "mci_status", "event_ids", "first_seen", "last_seen")
+        fields = ("id", "count", "previous_session", "header_unreadable", "description", "mci_status", "event_ids", "first_seen", "last_seen")
         shown = []
         for index, row in enumerate(shown_rows):
             entry = {key: row.get(key) for key in fields}
             sample = row.get("sample")
             if index < 3 and isinstance(sample, dict) and type(sample.get("RecordId")) is int and sample["RecordId"] > 0 and isinstance(sample.get("TimeCreated"), str):
-                entry["sample_ref"] = {"record_id": sample["RecordId"], "time_created": sample["TimeCreated"]}
+                entry["sample_ref"] = {"record_id": sample["RecordId"], "time_created": sample["TimeCreated"],
+                                       "previous_session": sample.get("previous_session")}
             shown.append(entry)
         output.append({**signatures, "data": {"distinct": len(rows), "shown": shown, "other_signatures": len(rows) - len(shown)},
-                       "basis": "Counts cover returned records only. First/last are System filing times, not error occurrence. Up to three sample_ref values identify System records for whea_record.",
+                       "basis": "Counts cover returned placed reports only; PreviousError flags do so when present. First/last are System filing times, not error occurrence. Up to three sample_ref values identify System records for whea_record; a missing flag stays unknown.",
                        "projection": "bounded summary"})
     return output
 

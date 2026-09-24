@@ -7,7 +7,6 @@ of these reports a burst of hardware errors. Its buckets describe report traffic
 
 from __future__ import annotations
 
-import re
 import time
 from datetime import timedelta
 from typing import Any
@@ -17,7 +16,19 @@ from ..reading import Param, Reading, Section, Spec, from_object, register
 from .event_coverage import COVERAGE_BASIS, LOG_METADATA_SCRIPT, stamp_key
 from .event_coverage import coverage as log_coverage
 from .event_coverage import metadata as log_metadata
-from .whea import CHANNEL, CHANNEL_PROVIDER, MAX_HOURS, RECORD_CAP, Window, _host_window, _stamp, before_stamp, window_for
+from .whea import (
+    CHANNEL,
+    CHANNEL_PROVIDER,
+    MAX_HOURS,
+    RECORD_CAP,
+    Window,
+    _host_window,
+    _stamp,
+    before_stamp,
+    fixed_cper_header,
+    valid_fixed_header_projection,
+    window_for,
+)
 
 SCRIPT = r"""
 $queried = (Get-Date).ToUniversalTime()
@@ -59,13 +70,15 @@ if ($null -eq $errorText) {{
     try {{
         $records = @($found | Select-Object -First {cap} | ForEach-Object {{
             $event = $_
-            $binary = $event.Properties | Where-Object {{ $_.Value -is [byte[]] }} | Select-Object -First 1
-            $bytes = if ($binary) {{ $binary.Value }} else {{ $null }}
+            $bytes = $null
+            foreach ($property in $event.Properties) {{
+                if ($property.Value -is [byte[]]) {{ $bytes = $property.Value; break }}
+            }}
             [pscustomobject]@{{
                 RecordId = $event.RecordId; Id = $event.Id; ProviderName = $event.ProviderName; LogName = $event.LogName
                 TimeCreated = $(if ($null -ne $event.TimeCreated) {{ $event.TimeCreated.ToUniversalTime().ToString('o') }} else {{ $null }})
-                HeaderHex = $(if ($bytes) {{ [System.BitConverter]::ToString($bytes, 0, [Math]::Min(128, $bytes.Length)).Replace('-','') }} else {{ $null }})
-                PayloadBytes = $(if ($bytes) {{ $bytes.Length }} else {{ $null }})
+                HeaderHex = $(if ($null -ne $bytes) {{ [System.BitConverter]::ToString($bytes, 0, [Math]::Min(128, $bytes.Length)).Replace('-','') }} else {{ $null }})
+                PayloadBytes = $(if ($null -ne $bytes) {{ $bytes.Length }} else {{ $null }})
             }}
         }})
         if ($records.Count -ne [Math]::Min($found.Count, {cap})) {{ throw 'the Kernel-WHEA projection returned fewer records than the query' }}
@@ -222,8 +235,7 @@ def _source(value: Any, start: Any, end: Any, *, problem: str = "the report sour
         if type(record_id) is not int or record_id <= 0 or (stamp is not None and not isinstance(stamp, str)):
             return fallback, []
         header, length = row.get("HeaderHex"), row.get("PayloadBytes")
-        if not ((header is None and length is None) or (isinstance(header, str) and isinstance(length, int) and not isinstance(length, bool)
-                and 0 <= length and len(header) == min(length, 128) * 2 and re.fullmatch(r"[0-9A-Fa-f]*", header))):
+        if not valid_fixed_header_projection(header, length):
             return fallback, []
         at = stamp_key(stamp)
         if at is None:
@@ -247,25 +259,9 @@ def _source(value: Any, start: Any, end: Any, *, problem: str = "the report sour
 def _reports(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     reports = []
     for row in rows:
-        header, error = _header(row.get("HeaderHex"), row.get("PayloadBytes"))
+        header, error = fixed_cper_header(row.get("HeaderHex"), row.get("PayloadBytes"))
         reports.append({"record_id": row["RecordId"], "reported_at": row.get("TimeCreated"), "header": header, "header_error": error})
     return reports
-
-
-def _header(raw: Any, payload_bytes: Any) -> tuple[dict[str, Any] | None, str | None]:
-    if not isinstance(raw, str) or len(raw) != 256 or type(payload_bytes) is not int or payload_bytes < 128:
-        return None, "the fixed CPER header was not available"
-    data = bytes.fromhex(raw)
-    if data[:4] != b"CPER" or data[6:10] != b"\xff\xff\xff\xff":
-        return None, "the CPER header signatures do not match"
-    sections = int.from_bytes(data[10:12], "little")
-    declared = int.from_bytes(data[20:24], "little")
-    if sections == 0 or 128 + 72 * sections > declared or declared > payload_bytes:
-        return None, "the CPER header's section count or length is inconsistent"
-    severity = int.from_bytes(data[12:16], "little")
-    flags = int.from_bytes(data[104:108], "little")
-    return {"severity": {0: "recoverable", 1: "fatal", 2: "corrected", 3: "informational"}.get(severity, f"unknown ({severity})"),
-            "previous_session": bool(flags & 0x2)}, None
 
 
 def _buckets(reports: list[dict[str, Any]], window: Window, reach: dict[str, Any]) -> dict[str, Any]:

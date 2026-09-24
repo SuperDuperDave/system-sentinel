@@ -706,6 +706,45 @@ def before_stamp(before: str) -> str:
         raise ValueError(f"parameter 'before': not an ISO timestamp with Z or an offset ({exc})") from exc
 
 
+def valid_fixed_header_projection(raw: Any, payload_bytes: Any) -> bool:
+    """The bounded first-binary-property shape both WHEA window collectors promise."""
+    return ((raw is None and payload_bytes is None)
+            or (isinstance(raw, str) and type(payload_bytes) is int and payload_bytes >= 0
+                and len(raw) == min(payload_bytes, 128) * 2 and re.fullmatch(r"[0-9A-Fa-f]*", raw) is not None))
+
+
+def fixed_cper_header(raw: Any, payload_bytes: Any) -> tuple[dict[str, Any] | None, str | None]:
+    """Read only CPER's fixed 128-byte header; do not certify the section payload."""
+    if not isinstance(raw, str) or len(raw) != 256 or type(payload_bytes) is not int or payload_bytes < 128:
+        return None, "the fixed CPER header was not available"
+    try:
+        data = bytes.fromhex(raw)
+    except ValueError:
+        return None, "the CPER header bytes were invalid"
+    if data[:4] != b"CPER" or data[6:10] != b"\xff\xff\xff\xff":
+        return None, "the CPER header signatures do not match"
+    sections = int.from_bytes(data[10:12], "little")
+    declared = int.from_bytes(data[20:24], "little")
+    if sections == 0 or 128 + 72 * sections > declared or declared > payload_bytes:
+        return None, "the CPER header's section count or length is inconsistent"
+    severity = int.from_bytes(data[12:16], "little")
+    flags = int.from_bytes(data[104:108], "little")
+    return {"severity": {0: "recoverable", 1: "fatal", 2: "corrected", 3: "informational"}.get(severity, f"unknown ({severity})"),
+            "previous_session": bool(flags & 0x2)}, None
+
+
+def fixed_header_issue(raw: Any, payload_bytes: Any) -> str | None:
+    """Why one bounded projection cannot supply a fixed CPER header."""
+    header, _ = fixed_cper_header(raw, payload_bytes)
+    if header is not None:
+        return None
+    if raw is None:
+        return "no_payload"
+    if type(payload_bytes) is int and payload_bytes < 128:
+        return "short_payload"
+    return "invalid_header"
+
+
 STORMS_SCRIPT_TEMPLATE = r"""
 $queried = (Get-Date).ToUniversalTime()
 $queried = $queried.AddTicks(-($queried.Ticks % 10000))
@@ -744,8 +783,21 @@ try {
 }
 if ($null -eq $errorText) {
     try {
-        $records = @($found | Select-Object -First {cap} -ErrorAction Stop | Select-Object RecordId, Id, ProviderName, LogName, LevelDisplayName,
-            @{Name='TimeCreated'; Expression={ if ($null -ne $_.TimeCreated) { $_.TimeCreated.ToUniversalTime().ToString('o') } }}, Message -ErrorAction Stop)
+        $records = @($found | Select-Object -First {cap} -ErrorAction Stop | ForEach-Object {
+            $event = $_
+            $bytes = $null
+            foreach ($property in $event.Properties) {
+                if ($property.Value -is [byte[]]) { $bytes = $property.Value; break }
+            }
+            [pscustomobject]@{
+                RecordId = $event.RecordId; Id = $event.Id; ProviderName = $event.ProviderName; LogName = $event.LogName
+                LevelDisplayName = $event.LevelDisplayName
+                TimeCreated = $(if ($null -ne $event.TimeCreated) { $event.TimeCreated.ToUniversalTime().ToString('o') } else { $null })
+                Message = $event.Message
+                HeaderHex = $(if ($null -ne $bytes) { [System.BitConverter]::ToString($bytes, 0, [Math]::Min(128, $bytes.Length)).Replace('-','') } else { $null })
+                PayloadBytes = $(if ($null -ne $bytes) { $bytes.Length } else { $null })
+            }
+        })
         if ($records.Count -ne [Math]::Min($found.Count, {cap})) { throw 'the System event projection returned fewer records than the query' }
         $outcome = if ($records.Count) { 'ok' } else { 'empty' }
     } catch {
@@ -845,6 +897,9 @@ def take_storms(bridge: Bridge, params: dict[str, Any]) -> Reading:
             reading.warnings.append(f"{issues['unplaced']} returned WHEA-Logger records had no readable time; no bucket can be called quiet")
         if issues.get("outside_window"):
             reading.warnings.append(f"{issues['outside_window']} returned records fell just outside the requested window and were not counted")
+        unreadable_headers = reading.section("buckets").data["header_unreadable"] if reading.section("buckets") else 0
+        if unreadable_headers:
+            reading.warnings.append(f"{unreadable_headers} returned System reports have no readable fixed CPER header; their PreviousError flags are unknown")
         oldest = stamp_key(source.get("log_oldest"))
         start = stamp_key(collection.get("window_start"))
         end = stamp_key(collection.get("window_end"))
@@ -858,7 +913,7 @@ def take_storms(bridge: Bridge, params: dict[str, Any]) -> Reading:
     return reading
 
 
-STORM_ROW_KEYS = {"RecordId", "Id", "ProviderName", "LogName", "LevelDisplayName", "TimeCreated", "Message"}
+STORM_ROW_KEYS = {"RecordId", "Id", "ProviderName", "LogName", "LevelDisplayName", "TimeCreated", "Message", "HeaderHex", "PayloadBytes"}
 
 
 def _host_window(start: Any, end: Any, requested: Window) -> Window | None:
@@ -929,7 +984,7 @@ def _storm_source(value: Any, start: Any, end: Any, *, problem: str = "the storm
 
 
 def _storm_row_location(row: Any, first: tuple[datetime, int], until: tuple[datetime, int]) -> str | None:
-    if not isinstance(row, dict) or not set(row) <= STORM_ROW_KEYS:
+    if not isinstance(row, dict) or not set(row) <= STORM_ROW_KEYS or not {"HeaderHex", "PayloadBytes"} <= set(row):
         return None
     record_id = row.get("RecordId")
     if not (
@@ -938,6 +993,7 @@ def _storm_row_location(row: Any, first: tuple[datetime, int], until: tuple[date
         and type(row.get("Id")) is int
         and (row.get("LevelDisplayName") is None or isinstance(row["LevelDisplayName"], str))
         and (row.get("Message") is None or isinstance(row["Message"], str))
+        and valid_fixed_header_projection(row.get("HeaderHex"), row.get("PayloadBytes"))
     ):
         return None
     stamp = row.get("TimeCreated")
@@ -958,18 +1014,38 @@ def _storm_row_location(row: Any, first: tuple[datetime, int], until: tuple[date
 def compose(records: list[dict[str, Any]], window: Window, params: dict[str, Any], reach: dict[str, Any], *, stopped: Any = None, anchored: bool = False) -> list[Section]:
     """Returned events remain visible; a bucket is zero only when retention covers all of it."""
     returned_totals = [0] * window.count
+    previous = [0] * window.count
+    unreadable = [0] * window.count
+    not_marked = [0] * window.count
+    previous_total = 0
+    unreadable_total = 0
+    unreadable_reasons = {"no_payload": 0, "short_payload": 0, "invalid_header": 0}
     per_bucket: list[dict[str, int]] = [{} for _ in range(window.count)]
     signatures: dict[str, _Signature] = {}
     unplaced = 0
 
     for record in records:
+        header, _ = fixed_cper_header(record.get("HeaderHex"), record.get("PayloadBytes"))
+        header_issue = fixed_header_issue(record.get("HeaderHex"), record.get("PayloadBytes")) if header is None else None
+        previous_session = header["previous_session"] if header is not None else None
+        if previous_session is True:
+            previous_total += 1
+        elif header_issue is not None:
+            unreadable_total += 1
+            unreadable_reasons[header_issue] += 1
         at = stamp_key(record.get("TimeCreated"))
         idx = window.index(at[0].timestamp()) if at is not None else None
         if idx is None:
             unplaced += 1
             continue
-        sig = _accumulate(signatures, record)
+        sig = _accumulate(signatures, record, previous_session)
         returned_totals[idx] += 1
+        if previous_session is True:
+            previous[idx] += 1
+        elif header_issue is not None:
+            unreadable[idx] += 1
+        else:
+            not_marked[idx] += 1
         per_bucket[idx][sig.id] = per_bucket[idx].get(sig.id, 0) + 1
 
     cutoff = stamp_key(reach.get("covered_from"))
@@ -987,10 +1063,14 @@ def compose(records: list[dict[str, Any]], window: Window, params: dict[str, Any
         "bucket_count": window.count,
         "total": sum(returned_totals),
         "unplaced": unplaced,
+        "previous_session": previous_total,
+        "header_unreadable": unreadable_total,
+        "header_unreadable_reasons": unreadable_reasons,
         "totals": totals,
         "unknown_buckets": sum(value is None for value in totals),
         "active": [
-            {"index": i, "start": _stamp(window.start + i * window.bucket_seconds), "total": returned_totals[i], "complete": totals[i] is not None, "signatures": per_bucket[i]}
+            {"index": i, "start": _stamp(window.start + i * window.bucket_seconds), "total": returned_totals[i], "complete": totals[i] is not None,
+             "previous_session": previous[i], "header_unreadable": unreadable[i], "signatures": per_bucket[i]}
             for i in range(window.count)
             if returned_totals[i]
         ],
@@ -1006,6 +1086,8 @@ def compose(records: list[dict[str, Any]], window: Window, params: dict[str, Any
                 "'totals' has null where retained history, an early stop, the record cap or an event with unreadable time cannot establish a whole bucket, "
                 "zero only for an observed quiet bucket, and a count otherwise. 'active' keeps returned "
                 "records even in an incomplete bucket; the final bucket is observed only through collection.window_end. "
+                "PreviousError and unreadable-header totals include returned rows without readable filing time; "
+                "active buckets and signatures require placed rows. Header bytes are used for derivation and omitted from the reading. "
                 "An anchored window has no inferred burst, acceleration or quiet status; its thresholds are not applied."
             ),
         ),
@@ -1013,15 +1095,17 @@ def compose(records: list[dict[str, Any]], window: Window, params: dict[str, Any
             "signatures",
             "derived",
             [s.to_dict() for s in ranked],
-            basis="Counts and first/last System-log filing times describe placed in-window returned records only, not hardware occurrence times. SHA-256 over the error type, bank, APIC id, MCI status, PCI vendor and device ids and the normalized message text; the first characters of the digest identify the signature",
+            basis="Counts, PreviousError flags and first/last System-log filing times describe placed in-window returned records only, not hardware occurrence times. An unreadable fixed header leaves PreviousError unknown. SHA-256 over the error type, bank, APIC id, MCI status, PCI vendor and device ids and the normalized message text; the first characters of the digest identify the signature",
         ),
     ]
     if not anchored:
-        sections.append(Section("status", "inferred", status(totals, returned_totals, per_bucket, params, unplaced, reach=reach, stopped=stopped), basis=_status_basis(params)))
+        sections.append(Section("status", "inferred", status(totals, returned_totals, per_bucket, params, unplaced,
+                                                            previous=previous, unreadable=unreadable, not_marked=not_marked,
+                                                            reach=reach, stopped=stopped), basis=_status_basis(params)))
     return sections
 
 
-def status(totals: list[int | None], returned_totals: list[int], per_bucket: list[dict[str, int]], params: dict[str, Any], unplaced: int = 0, *, reach: dict[str, Any], stopped: Any = None) -> dict[str, Any]:
+def status(totals: list[int | None], returned_totals: list[int], per_bucket: list[dict[str, int]], params: dict[str, Any], unplaced: int = 0, *, previous: list[int], unreadable: list[int], not_marked: list[int], reach: dict[str, Any], stopped: Any = None) -> dict[str, Any]:
     """A returned burst is evidence; acceleration and quiet require their whole source window."""
     burst_threshold = params["burst_threshold"]
     accel_threshold = params["accel_threshold"]
@@ -1034,6 +1118,12 @@ def status(totals: list[int | None], returned_totals: list[int], per_bucket: lis
     baseline_known = bool(baseline) and all(value is not None for value in baseline)
     whole_window = all(value is not None for value in totals) and not unplaced
     observed_peak = max(returned_totals[-RECENT_BUCKETS:], default=0)
+    recent_previous, recent_unreadable, recent_not_marked = previous[-RECENT_BUCKETS:], unreadable[-RECENT_BUCKETS:], not_marked[-RECENT_BUCKETS:]
+    not_marked_at_least = max(recent_not_marked, default=0)
+    not_marked_at_most = (max((known + unknown for known, unknown in zip(recent_not_marked, recent_unreadable, strict=True)), default=0)
+                          if recent_known and not unplaced else None)
+    not_marked_burst = (True if not_marked_at_least >= burst_threshold else
+                        False if not_marked_at_most is not None and not_marked_at_most < burst_threshold else None)
     peak = max(recent) if recent_known else None
     recent_rate = _mean([value for value in recent if value is not None]) if recent_known else None
     baseline_rate = _mean([value for value in baseline if value is not None]) if baseline_known else None
@@ -1080,16 +1170,22 @@ def status(totals: list[int | None], returned_totals: list[int], per_bucket: lis
         "baseline_buckets": len(baseline),
         "recent_observed": sum(value is not None for value in recent),
         "baseline_observed": sum(value is not None for value in baseline),
+        "recent_composition": {"previous_session": sum(recent_previous), "not_marked": sum(recent_not_marked),
+                               "header_unreadable": sum(recent_unreadable)},
+        "not_marked_peak": {"at_least": not_marked_at_least, "at_most": not_marked_at_most},
+        "not_marked_burst": not_marked_burst,
     }
 
 
 def _status_basis(params: dict[str, Any]) -> str:
     return (
-        "System WHEA-Logger filing times only, in a live window ending at the query time. Quiet does not clear Kernel-WHEA/Errors. "
-        f"the last {RECENT_BUCKETS} buckets against the {BASELINE_BUCKETS} before them, averaged over covered wall-clock buckets including observed idle ones: "
-        f"a burst is reportable when at least {params['burst_threshold']} returned records share a recent bucket (critical above twice that); "
-        f"acceleration needs the whole recent and baseline windows, a ratio of at least {params['accel_threshold']} and the noise floor. "
-        "Quiet requires coverage of the whole requested window; a gap yields unknown. The current bucket is only observed through the query time. A cluster may include reports filed after a restart; this rule does not locate the hardware occurrence. A lead, not a diagnosis."
+        "Live System filing-time report-traffic lead; quiet does not clear Kernel-WHEA/Errors. "
+        f"Burst: at least {params['burst_threshold']} reports in one of the last {RECENT_BUCKETS} buckets; critical above twice that. "
+        f"Acceleration: at least {params['accel_threshold']}x the prior {BASELINE_BUCKETS}-bucket average, with covered windows and a noise floor. "
+        "Quiet needs whole-window coverage; the current bucket ends at query time. "
+        "recent_composition separates readable PreviousError flags from unreadable headers. "
+        "not_marked_burst is true from returned reports, false only if complete recent buckets stay below threshold even with unreadable headers, otherwise null. "
+        "A clear flag does not date an error. Lead, not diagnosis."
     )
 
 
@@ -1135,6 +1231,8 @@ class _Signature:
     first_seen: str = ""
     last_seen: str = ""
     count: int = 0
+    previous_session: int = 0
+    header_unreadable: int = 0
     event_ids: set[int] = field(default_factory=set)
     sample: dict[str, Any] = field(default_factory=dict)
 
@@ -1150,6 +1248,8 @@ class _Signature:
             "vendor_id": self.vendor_id,
             "device_id": self.device_id,
             "count": self.count,
+            "previous_session": self.previous_session,
+            "header_unreadable": self.header_unreadable,
             "first_seen": self.first_seen,
             "last_seen": self.last_seen,
             "event_ids": sorted(self.event_ids),
@@ -1210,10 +1310,14 @@ def normalize(message: str) -> str:
     return " ".join(text.split())[:100]
 
 
-def _accumulate(signatures: dict[str, _Signature], record: dict[str, Any]) -> _Signature:
+def _accumulate(signatures: dict[str, _Signature], record: dict[str, Any], previous_session: bool | None) -> _Signature:
     sig = signature(record)
     held = signatures.setdefault(sig.id, sig)
     held.count += 1
+    if previous_session is True:
+        held.previous_session += 1
+    elif previous_session is None:
+        held.header_unreadable += 1
     stamp = str(record.get("TimeCreated") or "")
     held.first_seen = min(held.first_seen or stamp, stamp)
     if stamp >= held.last_seen:
@@ -1224,6 +1328,7 @@ def _accumulate(signatures: dict[str, _Signature], record: dict[str, Any]) -> _S
             "Id": record.get("Id"),
             "LevelDisplayName": record.get("LevelDisplayName"),
             "Message": record.get("Message"),
+            "previous_session": previous_session,
         }
     if isinstance(record.get("Id"), int):
         held.event_ids.add(record["Id"])
@@ -1300,7 +1405,7 @@ register(
 register(
     Spec(
         name="storms",
-        description="WHEA-Logger records in the System log over a wall-clock window, grouped by signature. A live window has inferred burst and acceleration status; a historical before window keeps its buckets and signatures without that status. Computed from the log on each take; nothing is stored between takes. The separate Kernel-WHEA/Errors channel is not counted here.",
+        description="WHEA-Logger reports in the System log over a wall-clock filing-time window, grouped by signature. Fixed CPER headers add PreviousError and unreadable counts when available; a clear flag does not date an error. A live window has report-traffic burst and acceleration status plus a separate true/false/unknown lead for reports not marked earlier-session; a historical before window keeps its buckets and signatures without live status. Computed from the log on each take; nothing is stored between takes. The separate Kernel-WHEA/Errors channel is not counted here.",
         classes=("raw", "derived", "inferred"),
         take=take_storms,
         params=(

@@ -70,7 +70,9 @@ def storms(records: list[dict[str, Any]], outcome: str = "ok", *, oldest: str | 
             start = whea._stamp(last - (count - 1) * bucket_seconds + start_shift)
             before = datetime.fromisoformat(start.replace("Z", "+00:00")) - timedelta(seconds=1)
             rows = [
-                {**(record if raw_rows else {key: record.get(key) for key in whea.STORM_ROW_KEYS if key in record}), "ProviderName": whea.PROVIDER, "LogName": whea.LOG}
+                {**(record if raw_rows else {key: record.get(key) for key in whea.STORM_ROW_KEYS if key in record}),
+                 "ProviderName": whea.PROVIDER, "LogName": whea.LOG,
+                 "HeaderHex": record.get("HeaderHex"), "PayloadBytes": record.get("PayloadBytes")}
                 for record in records
             ]
             source = {
@@ -753,6 +755,106 @@ def test_a_peak_over_twice_the_threshold_is_critical():
     assert status["state"] == "burst" and status["severity"] == "critical"
 
 
+@pytest.mark.parametrize("kinds,composition,at_most,classified", [
+    (["previous"] * 15, (15, 0, 0), 0, False),
+    (["previous"] * 12 + ["not_marked"] * 3, (12, 3, 0), 3, False),
+    (["previous"] * 10 + ["no_payload"] * 6, (10, 0, 6), 6, None),
+    (["previous"] * 6 + ["not_marked"] * 6, (6, 6, 0), 6, True),
+    (["no_payload"] * 6, (0, 0, 6), 6, None),
+])
+def test_report_traffic_and_not_marked_burst_remain_separate(kinds, composition, at_most, classified):
+    host_now = datetime(2026, 9, 23, 18, 30, 30, tzinfo=UTC).timestamp()
+    base = load(now=host_now)[0]
+    rows = []
+    for record_id, kind in enumerate(kinds, 1):
+        payload = cper(record_id, flags=2 if kind == "previous" else 0) if kind != "no_payload" else None
+        rows.append({**base, "RecordId": record_id, "TimeCreated": _powershell_stamp(host_now - 5),
+                     "HeaderHex": payload[:256] if payload else None,
+                     "PayloadBytes": len(payload) // 2 if payload else None})
+    reading = storms(rows, host_now=host_now, oldest=_powershell_stamp(host_now - 2 * 86400))
+    buckets = reading.section("buckets").data
+    status = reading.section("status").data
+    assert reading.outcome == "ok" and status["state"] == "burst"  # all reports filed in one bucket
+    assert status["recent_composition"] == dict(zip(("previous_session", "not_marked", "header_unreadable"), composition, strict=True))
+    assert status["not_marked_peak"] == {"at_least": composition[1], "at_most": at_most}
+    assert status["not_marked_burst"] is classified
+    assert buckets["previous_session"] == composition[0] and buckets["header_unreadable"] == composition[2]
+    assert buckets["active"][-1]["previous_session"] == composition[0]
+    assert sum(signature["previous_session"] for signature in reading.section("signatures").data) == composition[0]
+    assert all(signature["sample"]["previous_session"] is (True if kinds[-1] == "previous" else None if kinds[-1] == "no_payload" else False)
+               for signature in reading.section("signatures").data)
+    assert "43504552" not in json.dumps(reading.to_dict())  # no projected CPER bytes in an API reading
+
+
+def test_storm_header_failures_keep_returned_reports_and_explain_unknown_flags():
+    host_now = datetime(2026, 9, 23, 18, 30, 30, tzinfo=UTC).timestamp()
+    base = load(now=host_now)[0]
+    valid = cper(1, flags=2)
+    bad = "00" + valid[2:]
+    rows = [
+        {**base, "RecordId": 1, "HeaderHex": valid[:256], "PayloadBytes": len(valid) // 2},
+        {**base, "RecordId": 2, "HeaderHex": "43504552", "PayloadBytes": 4},
+        {**base, "RecordId": 3, "HeaderHex": bad[:256], "PayloadBytes": len(bad) // 2},
+        {**base, "RecordId": 4, "HeaderHex": None, "PayloadBytes": None, "TimeCreated": None},
+    ]
+    reading = storms(rows, host_now=host_now, oldest=_powershell_stamp(host_now - 2 * 86400))
+    buckets = reading.section("buckets").data
+    assert reading.count == 4 and buckets["total"] == 3 and buckets["unplaced"] == 1
+    assert buckets["previous_session"] == 1 and buckets["header_unreadable"] == 3
+    assert buckets["header_unreadable_reasons"] == {"no_payload": 1, "short_payload": 1, "invalid_header": 1}
+    assert buckets["active"][-1]["previous_session"] == 1 and buckets["active"][-1]["header_unreadable"] == 2
+    assert reading.section("status").data["not_marked_burst"] is None
+    assert any("3 returned System reports have no readable fixed CPER header" in warning for warning in reading.warnings)
+    assert "HeaderHex" not in json.dumps(reading.to_dict()["sections"])
+
+
+def test_historical_storm_keeps_fixed_header_evidence_without_live_classification():
+    host_now = datetime(2026, 9, 23, 18, 30, 30, tzinfo=UTC).timestamp()
+    anchor = host_now - 3600
+    base = load(now=anchor)[0]
+    marked = cper(1, flags=2)
+    row = {**base, "TimeCreated": _powershell_stamp(anchor - 30),
+           "HeaderHex": marked[:256], "PayloadBytes": len(marked) // 2}
+    reading = storms([row], host_now=host_now, before=_powershell_stamp(anchor),
+                     oldest=_powershell_stamp(anchor - 2 * 86400))
+    assert reading.section("status") is None
+    assert reading.section("buckets").data["previous_session"] == 1
+    assert reading.section("buckets").data["active"][-1]["previous_session"] == 1
+    assert reading.section("signatures").data[0]["sample"]["previous_session"] is True
+
+
+@pytest.mark.parametrize("returned,expected", [(1, None), (6, True)])
+def test_incomplete_recent_retention_cannot_falsely_clear_not_marked_reports(returned, expected):
+    host_now = datetime(2026, 9, 23, 18, 30, 30, tzinfo=UTC).timestamp()
+    base = load(now=host_now)[0]
+    payload = cper(flags=0)
+    rows = [{**base, "RecordId": index + 1, "TimeCreated": _powershell_stamp(host_now - 5),
+             "HeaderHex": payload[:256], "PayloadBytes": len(payload) // 2} for index in range(returned)]
+    reading = storms(rows, host_now=host_now, oldest=_powershell_stamp(host_now - 5 * 60))
+    status = reading.section("status").data
+    assert status["not_marked_peak"] == {"at_least": returned, "at_most": None}
+    assert status["not_marked_burst"] is expected
+
+
+@pytest.mark.parametrize("projection", [
+    {"HeaderHex": "00", "PayloadBytes": 200},
+    {"HeaderHex": "GG", "PayloadBytes": 1},
+    {"HeaderHex": "", "PayloadBytes": True},
+    {"HeaderHex": None, "PayloadBytes": 0},
+    {"PayloadBytes": 0},
+    {"HeaderHex": ""},
+])
+def test_broken_storm_header_projection_fails_closed(projection):
+    row = {**load()[0], **projection}
+    if "HeaderHex" not in projection:
+        row.pop("HeaderHex", None)
+    if "PayloadBytes" not in projection:
+        row.pop("PayloadBytes", None)
+    reading = storms([row])
+    assert reading.outcome == "failed" and reading.count is None
+    assert reading.section("buckets") is None
+
+
 def test_a_rising_rate_against_a_quiet_baseline_reads_as_accelerating():
     status = storms(load(groups={"baseline", "tail"})).section("status").data
     assert status["state"] == "accelerating" and status["severity"] == "warning"
@@ -1107,6 +1209,43 @@ def test_the_catalog_carries_both_readings_with_what_redaction_removes():
 
 
 @pytest.mark.host
+def test_native_storm_projection_bounds_fixed_headers(monkeypatch: pytest.MonkeyPatch):
+    import sentinel.bridge
+
+    monkeypatch.setattr(sentinel.bridge, "POOL_SIZE", 0)  # keep the synthetic function out of live sessions
+    bridge = real_bridge_or_skip()
+    fake = r"""
+$hex = 'PAYLOAD_HEX'
+$payload = [byte[]]::new($hex.Length / 2)
+for ($j = 0; $j -lt $payload.Length; $j++) { $payload[$j] = [Convert]::ToByte($hex.Substring($j * 2, 2), 16) }
+function Get-WinEvent {
+    [CmdletBinding()]
+    param([xml]$FilterXml, [string]$ListLog, [string]$LogName, [switch]$Oldest, [int]$MaxEvents)
+    if ($ListLog) { [pscustomobject]@{ IsEnabled = $true; LogMode = 'Circular' }; return }
+    if ($Oldest) { [pscustomobject]@{ TimeCreated = [datetime]::UtcNow.AddDays(-2) }; return }
+    for ($i = 0; $i -lt 4; $i++) {
+        $bytes = if ($i -eq 0) { ,$payload } elseif ($i -eq 1) { ,([byte[]]@(1, 2, 3, 4)) } elseif ($i -eq 2) { ,([byte[]]@()) } else { $null }
+        $properties = if ($null -ne $bytes) { @([pscustomobject]@{ Value = $bytes }) } else { @() }
+        [pscustomobject]@{
+            RecordId = $i + 1; Id = 17; ProviderName = 'Microsoft-Windows-WHEA-Logger'; LogName = 'System'
+            LevelDisplayName = 'Warning'; TimeCreated = [datetime]::UtcNow.AddMinutes(-1)
+            Message = 'Synthetic hardware event'; Properties = $properties
+        }
+    }
+}
+""".replace("PAYLOAD_HEX", cper(1, flags=2))
+    result = bridge.run(fake + whea.storms_script(whea.window_for(24, 60, now=0)))
+    assert result.outcome == "ok" and len(result.items) == 1, result
+    source = result.items[0]["source"]
+    assert source["outcome"] == "ok" and source["returned"] == 4
+    rows = source["records"]
+    assert [(len(row["HeaderHex"]) if row["HeaderHex"] is not None else None, row["PayloadBytes"]) for row in rows] == [
+        (256, len(cper()) // 2), (8, 4), (0, 0), (None, None),
+    ]
+    assert whea.fixed_cper_header(rows[0]["HeaderHex"], rows[0]["PayloadBytes"])[0]["previous_session"] is True
+
+
+@pytest.mark.host
 def test_powershell_keeps_the_prefix_when_a_storm_query_stops(monkeypatch: pytest.MonkeyPatch):
     import sentinel.bridge
 
@@ -1347,6 +1486,7 @@ def test_the_screenshot_fixture_never_feeds_a_truncated_cper_to_the_real_decoder
     records = fixture["whea_records"](time.time(), count=30)
     assert records
     assert all(whea.checked_cper(record["RawData"])[1] is None for record in records if record.get("RawData"))
+    assert next(record for record in records if record["RecordId"] == 9034)["RawData"][208:216] == "02000000"
     channel = fixture["kernel_whea_records"](time.time())
     assert len(channel) == 3 and all(record["Log"] == whea.CHANNEL for record in channel)
     assert whea.cper_header(channel[0]["RawData"])[0]["previous_session"] is True

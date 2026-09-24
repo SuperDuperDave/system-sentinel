@@ -92,6 +92,16 @@ def minimal_cper() -> str:
 CPER_HEX = minimal_cper()
 
 
+def earlier_session_cper() -> str:
+    """One synthetic System report exercises the earlier-session display path."""
+    payload = bytearray.fromhex(CPER_HEX)
+    payload[104:108] = (2).to_bytes(4, "little")
+    return payload.hex().upper()
+
+
+EARLIER_SESSION_CPER_HEX = earlier_session_cper()
+
+
 def kernel_cper() -> str:
     """A safe synthetic fatal header; this source never invokes the external decoder."""
     payload = bytearray.fromhex(CPER_HEX)
@@ -142,7 +152,7 @@ def whea_records(now: float, count: int | None = None) -> list[dict[str, Any]]:
     # valid, even when only the newest one's detail is visible in the final image.
     for record in out:
         if record.get("RawData"):
-            record["RawData"] = CPER_HEX
+            record["RawData"] = EARLIER_SESSION_CPER_HEX if record["RecordId"] == 9034 else CPER_HEX
     return out
 
 
@@ -343,7 +353,9 @@ class FixtureBridge:
             cap = max(int(value) for value in _MAXEVENTS_RE.findall(script)) - 1
             first, until = _parse_stamp(start), _parse_stamp(end)
             records = [
-                {"RecordId": row["RecordId"], "Id": row["Id"], "ProviderName": "Microsoft-Windows-WHEA-Logger", "LogName": "System", "LevelDisplayName": row.get("LevelDisplayName"), "TimeCreated": row["TimeCreated"], "Message": row.get("Message")}
+                {"RecordId": row["RecordId"], "Id": row["Id"], "ProviderName": "Microsoft-Windows-WHEA-Logger", "LogName": "System", "LevelDisplayName": row.get("LevelDisplayName"), "TimeCreated": row["TimeCreated"], "Message": row.get("Message"),
+                 "HeaderHex": row["RawData"][:256] if row.get("RawData") else None,
+                 "PayloadBytes": len(row["RawData"]) // 2 if row.get("RawData") else None}
                 for row in whea_records(WHEA_ANCHOR) if first <= _parse_stamp(row["TimeCreated"]) < until
             ]
             source = {
