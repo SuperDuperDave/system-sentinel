@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.4.1] - 2026-09-23
+
+### Added
+- `storms` can return one bounded, citable reference per returned in-window System WHEA-Logger report when `references=true`. References include fixed-header facts and explicitly unplaceable rows, omit messages and CPER bytes, and can lead to an exact `whea_record(source=system)` re-read. Compare the filing time because log-local RecordIds can be reused.
+
+### Changed
+- The default storm answer and Hardware errors view omit the new per-report list. A requested full list remains available to agents and future focused Record views; compact Stack handoffs retain signature sample references and count omitted per-report references.
+- System and Kernel-WHEA references use one fixed-header projection and normalize unreadable filing times to null.
+
+### Limits
+- A deliberately requested full list at the 20,000-row cap can add several megabytes to API, MCP or full Stack output. Even the default answer grows with the number of active buckets and signatures. Narrow the filing-time window before requesting detail. This is still report traffic, not a count or clock for underlying hardware errors.
+
 ## [1.4.0] - 2026-09-23
 
 ### Added

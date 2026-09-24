@@ -105,6 +105,14 @@ def test_unreadable_header_does_not_erase_report_and_unplaced_time_prevents_quie
     assert any("PreviousError flags are unknown" in warning for warning in reading.warnings)
 
 
+def test_unparseable_kernel_filing_time_is_null_in_the_shared_reference():
+    unreadable = {**row(11, NOW - timedelta(minutes=1)), "TimeCreated": "unreadable-time"}
+    reading = reports([unreadable])
+    assert reading.outcome == "ok" and reading.count == 1
+    assert sections(reading)["reports"][0]["reported_at"] is None
+    assert sections(reading)["buckets"]["unplaced"] == 1
+
+
 def test_failed_and_stopped_channel_keep_outcome_and_coverage_explicit():
     failed = reports([], outcome="denied")
     assert failed.outcome == "denied" and failed.count is None

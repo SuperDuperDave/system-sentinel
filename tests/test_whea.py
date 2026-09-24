@@ -730,6 +730,35 @@ def test_records_group_into_signatures_ranked_by_how_often_they_recur():
     assert all(s["key"].startswith(whea.SIGNATURE_VERSION + "|ET:") for s in signatures)
 
 
+def test_storm_keeps_one_bounded_reference_per_returned_report():
+    now = time.time()
+    rows = load(now=now)[:2]
+    rows.append({**rows[0], "RecordId": None, "TimeCreated": None})
+    reading = storms(rows, host_now=now, oldest=_powershell_stamp(now - 2 * 86400), references=True)
+    references = reading.section("reports").data
+    buckets = reading.section("buckets").data
+    signature_ids = {entry["id"] for entry in reading.section("signatures").data}
+    assert len(references) == reading.count == buckets["total"] + buckets["unplaced"] == 3
+    assert all(reference["signature_id"] in signature_ids for reference in references[:2])
+    assert references[2]["record_id"] is None and references[2]["reported_at"] is None
+    assert references[2]["signature_id"] is None
+    assert all(reference["event_id"] == row["Id"] for reference, row in zip(references, rows, strict=True))
+    assert all(set(reference) == {"record_id", "reported_at", "event_id", "signature_id", "header", "header_error"}
+               for reference in references)
+    assert "Message" not in json.dumps(references) and "HeaderHex" not in json.dumps(references)
+
+
+def test_storm_references_are_opt_in_and_unreadable_times_are_null():
+    now = time.time()
+    row = {**load(now=now)[0], "TimeCreated": "unreadable-time"}
+    default = storms([row], host_now=now)
+    detailed = storms([row], host_now=now, references=True)
+    assert default.section("reports") is None and default.count == 1
+    assert detailed.section("reports").data[0]["reported_at"] is None
+    assert detailed.section("reports").data[0]["signature_id"] is None
+    assert detailed.section("buckets").data["unplaced"] == 1
+
+
 def test_the_signature_is_the_error_not_the_instance():
     one = whea.signature({"Message": "Cache Hierarchy Error\nProcessor APIC ID: 4\nBank: 1\nMCI Status: 0xbea0000001000108\nAddress: 0xffff8001"})
     same = whea.signature({"Message": "Cache Hierarchy Error\nProcessor APIC ID: 4\nBank: 1\nMCI Status: 0xbea0000001000108\nAddress: 0xdead0002"})
@@ -816,11 +845,12 @@ def test_historical_storm_keeps_fixed_header_evidence_without_live_classificatio
     row = {**base, "TimeCreated": _powershell_stamp(anchor - 30),
            "HeaderHex": marked[:256], "PayloadBytes": len(marked) // 2}
     reading = storms([row], host_now=host_now, before=_powershell_stamp(anchor),
-                     oldest=_powershell_stamp(anchor - 2 * 86400))
+                     oldest=_powershell_stamp(anchor - 2 * 86400), references=True)
     assert reading.section("status") is None
     assert reading.section("buckets").data["previous_session"] == 1
     assert reading.section("buckets").data["active"][-1]["previous_session"] == 1
     assert reading.section("signatures").data[0]["sample"]["previous_session"] is True
+    assert reading.section("reports").data[0]["header"]["previous_session"] is True
 
 
 @pytest.mark.parametrize("returned,expected", [(1, None), (6, True)])
@@ -970,10 +1000,11 @@ def test_historical_storm_excludes_rows_at_or_just_after_its_exclusive_end():
     rows = [{**base, "TimeCreated": _powershell_stamp(anchor_time + offset), "Message": "PRIVATE_OUTSIDE_MARKER"}
             for offset in (0, 0.0005)]
     reading = storms(rows, host_now=query_time, before=_powershell_stamp(anchor_time),
-                     oldest=_powershell_stamp(anchor_time - 2 * 86400))
+                     oldest=_powershell_stamp(anchor_time - 2 * 86400), references=True)
     assert reading.outcome == "empty" and reading.count == 0
     assert reading.section("collection").data["system"]["row_issues"]["outside_window"] == 2
     assert reading.section("buckets").data["total"] == 0
+    assert reading.section("reports").data == []
     assert "PRIVATE_OUTSIDE_MARKER" not in json.dumps(reading.to_dict())
 
 
@@ -1041,8 +1072,9 @@ def test_one_extra_record_makes_the_storm_cap_exact(monkeypatch):
     monkeypatch.setattr(whea, "RECORD_CAP", 3)
     script = whea.storms_script(whea.window_for(24, 60))
     assert "-MaxEvents 4" in script
-    reading = storms(load(groups={"tail"})[:3], truncated=True)
+    reading = storms(load(groups={"tail"})[:3], truncated=True, references=True)
     assert reading.outcome == "ok" and reading.count == 3
+    assert len(reading.section("reports").data) == 3
     assert reading.section("collection").data["system"]["truncated"] is True
     assert reading.section("coverage").data["system"]["covered_from_inclusive"] is False
     assert reading.section("buckets").data["unknown_buckets"] > 0
@@ -1202,7 +1234,7 @@ def test_the_catalog_carries_both_readings_with_what_redaction_removes():
 
     assert REGISTRY["whea"].classes == ("raw", "derived") and REGISTRY["storms"].classes == ("raw", "derived", "inferred")
     assert REGISTRY["whea"].private and REGISTRY["storms"].private
-    assert [p.name for p in REGISTRY["storms"].params] == ["hours", "bucket_seconds", "burst_threshold", "accel_threshold", "before"]
+    assert [p.name for p in REGISTRY["storms"].params] == ["hours", "bucket_seconds", "burst_threshold", "accel_threshold", "references", "before"]
 
 
 # ---------------------------------------------------------------- on this machine
@@ -1243,6 +1275,13 @@ function Get-WinEvent {
         (256, len(cper()) // 2), (8, 4), (0, 0), (None, None),
     ]
     assert whea.fixed_cper_header(rows[0]["HeaderHex"], rows[0]["PayloadBytes"])[0]["previous_session"] is True
+    canned = type("CannedBridge", (), {"run": lambda self, script: result})()
+    reading = asyncio.run(take("storms", canned, {"hours": 24, "references": True}))
+    references = reading.section("reports").data
+    assert reading.outcome == "ok" and len(references) == 4
+    assert references[0]["header"]["previous_session"] is True
+    assert sum(reference["header"] is None for reference in references) == 3
+    assert "HeaderHex" not in json.dumps(reading.to_dict()["sections"])
 
 
 @pytest.mark.host

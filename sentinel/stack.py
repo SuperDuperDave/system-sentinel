@@ -973,6 +973,8 @@ def _storm_handoff_sections(envelope: dict[str, Any]) -> list[dict[str, Any]]:
         for section in _sections(envelope)
         if isinstance(section.get("name"), str)
     }
+    references = named.get("reports")
+    has_references = isinstance(references, dict) and isinstance(references.get("data"), list)
     output = [named[name] for name in ("status", "coverage", "collection") if name in named]
     if output and output[0].get("name") == "status":
         status_data = output[0].get("data")
@@ -1079,7 +1081,19 @@ def _storm_handoff_sections(envelope: dict[str, Any]) -> list[dict[str, Any]]:
                                        "previous_session": sample.get("previous_session")}
             shown.append(entry)
         output.append({**signatures, "data": {"distinct": len(rows), "shown": shown, "other_signatures": len(rows) - len(shown)},
-                       "basis": "Counts cover returned placed reports only; PreviousError flags do so when present. First/last are System filing times, not error occurrence. Up to three sample_ref values identify System records for whea_record; a missing flag stays unknown.",
+                       "basis": "Counts cover placed reports; first/last are filing times, not error occurrence. Up to three sample_ref values identify System records for whea_record. Missing flags stay unknown.",
+                       "projection": "bounded summary"})
+    if has_references:
+        source_rows = references["data"]
+        rows = [row for row in source_rows if isinstance(row, dict)]
+        output.append({**references, "data": {"returned": len(source_rows), "shown": [],
+                                               "other_reports": len(rows),
+                                               "invalid_rows": len(source_rows) - len(rows)},
+                       "basis": "All per-report references are omitted here; signature sample_ref values above remain. Full references are in the stored item.",
+                       "projection": "bounded summary"})
+    elif isinstance(references, dict):
+        output.append({"name": "reports", "class": "derived", "data": {"available": False, "reason": "saved report references could not be read"},
+                       "basis": "A reports section exists in this saved reading, but its data is not a list. Signature samples above remain available.",
                        "projection": "bounded summary"})
     return output
 

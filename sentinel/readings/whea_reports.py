@@ -25,7 +25,7 @@ from .whea import (
     _host_window,
     _stamp,
     before_stamp,
-    fixed_cper_header,
+    report_reference,
     valid_fixed_header_projection,
     window_for,
 )
@@ -257,11 +257,7 @@ def _source(value: Any, start: Any, end: Any, *, problem: str = "the report sour
 
 
 def _reports(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    reports = []
-    for row in rows:
-        header, error = fixed_cper_header(row.get("HeaderHex"), row.get("PayloadBytes"))
-        reports.append({"record_id": row["RecordId"], "reported_at": row.get("TimeCreated"), "header": header, "header_error": error})
-    return reports
+    return [report_reference(row) for row in rows]
 
 
 def _buckets(reports: list[dict[str, Any]], window: Window, reach: dict[str, Any]) -> dict[str, Any]:

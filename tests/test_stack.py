@@ -247,7 +247,13 @@ def test_a_week_of_storm_buckets_has_a_bounded_default_handoff_with_full_evidenc
     assert '"top_signatures":' in compact and '"mci_status":' in compact
     assert '"header_unreadable_reasons":' in compact and '"not_marked_burst":' in compact
     assert '"sample"' not in compact and '"sample"' in full
-    assert compact.count('"sample_ref":') == 3 and '"record_id":' in compact
+    assert compact.count('"sample_ref":') == 3 and '"name": "reports"' not in compact
+
+    detailed = storms(load(now=moment), host_now=moment, hours=168, bucket_seconds=60, references=True).to_dict()
+    with_references = "\n".join(_item_lines(1, {**item, "reading": detailed}))
+    assert len(with_references) < 8000
+    assert with_references.count('"sample_ref":') == 3
+    assert '"other_reports": 40' in with_references and '"shown": []' in with_references
 
     gap = storms([], outcome="empty", oldest=_powershell_stamp(moment - 12 * 3600), host_now=moment, hours=168).to_dict()
     unknown = "\n".join(_item_lines(1, {**item, "reading": gap}))
@@ -271,7 +277,7 @@ def test_historical_storm_handoff_preserves_anchor_and_coverage_without_live_urg
     query_time = time.time()
     anchor_time = query_time - 3 * 86400
     reading = storms(load(now=anchor_time), host_now=query_time, before=_powershell_stamp(anchor_time),
-                     oldest=_powershell_stamp(anchor_time - 2 * 86400)).to_dict()
+                     oldest=_powershell_stamp(anchor_time - 2 * 86400), references=True).to_dict()
     compact = "\n".join(_item_lines(1, {"kind": "reading", "title": "Historical System reports",
                                          "reading": reading, "verbosity": "summary"}))
     assert len(compact) < 10_000
@@ -279,13 +285,14 @@ def test_historical_storm_handoff_preserves_anchor_and_coverage_without_live_urg
     assert '"queried_at":' in compact and '"highlighted_active":' in compact
     assert '"state": "burst"' not in compact and '"name": "status"' not in compact
     assert "No live burst, acceleration or quiet status is inferred by design" in compact
-    assert '"sample_ref":' in compact
+    assert '"name": "reports"' in compact and '"other_reports":' in compact
 
 
 def test_old_saved_storm_handoff_keeps_missing_header_facts_unknown():
     from tests.test_whea import load, storms
 
-    reading = storms(load()).to_dict()
+    reading = storms(load(), references=True).to_dict()
+    reading["sections"] = [section for section in reading["sections"] if section["name"] != "reports"]
     for section in reading["sections"]:
         data = section["data"]
         if section["name"] == "status":
@@ -305,6 +312,23 @@ def test_old_saved_storm_handoff_keeps_missing_header_facts_unknown():
     compact = "\n".join(_item_lines(1, {"kind": "reading", "title": "Older saved storm", "reading": reading, "verbosity": "summary"}))
     assert '"previous_session": null' in compact and '"header_unreadable": null' in compact
     assert '"not_marked_burst"' not in compact
+    assert '"sample_ref":' in compact and '"name": "reports"' not in compact
+
+
+def test_storm_handoff_counts_malformed_saved_references_without_losing_signature_samples():
+    from tests.test_whea import load, storms
+
+    reading = storms(load(), references=True).to_dict()
+    report_section = next(section for section in reading["sections"] if section["name"] == "reports")
+    report_section["data"] = [None, report_section["data"][0]]
+    item = {"kind": "reading", "title": "Saved storm", "reading": reading, "verbosity": "summary"}
+    compact = "\n".join(_item_lines(1, item))
+    assert '"returned": 2' in compact and '"other_reports": 1' in compact and '"invalid_rows": 1' in compact
+    assert '"sample_ref":' in compact
+
+    report_section["data"] = {"broken": True}
+    fallback = "\n".join(_item_lines(1, item))
+    assert '"name": "reports"' in fallback and '"available": false' in fallback and '"sample_ref":' in fallback
 
 
 def test_a_kernel_report_timeline_has_a_bounded_default_handoff(client: TestClient):

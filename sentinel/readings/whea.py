@@ -745,6 +745,14 @@ def fixed_header_issue(raw: Any, payload_bytes: Any) -> str | None:
     return "invalid_header"
 
 
+def report_reference(row: dict[str, Any]) -> dict[str, Any]:
+    """The citable, bounded part of one WHEA report; never copy message or CPER bytes."""
+    header, error = fixed_cper_header(row.get("HeaderHex"), row.get("PayloadBytes"))
+    reported_at = row.get("TimeCreated")
+    return {"record_id": row.get("RecordId"), "reported_at": reported_at if stamp_key(reported_at) is not None else None,
+            "header": header, "header_error": error}
+
+
 STORMS_SCRIPT_TEMPLATE = r"""
 $queried = (Get-Date).ToUniversalTime()
 $queried = $queried.AddTicks(-($queried.Ticks % 10000))
@@ -1022,10 +1030,15 @@ def compose(records: list[dict[str, Any]], window: Window, params: dict[str, Any
     unreadable_reasons = {"no_payload": 0, "short_payload": 0, "invalid_header": 0}
     per_bucket: list[dict[str, int]] = [{} for _ in range(window.count)]
     signatures: dict[str, _Signature] = {}
+    reports: list[dict[str, Any]] = []
     unplaced = 0
 
     for record in records:
-        header, _ = fixed_cper_header(record.get("HeaderHex"), record.get("PayloadBytes"))
+        reference = report_reference(record) if params.get("references") is True else None
+        if reference is not None:
+            reference.update(event_id=record["Id"], signature_id=None)
+            reports.append(reference)
+        header = reference["header"] if reference is not None else fixed_cper_header(record.get("HeaderHex"), record.get("PayloadBytes"))[0]
         header_issue = fixed_header_issue(record.get("HeaderHex"), record.get("PayloadBytes")) if header is None else None
         previous_session = header["previous_session"] if header is not None else None
         if previous_session is True:
@@ -1039,6 +1052,8 @@ def compose(records: list[dict[str, Any]], window: Window, params: dict[str, Any
             unplaced += 1
             continue
         sig = _accumulate(signatures, record, previous_session)
+        if reference is not None:
+            reference["signature_id"] = sig.id
         returned_totals[idx] += 1
         if previous_session is True:
             previous[idx] += 1
@@ -1076,7 +1091,18 @@ def compose(records: list[dict[str, Any]], window: Window, params: dict[str, Any
         ],
     }
     ranked = sorted(signatures.values(), key=lambda s: (s.count, s.last_seen), reverse=True)
-    sections = [
+    sections = []
+    if params.get("references") is True:
+        sections.append(Section(
+            "reports", "derived", reports,
+            basis=("One reference per returned in-window System WHEA-Logger report in collector order, "
+                   "including reports without a readable filing time. reported_at is when Windows filed the report, "
+                   "not when the error occurred. signature_id is null when time cannot be placed; signatures count "
+                   "placed reports only. A null record_id cannot be re-read by whea_record. A non-null record_id "
+                   "is log-local and must be checked against reported_at on exact re-read. Fixed-header facts do "
+                   "not validate the whole CPER; raw message and CPER bytes are omitted."),
+        ))
+    sections.extend([
         Section(
             "buckets",
             "derived",
@@ -1097,7 +1123,7 @@ def compose(records: list[dict[str, Any]], window: Window, params: dict[str, Any
             [s.to_dict() for s in ranked],
             basis="Counts, PreviousError flags and first/last System-log filing times describe placed in-window returned records only, not hardware occurrence times. An unreadable fixed header leaves PreviousError unknown. SHA-256 over the error type, bank, APIC id, MCI status, PCI vendor and device ids and the normalized message text; the first characters of the digest identify the signature",
         ),
-    ]
+    ])
     if not anchored:
         sections.append(Section("status", "inferred", status(totals, returned_totals, per_bucket, params, unplaced,
                                                             previous=previous, unreadable=unreadable, not_marked=not_marked,
@@ -1405,7 +1431,7 @@ register(
 register(
     Spec(
         name="storms",
-        description="WHEA-Logger reports in the System log over a wall-clock filing-time window, grouped by signature. Fixed CPER headers add PreviousError and unreadable counts when available; a clear flag does not date an error. A live window has report-traffic burst and acceleration status plus a separate true/false/unknown lead for reports not marked earlier-session; a historical before window keeps its buckets and signatures without live status. Computed from the log on each take; nothing is stored between takes. The separate Kernel-WHEA/Errors channel is not counted here.",
+        description="WHEA-Logger reports in the System log over a wall-clock filing-time window, with placed reports grouped by signature. Set references=true to return one bounded reference per returned report; re-read with whea_record(source=system) and compare filing time because log-local IDs can be reused. Fixed CPER headers add PreviousError and unreadable counts when available; a clear flag does not date an error. A live window has report-traffic burst and acceleration status plus a separate true/false/unknown lead for reports not marked earlier-session; a historical before window keeps evidence without live status. Computed from the log on each take; nothing is stored between takes. The separate Kernel-WHEA/Errors channel is not counted here.",
         classes=("raw", "derived", "inferred"),
         take=take_storms,
         params=(
@@ -1413,6 +1439,7 @@ register(
             Param("bucket_seconds", "int", 60, "The width of one wall-clock bucket.", minimum=1),
             Param("burst_threshold", "int", 5, "Live window only: records in one bucket that count as a burst; twice this is critical.", minimum=1),
             Param("accel_threshold", "float", 2.0, "Live window only: how many times the baseline rate the recent rate must reach to count as accelerating."),
+            Param("references", "bool", False, "Include one bounded per-report reference for every returned in-window System event. Default false avoids the extra per-report list."),
             Param("before", "str", "", "Exclusive historical end with Z or an offset; empty uses the query time and includes live status."),
         ),
         private=("user names and profile paths inside the signature samples' message text",),
