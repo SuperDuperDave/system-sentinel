@@ -851,8 +851,8 @@ SIGNAL_INPUT_DESCRIPTION = (
     f"Crash asks for up to {_SIGNAL_INPUT_SCOPES['crash']['count']} stops. "
 )
 
-# A provider's share of the recent records, not a count: the window is whatever the log
-# held. Below TALKATIVE it is not worth naming; at or above LOUD one source is most of it.
+# A provider's share of the returned records, not a rate or a lifetime count.
+# Below TALKATIVE it is not worth naming; at or above LOUD its share is conspicuous.
 TALKATIVE = 0.10
 LOUD = 0.25
 TOP_TALKERS = 3
@@ -1002,10 +1002,23 @@ def _gaps(observed: dict[str, Reading], readings: dict[str, Reading | None], rea
 
 
 def _pressure(observed: dict[str, Reading]) -> list[dict[str, Any]]:
-    """Who is filling the log. A rate against the window the records actually cover."""
-    records = _records(observed.get("events"))
+    """Who wrote a large share of the returned event sample, without inferring a time burst."""
+    events = observed.get("events")
+    records = _records(events)
     if not records:
         return []
+    collection = _section(events, "collection")
+    source = collection if isinstance(collection, dict) else {}
+    span = _returned_span(records)
+    raw_levels = events.params.get("levels") if events is not None else None
+    sample = {
+        "log": source.get("log") if source.get("log") in ("System", "Application") else None,
+        "levels": raw_levels if isinstance(raw_levels, list) and all(type(level) is int and 0 <= level <= 5 for level in raw_levels) else None,
+        "returned": len(records),
+        "limit": source.get("limit") if type(source.get("limit")) is int and source["limit"] > 0 else None,
+        "limit_reached": source.get("truncated") if type(source.get("truncated")) is bool and source.get("stopped") is None else None,
+        "oldest": span[0], "newest": span[1],
+    }
     counts = Counter(str(r.get("ProviderName") or "unnamed") for r in records)
     out: list[dict[str, Any]] = []
     for provider, count in counts.most_common(TOP_TALKERS):
@@ -1016,11 +1029,11 @@ def _pressure(observed: dict[str, Reading]) -> list[dict[str, Any]]:
             _signal(
                 "pressure",
                 f"pressure:{provider}",
-                f"{provider} wrote {count} of the last {len(records)} records",
-                "This source accounts for a large share of the recent log. A burst is a lead to follow to its cause, not a fault in itself."
+                f"{provider} wrote {count} of {len(records)} returned {sample['log'] + ' ' if sample['log'] else ''}events",
+                "This source wrote at least a quarter of the returned sample. Share counts records, not elapsed time; compare the source and sample spans when their times are readable."
                 if share >= LOUD
-                else "This source is among the loudest in the recent log.",
-                {"provider": provider, "records": count, "of": len(records), "share": round(share, 3), "first": _stamp(records, provider, first=True), "last": _stamp(records, provider, first=False)},
+                else "This source is among the most represented in the returned sample; its share is not an event rate.",
+                {"provider": provider, "records": count, "of": len(records), "share": round(share, 3), "first": _stamp(records, provider, first=True), "last": _stamp(records, provider, first=False), "sample": sample},
                 ["events"],
             )
         )
@@ -1032,7 +1045,7 @@ def _transitions(observed: dict[str, Reading]) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     derived = _derived(observed.get("power"))
     counts = (derived.get("ledger") or {}).get("counts") or {}
-    window = (derived.get("ledger") or {}).get("window") or {}
+    ledger = derived.get("ledger") or {}
 
     crash = observed.get("crash")
     stops = _rows(crash, "stops")
@@ -1063,13 +1076,30 @@ def _transitions(observed: dict[str, Reading]) -> list[dict[str, Any]]:
         )
     out += _repeated_stops(stops, stop_rows)
     if counts.get("display driver reset") and (counts.get("wake") or counts.get("resume")):
+        wake_kind = "wake" if counts.get("wake") else "resume"
+        raw = _section(observed.get("power"), "raw")
+        transitions = raw.get("transitions") if isinstance(raw, dict) else None
+        rows = [row for row in transitions if isinstance(row, dict)] if isinstance(transitions, list) else []
+        span = _returned_span(rows) if isinstance(transitions, list) and len(rows) == len(transitions) else (None, None)
+        refs = _transition_refs(rows, "display driver reset", 5)
+        claimed_resets = counts.get("display driver reset")
+        if type(claimed_resets) is int and claimed_resets > refs["refs_total"]:
+            refs["refs_missing"] += claimed_resets - refs["refs_total"]
+            refs["refs_total"] = claimed_resets
+        sample = {
+            "log": "System",
+            "returned": ledger.get("records") if type(ledger.get("records")) is int and ledger["records"] >= 0 else len(rows) if isinstance(transitions, list) else None,
+            "limit": ledger.get("limit") if type(ledger.get("limit")) is int and ledger["limit"] > 0 else None,
+            "limit_reached": ledger.get("limit_reached") if type(ledger.get("limit_reached")) is bool else None,
+            "oldest": span[0], "newest": span[1],
+        }
         out.append(
             _signal(
                 "transitions",
                 "transition:display-reset-near-wake",
-                "A display driver reset and a wake are in the same ledger",
-                "Both appear in the transition window. Whether they are related is for the record around each moment to say.",
-                {"display driver resets": counts.get("display driver reset"), "wakes": counts.get("wake"), "resumes": counts.get("resume"), "window": window},
+                f"A display driver reset and a {wake_kind} appear in the same returned ledger",
+                "They may be far apart. Inspect any cited reset and its surrounding record before considering a relationship; this lead does not measure proximity.",
+                {"display driver resets": counts.get("display driver reset"), "wakes": counts.get("wake"), "resumes": counts.get("resume"), "sample": sample, **refs},
                 ["power"],
             )
         )
@@ -1116,6 +1146,25 @@ def _stop_refs(stops: list[dict[str, Any]], index: dict[tuple[str, int], list[st
             elif len(refs) < limit:
                 refs.append({"role": role, "reading": "event_record", "params": {"log": log, "record_id": record_id, "time_created": matches[0]}})
     return {"refs": refs, "refs_total": total, "refs_missing": missing, "refs_omitted": total - missing - len(refs)}
+
+
+def _transition_refs(rows: list[dict[str, Any]], kind: str, limit: int) -> dict[str, Any]:
+    """Cite only unique raw System rows; the Power ledger's derived counts are not row identities."""
+    index = _stop_row_index([{**row, "Log": "System"} for row in rows])
+    selected = [row for row in rows if transition_kind(row) == kind]
+    refs: list[dict[str, Any]] = []
+    missing = 0
+    for row in selected:
+        record_id = row.get("RecordId")
+        if type(record_id) is not int or not 1 <= record_id <= MAX_RECORD_ID:
+            missing += 1
+            continue
+        matches = index.get(("System", record_id), [])
+        if len(matches) != 1 or matches[0] is None:
+            missing += 1
+        elif len(refs) < limit:
+            refs.append({"role": "display_reset", "reading": "event_record", "params": {"log": "System", "record_id": record_id, "time_created": matches[0]}})
+    return {"refs": refs, "refs_total": len(selected), "refs_missing": missing, "refs_omitted": len(selected) - missing - len(refs)}
 
 
 def _stop_facts(stop: dict[str, Any], index: dict[tuple[str, int], list[str | None]]) -> dict[str, Any]:
@@ -1370,6 +1419,22 @@ def _stamp(records: list[dict[str, Any]], provider: str, *, first: bool) -> str 
     return stamps[0] if first else stamps[-1]
 
 
+def _returned_span(rows: list[dict[str, Any]]) -> tuple[str | None, str | None]:
+    """A full returned-row span only when every row has a readable exact event time."""
+    if not rows:
+        return None, None
+    times: list[tuple[str, int]] = []
+    for row in rows:
+        at = row.get("TimeCreated")
+        if not isinstance(at, str):
+            return None, None
+        try:
+            times.append(exact_stamp(at, "TimeCreated", strict=True))
+        except ValueError:
+            return None, None
+    return min(times, key=lambda item: item[1])[0], max(times, key=lambda item: item[1])[0]
+
+
 def _first(*values: Any) -> Any:
     return next((v for v in values if v is not None), None)
 
@@ -1482,7 +1547,7 @@ register(
         name="signals",
         description=(
             "Forensic signals across the readings: what is suppressed, where the record has a hole, "
-            "what is filling the log, what the machine did between states, and where two parts of "
+            "which sources wrote the largest share of returned log records, what the machine did between states, and where two parts of "
             "the record disagree. Each signal names the readings it drew on and the rule it came "
             "from. These are leads to investigate, never a diagnosis. "
             + SIGNAL_INPUT_DESCRIPTION
@@ -1491,7 +1556,7 @@ register(
             "them as hardware errors. Take whea or storms for hardware errors. "
             "An ok answer can still lack inputs: read the gap:inputs signal "
             "and each method.readings outcome. Empty means no pattern was noticed in what was observed, "
-            "not that the machine is healthy. Crash leads may carry bounded log-local refs; "
+            "not that the machine is healthy. Leads that cite exact raw rows carry bounded log-local refs; "
             "call each ref's reading (event_record) with its params (log, record_id, time_created) to inspect one again."
         ),
         classes=("inferred",),

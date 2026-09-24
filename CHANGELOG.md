@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.9.22] - 2026-09-24
+
+### Improved
+- Signals pressure leads now name their returned Events sample: source log, levels, row count and limit, whether an extra matching row was found, and the exact oldest/newest returned times when every row can be placed. Their share remains a count of returned rows; the wording no longer calls that count a time burst. A quiet or capped sample does not claim complete log history.
+- The display-reset/wake lead now gives the same bounded sample context and up to five exact `event_record` references to unique raw Display reset rows in the Power transition ledger. Invalid, ambiguous and capped references have separate counts. Captures save the Power envelope that supplied those refs, so an investigator can inspect the original row offline. The lead explains that co-occurrence in a returned ledger does not measure proximity or cause. A resume without a wake is named as a resume.
+
+### Limits
+- The display-reset lead's old `window` evidence is replaced by `sample`. The old field's `last` was the newest transition of any kind and made the dashboard jump to an unrelated moment. The historical lead id still contains `near-wake` for saved-item compatibility; its text makes no proximity claim. Exact record re-reads remain new observations that may find a reused or no-longer-returned id. The current Signals screen shows references in its raw evidence tree; a dedicated human exact-record control remains a separate UI slice.
+- On reproducible synthetic fixtures, the existing broad Health + Signals path stayed at eight machine questions while Signals MCP text rose from 10,277 to 10,952 bytes (+675). In a separate compact-JSON lead fixture, the pressure lead grew 395→619 bytes and the reference-heavy reset lead 426→1,282 bytes. These are response sizes, not measured model-context or host latency. See the [measurement](docs/measurements/signals-aggregate-evidence.md).
+
 ## [1.9.21] - 2026-09-24
 
 ### Improved

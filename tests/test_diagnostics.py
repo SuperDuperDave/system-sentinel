@@ -9,6 +9,7 @@ machine (a root port with two endpoints under it and a disabled device) are not 
 import asyncio
 import threading
 import time
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -716,6 +717,84 @@ def test_every_class_can_fire_and_each_signal_names_the_readings_it_drew_on():
     assert all(s["readings"] and s["id"] and s["title"] and s["summary"] and isinstance(s["evidence"], dict) for s in signals)
     assert "Observed: hardware, pcie, power, constraints, events, crash, reliability." in basis
     assert "Not observed" not in basis
+
+
+def test_pressure_share_names_its_returned_scope_without_claiming_a_time_burst():
+    start = datetime(2026, 9, 10, tzinfo=UTC)
+
+    def at(moment: datetime) -> str:
+        return moment.isoformat(timespec="microseconds").replace("+00:00", "Z")
+
+    other = [{"ProviderName": f"Other {i % 8}", "TimeCreated": at(start + timedelta(hours=2.5 * i))} for i in range(140)]
+    for provider_times, first, last in (
+        ([at(start + timedelta(days=7, seconds=i)) for i in range(60)],
+         "2026-09-17T00:00:00.000000Z", "2026-09-17T00:00:59.000000Z"),
+        ([at(start + timedelta(hours=5.5 * i)) for i in range(60)],
+         "2026-09-10T00:00:00.000000Z", "2026-09-23T12:30:00.000000Z"),
+    ):
+        rows = other + [{"ProviderName": "Example", "TimeCreated": stamp} for stamp in provider_times]
+        events = _reading("events", [("records", "raw", rows), ("collection", "raw", {"log": "System", "limit": 200, "truncated": True, "stopped": None})])
+        events.params = {"log": "System", "levels": [1, 2, 3, 4], "count": 200}
+        lead = next(signal for signal in take_signals_sync(_inputs(events=events))[0] if signal["id"] == "pressure:Example")
+        sample = lead["evidence"]["sample"]
+        assert lead["evidence"]["share"] == 0.3 and "burst" not in lead["summary"].lower()
+        assert (lead["evidence"]["first"], lead["evidence"]["last"]) == (first, last)
+        assert lead["title"] == "Example wrote 60 of 200 returned System events"
+        assert sample == {"log": "System", "levels": [1, 2, 3, 4], "returned": 200, "limit": 200,
+                          "limit_reached": True, "oldest": "2026-09-10T00:00:00.0000000Z", "newest": "2026-09-24T11:30:00.0000000Z"}
+
+
+def test_pressure_coverage_does_not_invent_a_clean_span_or_an_uncapped_history():
+    rows = [{"ProviderName": "Example", "TimeCreated": "2026-09-10T00:00:00Z"},
+            {"ProviderName": "Example", "TimeCreated": "2026-09-24T12:00:00Z"}]
+    for truncated, expected in ((True, True), (False, False), (None, None)):
+        events = _reading("events", [("records", "raw", rows), ("collection", "raw", {"log": "System", "limit": 200, "truncated": truncated})])
+        lead = next(signal for signal in take_signals_sync(_inputs(events=events))[0] if signal["id"] == "pressure:Example")
+        assert lead["evidence"]["sample"]["limit_reached"] is expected
+        assert "burst" not in lead["summary"].lower()
+    events = _reading("events", [("records", "raw", [*rows, {"ProviderName": "Other", "TimeCreated": None}])])
+    lead = next(signal for signal in take_signals_sync(_inputs(events=events))[0] if signal["id"] == "pressure:Example")
+    assert lead["evidence"]["sample"] == {"log": None, "levels": None, "returned": 3, "limit": None,
+                                           "limit_reached": None, "oldest": None, "newest": None}
+
+
+def test_display_reset_lead_cites_only_unique_raw_rows_and_no_unrelated_ledger_last():
+    stamp = "2026-09-24T12:00:00.1234567Z"
+    reset = {"Id": 4101, "ProviderName": "Display", "TimeCreated": stamp}
+    rows = [{**reset, "RecordId": record_id} for record_id in range(1, 11)]
+    rows += [{**reset, "RecordId": 11}, {**reset, "RecordId": 11}, {**reset, "RecordId": "bad"}]
+    rows.append({"RecordId": 30, "Id": 1, "ProviderName": "Microsoft-Windows-Power-Troubleshooter", "TimeCreated": stamp})
+    power = _reading("power", [("raw", "raw", {"transitions": rows}),
+                               ("derived", "derived", {"ledger": {"counts": {"display driver reset": 13, "wake": 1},
+                                                                  "records": 14, "limit": 120, "limit_reached": False}})])
+    lead = next(signal for signal in take_signals_sync(_inputs(power=power))[0] if signal["id"] == "transition:display-reset-near-wake")
+    evidence = lead["evidence"]
+    assert (evidence["refs_total"], evidence["refs_missing"], evidence["refs_omitted"], len(evidence["refs"])) == (13, 3, 5, 5)
+    assert evidence["sample"] == {"log": "System", "returned": 14, "limit": 120, "limit_reached": False,
+                                  "oldest": stamp, "newest": stamp}
+
+    def moment_keys(value: object) -> set[str]:
+        if isinstance(value, dict):
+            return ({key for key in value if key in {"last", "started_at", "anchor_at"}}
+                    | set().union(*(moment_keys(child) for child in value.values())))
+        if isinstance(value, list):
+            return set().union(*(moment_keys(child) for child in value))
+        return set()
+
+    assert "window" not in evidence and moment_keys(evidence) == set()
+    assert "does not measure proximity" in lead["summary"]
+    assert all(ref == {"role": "display_reset", "reading": "event_record",
+                       "params": {"log": "System", "record_id": i, "time_created": stamp}}
+               for i, ref in enumerate(evidence["refs"], start=1))
+    same = asyncio.run(take("event_record", FakeBridge(log_collector_result([{**rows[0], "Log": "System"}], log="System", window_start=None, limit=1)), evidence["refs"][0]["params"]))
+    assert same.outcome == "ok" and same.section("reference").data["status"] == "same"
+
+
+def test_display_reset_lead_marks_unavailable_raw_rows_as_missing_refs():
+    lead = next(signal for signal in take_signals_sync(_inputs())[0] if signal["id"] == "transition:display-reset-near-wake")
+    assert lead["evidence"]["refs"] == []
+    assert (lead["evidence"]["refs_total"], lead["evidence"]["refs_missing"], lead["evidence"]["refs_omitted"]) == (1, 1, 0)
+    assert lead["evidence"]["sample"]["oldest"] is None and lead["evidence"]["sample"]["newest"] is None
 
 
 def test_fast_startup_preference_does_not_claim_the_last_boot_mode():

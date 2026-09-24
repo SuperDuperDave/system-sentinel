@@ -215,7 +215,7 @@ const CLASSES = ['suppressions', 'gaps', 'pressure', 'transitions', 'mismatches'
 const WHAT: Record<string, string> = {
   suppressions: 'Settings that would keep a fault from showing itself.',
   gaps: 'Places the record has a hole: something that cannot report.',
-  pressure: 'What is filling the recent log.',
+  pressure: 'Which sources wrote the largest share of returned log records.',
   transitions: 'What the machine did between one power state and the next.',
   mismatches: 'Where two readings of the same thing do not agree.',
 };

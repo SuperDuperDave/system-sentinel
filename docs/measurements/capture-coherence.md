@@ -2,7 +2,7 @@
 
 A capture is an offline record. Through 1.9.20, it saved the seven readings that Signals uses and then asked those sources again inside Signals. The two answers could differ in time and scope: the archive's default `crash.json` requested five stops, while Signals examined up to twenty. A Signals crash reference could therefore point to a raw row absent from the ZIP. In 1.9.21, capture gathers those seven inputs once, composes Signals from them and saves those same input envelopes as members. The manifest names their origin and actual parameters.
 
-This measurement compares the published `v1.9.20` source with the 1.9.21 candidate using the same public synthetic fixture and [`measure_capture.py`](../../scripts/measure_capture.py). It reads no host data, uses a temporary data home and deletes it. Run it from a source checkout with test dependencies installed:
+This measurement compares the published `v1.9.20` source with `v1.9.21` using the same public synthetic fixture and [`measure_capture.py`](../../scripts/measure_capture.py). It reads no host data, uses a temporary data home and deletes it. Run it from a source checkout with test dependencies installed:
 
 ```sh
 PYTHONPATH=. .venv/bin/python scripts/measure_capture.py

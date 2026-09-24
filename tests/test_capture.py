@@ -137,6 +137,38 @@ def test_capture_crash_references_resolve_inside_its_own_zip(monkeypatch: pytest
                for ref in repeated["evidence"]["refs"])
 
 
+def test_capture_display_reset_references_resolve_in_its_saved_power_member(monkeypatch: pytest.MonkeyPatch):
+    at = "2026-09-24T12:00:00.1234567Z"
+    transitions = [
+        {"RecordId": 71, "Id": 4101, "ProviderName": "Display", "TimeCreated": at},
+        {"RecordId": 72, "Id": 1, "ProviderName": "Microsoft-Windows-Power-Troubleshooter", "TimeCreated": at},
+    ]
+    calls = 0
+
+    def power_at_scope(_bridge, params):
+        nonlocal calls
+        calls += 1
+        return Reading("power", params, "ok", {"kind": "synthetic"}, sections=[
+            Section("raw", "raw", {"transitions": transitions}),
+            Section("derived", "derived", {"ledger": {"counts": {"display driver reset": 1, "wake": 1},
+                                                  "records": 2, "limit": 120, "limit_reached": False}}),
+        ])
+
+    monkeypatch.setitem(REGISTRY, "power", replace(REGISTRY["power"], take=power_at_scope))
+    result = asyncio.run(capture.create(FakeBridge(), Stack(), Prompts()))
+    files = members(result.path.read_bytes())
+    power = json.loads(files["readings/power.json"])
+    signals = json.loads(files["readings/signals.json"])
+    lead = next(lead for lead in next(section["data"] for section in signals["sections"] if section["name"] == "signals")
+                if lead["id"] == "transition:display-reset-near-wake")
+    refs = lead["evidence"]["refs"]
+    assert calls == 1 and len(refs) == 1
+    assert next(item for item in signals["method"]["readings"] if item["name"] == "power")["asked_at"] == power["asked_at"]
+    saved_rows = next(section["data"]["transitions"] for section in power["sections"] if section["name"] == "raw")
+    assert all(any(row["RecordId"] == ref["params"]["record_id"] and row["TimeCreated"] == ref["params"]["time_created"]
+                   for row in saved_rows) for ref in refs)
+
+
 def test_capture_keeps_a_signals_input_exception_without_retry(monkeypatch: pytest.MonkeyPatch):
     calls = 0
 
