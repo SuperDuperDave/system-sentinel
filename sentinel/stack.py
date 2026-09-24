@@ -684,11 +684,13 @@ def _outcome_text(envelope: dict[str, Any]) -> str:
     outcome = envelope.get("outcome", "unknown")
     if not isinstance(outcome, str):
         return "unknown — the stored outcome is malformed"
+    if outcome == "unavailable" and isinstance(envelope.get("error"), dict) and envelope["error"].get("kind") == "local_store":
+        return "unavailable — not observed: local performance history could not be read"
     said = {
         "ok": "the machine was observed",
         "empty": "the query ran and matched nothing",
         "failed": "not observed: the query errored",
-        "unavailable": "not observed: no bridge to Windows",
+        "unavailable": "not observed: Sentinel could not get an answer from Windows",
         "denied": "not observed: Windows refused",
         "timeout": "not observed: the query did not finish",
     }.get(outcome)

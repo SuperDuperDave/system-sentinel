@@ -126,7 +126,7 @@ def take_load(bridge: Bridge, params: dict[str, Any]) -> Reading:
         reading.sections = [Section("snapshot", "raw", None)]
         reading.count = 0
     else:
-        reading.error = {"kind": result.outcome, "detail": result.error or ""}
+        reading.error = {"kind": result.error_kind, "detail": result.error or ""}
     return reading
 
 

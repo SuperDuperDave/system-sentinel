@@ -9,6 +9,7 @@ from sentinel import readings  # noqa: F401
 from sentinel.bridge import BridgeResult
 from sentinel.reading import REGISTRY, Param, Section, Spec, from_bridge, from_object, take
 from sentinel.readings.events import _utc_stamp, events_script, record_script, since_clause
+from sentinel.stack import _outcome_text
 from tests.conftest import FakeBridge, log_collector_result
 
 
@@ -29,6 +30,16 @@ def test_empty_reading_is_distinguishable_from_failure():
     assert empty["outcome"] == "empty" and empty["count"] == 0 and empty["sections"][0]["data"] == [] and empty["error"] is None
     assert failed["outcome"] == "failed" and failed["count"] is None and failed["sections"] == [] and failed["error"] == {"kind": "failed", "detail": "boom"}
     assert unavailable["outcome"] == "unavailable" and unavailable["error"]["kind"] == "unavailable"
+
+
+def test_busy_bridge_keeps_the_unavailable_outcome_and_explains_its_own_queue():
+    detail = "Sentinel's bridge was busy: no bridge session came free within 1s; this attempt could not reach Windows"
+    reading = from_bridge("events", {}, "q", BridgeResult("unavailable", error=detail, cause="busy")).to_dict()
+    assert reading["outcome"] == "unavailable" and reading["error"] == {"kind": "busy", "detail": detail}
+    assert "could not get an answer" in _outcome_text(reading)
+    old = from_bridge("events", {}, "q", BridgeResult("unavailable", error="no bridge session came free within 1s")).to_dict()
+    assert "could not get an answer" in _outcome_text(old)
+    assert "local performance history" in _outcome_text({"outcome": "unavailable", "error": {"kind": "local_store"}})
 
 
 def test_object_shape_unwraps_the_single_item():

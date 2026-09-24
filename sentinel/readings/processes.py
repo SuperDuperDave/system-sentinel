@@ -131,7 +131,7 @@ def take_processes(bridge: Bridge, params: dict[str, Any]) -> Reading:
     result = bridge.run(PROCESS_SCRIPT, timeout=20)
     reading = Reading("processes", params, result.outcome, {"kind": "powershell", "query": PROCESS_SCRIPT.strip()}, took_ms=result.took_ms, warnings=list(result.warnings))
     if not result.observed:
-        reading.error = {"kind": result.outcome, "detail": result.error or ""}
+        reading.error = {"kind": result.error_kind, "detail": result.error or ""}
         return reading
     payload = result.items[0] if result.items and isinstance(result.items[0], dict) else None
     if payload is None:

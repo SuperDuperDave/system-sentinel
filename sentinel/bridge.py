@@ -119,8 +119,8 @@ _ONE_SHOT_COMMAND = base64.b64encode(_ONE_SHOT_BOOTSTRAP.encode("utf-16le")).dec
 
 
 class SlotTimeout(Exception):
-    """Nothing came free within the question's own timeout — a launch slot another process is
-    holding, or a session another question is using — so the question is reported as
+    """Nothing came free within the question's own timeout — a WSL launch slot held by another
+    launch, or a session another question is using — so the question is reported as
     ``unavailable`` rather than waited for without end."""
 
 
@@ -180,7 +180,7 @@ def _launch_slot(timeout: float) -> Iterator[None]:
                 break
             else:
                 if time.monotonic() >= deadline:
-                    raise SlotTimeout(f"no launch slot came free within {timeout:g}s: another process is holding the bridge")
+                    raise SlotTimeout(f"no WSL launch slot came free within {timeout:g}s; another launch held it")
                 time.sleep(_SLOT_POLL)
         yield
     finally:
@@ -198,11 +198,17 @@ class BridgeResult:
     returncode: int | None = None
     error: str | None = None
     warnings: list[str] = field(default_factory=list)
+    cause: Literal["busy"] | None = None
 
     @property
     def observed(self) -> bool:
         """True when the machine answered: the reading is evidence either way."""
         return self.outcome in ("ok", "empty")
+
+    @property
+    def error_kind(self) -> str:
+        """The outcome, or ``busy`` when Sentinel's own queue kept a question waiting."""
+        return self.cause or self.outcome
 
 
 def classify(stdout: str, stderr: str, returncode: int | None, took_ms: int) -> BridgeResult:
@@ -290,6 +296,7 @@ class Bridge:
         """One attempt, through whichever transport can take it: a live session for preference, a
         launch of its own when the pool is switched off or no session would start. Terminal
         shutdown refuses a new launch."""
+        started = time.perf_counter()
         pool = _pool_for(self)
         if pool is not None:
             answered = pool.ask(script, timeout=timeout, depth=depth)
@@ -307,7 +314,7 @@ class Bridge:
         except BridgeStopping:
             return BridgeResult("unavailable", error="the bridge is shutting down")
         except SlotTimeout as exc:
-            return BridgeResult("unavailable", error=str(exc))
+            return BridgeResult("unavailable", took_ms=_ms(started), error=f"Sentinel's bridge was busy: {exc}; this attempt could not reach Windows", cause="busy")
 
     def _run_once(self, script: str, *, timeout: float, depth: int) -> BridgeResult:
         """The one-shot transport: one script, one process, one answer."""
@@ -696,10 +703,11 @@ class Pool:
     def ask(self, script: str, *, timeout: float, depth: int) -> BridgeResult | None:
         """Answer one question from a live session, or return ``None`` to say it could not: no
         session would start, and the question belongs to the one-shot transport."""
+        started = time.perf_counter()
         try:
             session = self._checkout(timeout)
         except SlotTimeout as exc:
-            return BridgeResult("unavailable", error=str(exc))
+            return BridgeResult("unavailable", took_ms=_ms(started), error=f"Sentinel's bridge was busy: {exc}; this attempt could not reach Windows", cause="busy")
         if session is None:
             with self._lock:
                 self.fell_back += 1

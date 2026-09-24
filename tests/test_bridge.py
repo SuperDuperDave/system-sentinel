@@ -21,7 +21,7 @@ from pathlib import Path
 import pytest
 
 import sentinel.bridge
-from sentinel.bridge import WSL_LAUNCH_SLOTS, Bridge, BridgeResult, classify, clean_stderr, sessions_report
+from sentinel.bridge import WSL_LAUNCH_SLOTS, Bridge, BridgeResult, Pool, classify, clean_stderr, sessions_report
 from sentinel.readings.health import take_health
 
 
@@ -294,6 +294,55 @@ def test_the_pool_bounds_how_many_questions_are_in_flight(session_bridge: Bridge
     assert report["alive"] <= 3 and report["answered"] == 8
 
 
+def test_a_full_pool_reports_its_own_contention_not_a_missing_windows_bridge():
+    held, entered = threading.Event(), threading.Event()
+    lock = threading.Lock()
+    inside = 0
+
+    class FakeSession:
+        alive = True
+        discarded = None
+
+        def __init__(self):
+            self.answered = 0
+
+        def ask(self, script, *, timeout, depth):
+            nonlocal inside
+            with lock:
+                inside += 1
+                if inside == 4:
+                    entered.set()
+            held.wait(3)
+            self.answered += 1
+            return BridgeResult("ok", items=[{"Id": 1}])
+
+        def discard(self, why, grace=0):
+            self.discarded = why
+
+    pool = Pool(Bridge(exe="synthetic"), size=4)
+    with pool._lock:
+        pool._sessions = [FakeSession() for _ in range(4)]
+        pool._idle = pool._sessions.copy()
+    threads = [threading.Thread(target=lambda: pool.ask("held", timeout=2, depth=3)) for _ in range(4)]
+    try:
+        for thread in threads:
+            thread.start()
+        assert entered.wait(2), "four synthetic sessions did not enter"
+        started = time.monotonic()
+        busy = pool.ask("cheap", timeout=0.25, depth=3)
+        assert busy is not None and busy.outcome == "unavailable" and busy.cause == busy.error_kind == "busy"
+        assert "this attempt could not reach Windows" in (busy.error or "")
+        assert time.monotonic() - started >= 0.2
+        assert busy.took_ms >= 200
+    finally:
+        held.set()
+        for thread in threads:
+            thread.join(3)
+    assert all(not thread.is_alive() for thread in threads)
+    free = pool.ask("cheap", timeout=0.25, depth=3)
+    assert free is not None and free.outcome == "ok" and free.items == [{"Id": 1}]
+
+
 def test_the_one_shot_transport_answers_when_a_session_will_not_start(session_bridge: Bridge, monkeypatch):
     """Never lose a reading because a session would not start: the question is launched instead,
     and the fallback is a number on health rather than a failure."""
@@ -477,7 +526,8 @@ def test_a_slot_held_elsewhere_for_longer_than_the_timeout_is_unavailable_not_a_
             result = bridge.run("# fake: ok-list", timeout=0.3)
         finally:
             fcntl.flock(holder, fcntl.LOCK_UN)
-    assert result.outcome == "unavailable" and "launch slot" in (result.error or "")
+    assert result.outcome == "unavailable" and result.cause == "busy" and "launch slot" in (result.error or "")
+    assert result.took_ms >= 250
 
 
 def test_a_bridge_without_a_slot_still_launches(one_shot_bridge: Bridge, monkeypatch):

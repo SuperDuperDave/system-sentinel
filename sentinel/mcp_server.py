@@ -50,6 +50,7 @@ logger = logging.getLogger(__name__)
 INSTRUCTIONS = (
     "A stethoscope for this Windows computer. Each reading tool takes one reading and returns an envelope: "
     "'outcome' says whether the machine was observed (ok, empty) or not (failed, unavailable, denied, timeout); "
+    "'unavailable' with error.kind 'busy' means Sentinel's bridge was busy; inspect the detail and retry later. "
     "'sections' keep raw, derived, invariant and inferred apart; 'method' is the query so you can reproduce it. "
     "Take 'health' first, then 'crash': the last unplanned stops, each with its bug check, its dump and the machine's "
     "last System record before the next start, or 'crash' with a 'moment' when the person names a time. "

@@ -27,7 +27,7 @@ def learn_identity(bridge: Bridge) -> tuple[Identity, dict[str, Any]]:
         # The native Windows child inherits these names from this process. Keep the bridge
         # failure visible, while retaining enough identity to mask names in default responses.
         native = Identity(host=os.environ.get("COMPUTERNAME") or None, user=os.environ.get("USERNAME") or None) if sys.platform == "win32" and isinstance(bridge, Bridge) else Identity()
-        return native, {"outcome": result.outcome, "error": result.error}
+        return native, {"outcome": result.outcome, "error": result.error, **({"cause": result.cause} if result.cause else {})}
     item = result.items[0]
     identity = Identity(host=item.get("host") or None, user=item.get("user") or None)
     return identity, {"outcome": "ok", "powershell": item.get("ps"), "windows": item.get("os"), "took_ms": result.took_ms}
@@ -50,7 +50,7 @@ def take_health(bridge: Bridge, params: dict[str, Any]) -> Reading:
     if sessions["fell_back"] or sessions["start_failures"]:
         reading.warnings.append("a live session did not start, so some questions fell back to one-shot launches; the machine still answered")
     if outcome not in ("ok", "empty"):
-        reading.error = {"kind": outcome, "detail": facts.get("error") or ""}
+        reading.error = {"kind": facts.get("cause") or outcome, "detail": facts.get("error") or ""}
     return reading
 
 

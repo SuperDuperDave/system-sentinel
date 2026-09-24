@@ -36,6 +36,7 @@ from collections.abc import Iterable
 from datetime import UTC, datetime
 from typing import Any
 
+from .. import bridge as bridge_module
 from ..bridge import Bridge
 from ..reading import REGISTRY, Reading, Section, Spec, from_object, register, take
 
@@ -877,10 +878,22 @@ def _why(name: str, reading: Reading | None, reasons: dict[str, str]) -> str:
     return reading.outcome if reading is not None else reasons.get(name, "not taken")
 
 
+def _refined_error_kind(reading: Reading | None) -> str | None:
+    if reading is None or not isinstance(reading.error, dict):
+        return None
+    kind = reading.error.get("kind")
+    return kind if isinstance(kind, str) and kind != reading.outcome else None
+
+
+def _why_with_cause(name: str, reading: Reading | None, reasons: dict[str, str]) -> str:
+    why = _why(name, reading, reasons)
+    return f"{why}; Sentinel's bridge was busy" if _refined_error_kind(reading) == "busy" else why
+
+
 def _basis(readings: dict[str, Reading | None], reasons: dict[str, str]) -> str:
     seen = [name for name, r in readings.items() if r is not None and r.observed]
     limited = [name for name, r in readings.items() if r is not None and r.observed and r.warnings]
-    missed = [f"{name} ({_why(name, r, reasons)})" for name, r in readings.items() if r is None or not r.observed]
+    missed = [f"{name} ({_why_with_cause(name, r, reasons)})" for name, r in readings.items() if r is None or not r.observed]
     parts = [
         "Each signal is a pattern noticed across the readings named on it, not a diagnosis; the rule is on the signal.",
         f"Observed: {', '.join(seen) if seen else 'nothing'}.",
@@ -1167,7 +1180,15 @@ async def take_signals(bridge: Bridge, params: dict[str, Any]) -> Reading:
     every fact comes from an input's envelope, with its provenance attached.
     """
     wanted = list(SIGNAL_INPUTS)
-    taken = await asyncio.gather(*(_take_input(name, bridge, want) for name, want in wanted))
+    # Limit this reading's share of the bridge. Other callers can still occupy the remaining
+    # session; this is a per-call bound, not a global priority lane or a free-session guarantee.
+    lanes = asyncio.Semaphore(len(wanted) if bridge_module.POOL_SIZE <= 0 else max(1, bridge_module.POOL_SIZE - 1))
+
+    async def input_in_lane(name: str, want: dict[str, Any]) -> tuple[Reading | None, str | None]:
+        async with lanes:
+            return await _take_input(name, bridge, want)
+
+    taken = await asyncio.gather(*(input_in_lane(name, want) for name, want in wanted))
     readings: dict[str, Reading | None] = {}
     reasons: dict[str, str] = {}
     for (name, _), (reading, reason) in zip(wanted, taken, strict=True):  # gather answers every input or raises; a mismatch here would be a silent input lost
@@ -1177,25 +1198,26 @@ async def take_signals(bridge: Bridge, params: dict[str, Any]) -> Reading:
 
     signals, basis = take_signals_sync(readings, reasons)
     observed = [name for name, r in readings.items() if r is not None and r.observed]
+    input_sources = []
+    for name, want in wanted:
+        input_reading = readings[name]
+        source = {
+            "name": name,
+            "params": want,
+            "outcome": _why(name, input_reading, reasons),
+            "took_ms": input_reading.took_ms if input_reading is not None else None,
+            "warnings": [_bounded_warning(w) for w in (input_reading.warnings if input_reading is not None else [])[:5]],
+            "warnings_total": len(input_reading.warnings) if input_reading is not None else 0,
+        }
+        if kind := _refined_error_kind(input_reading):
+            source["error_kind"] = kind
+        input_sources.append(source)
 
     reading = Reading(
         reading="signals",
         params=params,
         outcome="ok" if (observed and signals) else ("empty" if observed else "unavailable"),
-        method={
-            "kind": "readings",
-            "readings": [
-                {
-                    "name": name,
-                    "params": want,
-                    "outcome": _why(name, readings[name], reasons),
-                    "took_ms": (readings[name].took_ms if readings[name] is not None else None),
-                    "warnings": [_bounded_warning(w) for w in (readings[name].warnings if readings[name] is not None else [])[:5]],
-                    "warnings_total": len(readings[name].warnings) if readings[name] is not None else 0,
-                }
-                for name, want in wanted
-            ],
-        },
+        method={"kind": "readings", "readings": input_sources},
         took_ms=max((r.took_ms for r in readings.values() if r is not None), default=0),
         count=len(signals),
     )
@@ -1207,7 +1229,7 @@ async def take_signals(bridge: Bridge, params: dict[str, Any]) -> Reading:
         reading.error = {"kind": "unavailable", "detail": "no reading this one is made of observed the machine"}
     for name, r in readings.items():
         if r is None or not r.observed:
-            reading.warnings.append(f"{name} was not observed ({_why(name, r, reasons)}): what it would have shown is absent from these signals.")
+            reading.warnings.append(f"{name} was not observed ({_why_with_cause(name, r, reasons)}): what it would have shown is absent from these signals.")
         elif r.warnings:
             reading.warnings.append(f"{name} answered with {len(r.warnings)} {'warning' if len(r.warnings) == 1 else 'warnings'}; first: {_bounded_warning(r.warnings[0])}")
     return reading

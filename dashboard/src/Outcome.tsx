@@ -6,7 +6,7 @@ import styles from './Outcome.module.css';
 
 const NOT_OBSERVED: Record<string, string> = {
   failed: 'Windows or PowerShell reported an error',
-  unavailable: 'the bridge to Windows was not there',
+  unavailable: 'Sentinel could not get an answer from Windows',
   denied: 'Windows refused',
   timeout: 'the query did not finish in time',
 };
@@ -41,9 +41,12 @@ export function OutcomeLine<T>({ taken, noun = 'records', singular, emptyText }:
   } else if (r.outcome === 'empty') {
     body = <>{emptyText ?? `No ${noun}`} · taken {when} · {cost}</>;
   } else {
+    const missed = r.outcome === 'unavailable' && r.error?.kind === 'local_store'
+      ? 'Sentinel could not read local performance history'
+      : NOT_OBSERVED[r.outcome] ?? r.outcome;
     body = (
       <>
-        <Glyph kind="warn" /> Not observed: {NOT_OBSERVED[r.outcome] ?? r.outcome}
+        <Glyph kind="warn" /> Not observed: {missed}
         {r.error?.detail ? <span className={styles.detail}> · {firstLine(r.error.detail)}</span> : null}
       </>
     );

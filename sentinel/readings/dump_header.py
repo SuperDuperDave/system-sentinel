@@ -420,7 +420,7 @@ def take_dump_header(bridge: Bridge, params: dict[str, Any]) -> Reading:
         reading.error = {"kind": "failed", "detail": "The dump query returned no inventory or inspection result."}
         return reading
     if result.outcome != "ok":
-        reading.error = {"kind": result.outcome, "detail": result.error or ""}
+        reading.error = {"kind": result.error_kind, "detail": result.error or ""}
         return reading
     if len(result.items) != 1 or not isinstance(result.items[0], dict):
         reading.outcome = "failed"

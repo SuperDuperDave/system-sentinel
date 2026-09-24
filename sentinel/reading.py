@@ -240,7 +240,7 @@ def from_bridge(
         reading.sections = [Section(section, cls, [] if shape == "list" else None)]
         reading.count = 0
     else:
-        reading.error = {"kind": result.outcome, "detail": result.error or ""}
+        reading.error = {"kind": result.error_kind, "detail": result.error or ""}
     return reading
 
 

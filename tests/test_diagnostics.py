@@ -7,12 +7,15 @@ machine (a root port with two endpoints under it and a disabled device) are not 
 """
 
 import asyncio
+import threading
 
 import pytest
 
+import sentinel.bridge as bridge_module
 from sentinel import readings  # noqa: F401  (registers the catalog)
-from sentinel.bridge import BridgeResult
-from sentinel.reading import REGISTRY, take
+from sentinel.bridge import Bridge, BridgeResult, Pool
+from sentinel.reading import REGISTRY, from_bridge, take
+from sentinel.readings import diagnostics as diagnostics_module
 from sentinel.readings.diagnostics import (
     CONSTRAINTS_SCRIPT,
     MEMORY_BASIS,
@@ -28,6 +31,7 @@ from sentinel.readings.diagnostics import (
     power_source,
     sleep_model,
     take_constraints,
+    take_signals,
     take_signals_sync,
     transition_kind,
     transitions_query,
@@ -911,6 +915,158 @@ def test_signals_takes_every_input_and_carries_their_provenance():
     assert [(s.name, s.cls) for s in reading.sections] == [("signals", "inferred")]
     assert reading.section("signals").basis
     assert reading.outcome in ("ok", "empty")
+
+
+def test_one_signals_reading_leaves_a_bridge_session_for_a_concurrent_cheap_question(monkeypatch):
+    release, entered = threading.Event(), threading.Event()
+    lock = threading.Lock()
+    inside = peak = 0
+
+    class FakeSession:
+        alive = True
+        discarded = None
+
+        def __init__(self):
+            self.answered = 0
+
+        def ask(self, script, *, timeout, depth):
+            nonlocal inside, peak
+            if script == "cheap":
+                self.answered += 1
+                return BridgeResult("ok", items=[{"Id": 1}])
+            with lock:
+                inside += 1
+                peak = max(peak, inside)
+                if inside == 3:
+                    entered.set()
+            try:
+                release.wait(3)
+                self.answered += 1
+                return BridgeResult("empty")
+            finally:
+                with lock:
+                    inside -= 1
+
+        def discard(self, why, grace=0):
+            self.discarded = why
+
+    bridge = Bridge(exe="synthetic")
+    pool = Pool(bridge, size=4)
+    with pool._lock:
+        pool._sessions = [FakeSession() for _ in range(4)]
+        pool._idle = pool._sessions.copy()
+    monkeypatch.setattr(bridge_module, "POOL_SIZE", 4)
+    monkeypatch.setattr(bridge_module, "_pool_for", lambda _: pool)
+
+    async def exercise():
+        task = asyncio.create_task(take_signals(bridge, {}))
+        safety = threading.Timer(3, release.set)
+        safety.start()
+        try:
+            assert await asyncio.to_thread(entered.wait, 2), "Signals did not take three synthetic sessions"
+            with lock:
+                assert inside == 3  # the fourth session has not been taken by this reading
+            cheap = await asyncio.to_thread(bridge.run, "cheap", timeout=0.25)
+            assert cheap.outcome == "ok" and cheap.items == [{"Id": 1}]
+            with lock:
+                assert inside == 3  # cheap question completed while Signals inputs still waited
+        finally:
+            release.set()
+            safety.cancel()
+        result = await asyncio.wait_for(task, 5)
+        assert len(result.method["readings"]) == 7
+        assert peak == 3
+
+    asyncio.run(exercise())
+
+
+def test_signals_keeps_one_shot_concurrency_when_the_session_pool_is_off(monkeypatch):
+    monkeypatch.setattr(bridge_module, "POOL_SIZE", 0)
+    all_entered, release = asyncio.Event(), asyncio.Event()
+    started = 0
+
+    async def held_input(name, bridge, want):
+        nonlocal started
+        started += 1
+        if started == len(diagnostics_module.SIGNAL_INPUTS):
+            all_entered.set()
+        await release.wait()
+        return None, "synthetic input unavailable"
+
+    monkeypatch.setattr(diagnostics_module, "_take_input", held_input)
+
+    async def exercise():
+        task = asyncio.create_task(take_signals(Bridge(exe=None), {}))
+        try:
+            await asyncio.wait_for(all_entered.wait(), 1)
+        finally:
+            release.set()
+        result = await task
+        assert result.outcome == "unavailable"
+        assert started == len(diagnostics_module.SIGNAL_INPUTS)
+
+    asyncio.run(exercise())
+
+
+def test_signals_names_a_busy_input_without_changing_its_outcome(monkeypatch):
+    async def input_with_busy(name, bridge, want):
+        if name == "hardware":
+            return from_bridge(name, want, "q", BridgeResult("unavailable", cause="busy", error="Sentinel's bridge was busy")), None
+        return None, "synthetic source unavailable"
+
+    monkeypatch.setattr(diagnostics_module, "_take_input", input_with_busy)
+    result = asyncio.run(take_signals(Bridge(exe=None), {}))
+    source = next(row for row in result.method["readings"] if row["name"] == "hardware")
+    assert result.outcome == "unavailable"
+    assert source["outcome"] == "unavailable" and source["error_kind"] == "busy"
+    assert "hardware (unavailable; Sentinel's bridge was busy)" in result.section("signals").basis
+    assert any("hardware was not observed (unavailable; Sentinel's bridge was busy)" in warning for warning in result.warnings)
+
+
+def test_cancelling_signals_does_not_start_queued_inputs(monkeypatch):
+    monkeypatch.setattr(bridge_module, "POOL_SIZE", 4)
+    entered, release, finished = threading.Event(), threading.Event(), threading.Event()
+    lock = threading.Lock()
+    started = ended = 0
+
+    def held_query():
+        nonlocal started, ended
+        with lock:
+            started += 1
+            if started == 3:
+                entered.set()
+        release.wait(3)
+        with lock:
+            ended += 1
+            if ended == 3:
+                finished.set()
+
+    async def input_with_held_query(name, bridge, want):
+        await asyncio.to_thread(held_query)
+        return None, "synthetic source unavailable"
+
+    monkeypatch.setattr(diagnostics_module, "_take_input", input_with_held_query)
+
+    async def exercise():
+        task = asyncio.create_task(take_signals(Bridge(exe=None), {}))
+        safety = threading.Timer(3, release.set)
+        safety.start()
+        try:
+            assert await asyncio.to_thread(entered.wait, 2)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            with lock:
+                assert started == 3
+        finally:
+            release.set()
+            safety.cancel()
+        assert await asyncio.to_thread(finished.wait, 2)
+        await asyncio.sleep(0)
+        with lock:
+            assert started == ended == 3
+
+    asyncio.run(exercise())
 
 
 def test_signals_bounds_but_counts_input_warnings_for_the_agent():

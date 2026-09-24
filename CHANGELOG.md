@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.9.12] - 2026-09-24
+
+### Fixed
+- A question that cannot enter a busy PowerShell session pool or WSL launch slot still reports `unavailable`, but now carries `error.kind=busy` where the reading is built from that bridge result, records the wait in `took_ms`, and explains that the timed-out attempt could not reach Windows. Signals now keeps a busy input's precise cause in its method and warnings. The screen, API guide and saved handoff no longer describe every unavailable answer as a missing bridge. Existing saved readings and the six outcome values remain valid.
+- One Signals reading now starts at most `max(1, pool size − 1)` concurrent inputs. At the default four-session size it can leave one session for a concurrent light question when nothing else is using the bridge. A pool of one leaves no spare session. Disabling the session pool keeps Signals' previous one-shot concurrency.
+
+### Limits
+- A synthetic four-session gate reproduced a cheap reading waiting 250 ms and then receiving `unavailable` before this change; another gate showed one Signals reading filling all four sessions. These establish the pathway, not frequency or 60-second behavior on a Windows host. Other clients can still fill the pool; the per-Signals cap is not a global reserved lane. With three lanes instead of four, Signals may take longer, especially when several inputs each reach their own timeout; A small alternating host comparison observed a latency cost; `bench --readings signals --transport session` measures Signals on another machine.
+
 ## [1.9.11] - 2026-09-24
 
 ### Fixed
