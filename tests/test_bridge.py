@@ -21,7 +21,7 @@ from pathlib import Path
 import pytest
 
 import sentinel.bridge
-from sentinel.bridge import WSL_LAUNCH_SLOTS, Bridge, BridgeResult, Pool, Session, SlotTimeout, classify, clean_stderr, sessions_report
+from sentinel.bridge import WSL_LAUNCH_SLOTS, Bridge, BridgeResult, Pool, Session, SlotTimeout, classify, clean_stderr, questions_report, sessions_report
 from sentinel.readings.health import take_health
 
 
@@ -33,6 +33,65 @@ def test_ok_list(bridge: Bridge):
     assert r.returncode == 0
     assert r.error is None
     assert r.took_ms >= 0
+
+
+def test_question_counters_cover_final_busy_and_unanswered_calls(monkeypatch):
+    before = questions_report()
+    assert Bridge(exe=None).run("anything").outcome == "unavailable"
+    monkeypatch.setattr(Bridge, "_answer", lambda self, *args, **kwargs: BridgeResult("unavailable", cause="busy"))
+    assert Bridge(exe="synthetic").run("anything").cause == "busy"
+    after = questions_report()
+    assert after["asked"] == before["asked"] + 2
+    assert after["busy"] == before["busy"] + 1
+    assert after["in_flight"] == before["in_flight"]
+
+
+def test_question_counters_release_an_unexpected_exception(monkeypatch):
+    before = questions_report()
+
+    def raise_unexpected(*args, **kwargs):
+        raise RuntimeError("synthetic interruption")
+
+    monkeypatch.setattr(Bridge, "_answer", raise_unexpected)
+    with pytest.raises(RuntimeError, match="synthetic interruption"):
+        Bridge(exe="synthetic").run("anything")
+    after = questions_report()
+    assert after["asked"] == before["asked"] + 1
+    assert after["in_flight"] == before["in_flight"]
+
+
+def test_question_counters_show_active_work_and_peak(monkeypatch):
+    entered = threading.Event()
+    release = threading.Event()
+    before = questions_report()
+
+    def answer(*args, **kwargs):
+        entered.set()
+        assert release.wait(5)
+        return BridgeResult("empty")
+
+    monkeypatch.setattr(Bridge, "_answer", answer)
+    worker = threading.Thread(target=lambda: Bridge(exe="synthetic").run("anything"))
+    worker.start()
+    try:
+        assert entered.wait(5)
+        during = questions_report()
+        assert during["in_flight"] == before["in_flight"] + 1
+        assert during["in_flight_max"] >= during["in_flight"]
+    finally:
+        release.set()
+        worker.join(5)
+    assert not worker.is_alive()
+    assert questions_report()["in_flight"] == before["in_flight"]
+
+
+def test_question_counter_counts_an_interop_retry_once(monkeypatch):
+    before = questions_report()
+    answers = iter((BridgeResult("unavailable", error="UtilAcceptVsock accept4 failed"), BridgeResult("empty")))
+    monkeypatch.setattr(Bridge, "_answer", lambda self, *args, **kwargs: next(answers))
+    monkeypatch.setattr(sentinel.bridge.time, "sleep", lambda _: None)
+    assert Bridge(exe="synthetic").run("anything").outcome == "empty"
+    assert questions_report()["asked"] == before["asked"] + 1
 
 
 def test_single_object_becomes_a_list_of_one(bridge: Bridge):
@@ -448,7 +507,10 @@ def _running(pid: int) -> bool:
 def test_health_reports_the_pool(session_bridge: Bridge):
     """A reading whose job is the bridge says what the bridge now is. Counts, never a verdict."""
     session_bridge.run("# fake: ok-list")
-    sessions = take_health(session_bridge, {}).section("bridge").data["bridge"]["sessions"]
+    health = take_health(session_bridge, {}).section("bridge").data
+    sessions = health["bridge"]["sessions"]
+    assert set(health["bridge"]["questions"]) == {"asked", "busy", "in_flight", "in_flight_max"}
+    assert set(health["streams"]) == {"connected", "connected_max", "asked", "records_returned", "polls_at_limit"}
     assert sessions["transport"] == "session"
     assert sessions["alive"] == 1 and sessions["answered"] >= 2
     assert sessions["oldest_seconds"] is not None

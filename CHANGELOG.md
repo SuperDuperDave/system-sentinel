@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.9.15] - 2026-09-24
+
+### Added
+- Health now reports process-lifetime bridge questions asked, final busy answers, questions in flight and peak concurrency. The count covers session, fallback and one-shot calls; an interop retry remains one question.
+- Health also reports current and peak connected streams, cursor and poll questions, raw records returned by polls, and polls that hit their record limit. These counts make independent client polling visible before deciding whether a shared poller is worth its added cursor and delivery machinery.
+
+### Clarified
+- Stream counters describe Sentinel's work, not Windows health or records delivered to a client. Returned records include items before validation and redaction; separate clients may fetch the same record. Reconnecting does not replay missed records. Agents can compare two health readings to estimate rates; neither count measures query cost.
+
+### Limits
+- The counters reset on process restart and have no persistent history or per-client identifiers. A poll at its limit can indicate backlog but cannot measure Windows enumeration work or prove a record was lost. The shared poller remains a measured design choice, not part of this release.
+
 ## [1.9.14] - 2026-09-24
 
 ### Fixed

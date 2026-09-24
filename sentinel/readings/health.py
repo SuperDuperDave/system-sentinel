@@ -10,7 +10,7 @@ import os
 import sys
 from typing import Any
 
-from ..bridge import Bridge, sessions_report
+from ..bridge import Bridge, questions_report, sessions_report
 from ..paths import data_dir
 from ..reading import Reading, Section, Spec, register
 from ..redact import Identity
@@ -34,10 +34,14 @@ def learn_identity(bridge: Bridge) -> tuple[Identity, dict[str, Any]]:
 
 
 def take_health(bridge: Bridge, params: dict[str, Any]) -> Reading:
+    # stream imports readings.events; import here to avoid a readings package cycle.
+    from ..stream import stream_report
+
     _, facts = learn_identity(bridge)
     sessions = sessions_report(bridge)
     data = {
-        "bridge": {"available": bridge.available, "exe": bool(bridge.exe), **facts, "sessions": sessions},
+        "bridge": {"available": bridge.available, "exe": bool(bridge.exe), **facts, "sessions": sessions, "questions": questions_report()},
+        "streams": stream_report(),
         "decoder": {"present": os.path.exists(DECODER)},
         "data_dir": {"present": data_dir().is_dir()},
     }
@@ -56,7 +60,7 @@ def take_health(bridge: Bridge, params: dict[str, Any]) -> Reading:
 register(
     Spec(
         name="health",
-        description="Whether the bridge works: PowerShell found and answering, its version, how questions are reaching the machine and how the live sessions are doing, the decoder present, the data directory writable. Take this first.",
+        description="Whether the bridge works: PowerShell found and answering, its version, bridge and stream workload, live sessions, the decoder present, the data directory writable. Take this first.",
         classes=("raw",),
         take=take_health,
     )

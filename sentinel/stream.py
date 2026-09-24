@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -34,7 +35,16 @@ from .serialization import json_safe_integers
 
 POLL_SECONDS = 5.0
 MAX_PER_POLL = 200
-"""Oldest first above the cursor: a burst is emitted in order over several polls, never skipped."""
+"""Oldest first above the cursor: a burst is fetched over several polls while connected."""
+
+_STATS_LOCK = threading.Lock()
+_STATS = {"connected": 0, "connected_max": 0, "asked": 0, "records_returned": 0, "polls_at_limit": 0}
+
+
+def stream_report() -> dict[str, int]:
+    """Process-lifetime stream work; returned records may never reach an SSE client."""
+    with _STATS_LOCK:
+        return dict(_STATS)
 
 
 @dataclass(frozen=True)
@@ -111,6 +121,8 @@ class Stream:
 
     def start_cursors(self) -> BridgeResult:
         """Ask each log for its latest record, so the stream begins at now and replays nothing."""
+        with _STATS_LOCK:
+            _STATS["asked"] += 1
         result = self.bridge.run(CURSOR_SCRIPT, timeout=30)
         for item in result.items:
             log, record = item.get("log"), item.get("record")
@@ -120,7 +132,13 @@ class Stream:
 
     def poll(self) -> tuple[BridgeResult, list[dict[str, Any]]]:
         """One round trip. Returns what the bridge said and the new records as stream payloads."""
+        with _STATS_LOCK:
+            _STATS["asked"] += 1
         result = self.bridge.run(poll_script(self.cursors, self.limit))
+        with _STATS_LOCK:
+            _STATS["records_returned"] += len(result.items)
+            if self.limit > 0 and len(result.items) >= self.limit:
+                _STATS["polls_at_limit"] += 1
         redactor = self._current_redactor()
         events: list[dict[str, Any]] = []
         for item in result.items:
@@ -139,6 +157,9 @@ class Stream:
     async def events(self, disconnected: Callable[[], Awaitable[bool]] | None = None) -> AsyncIterator[str]:
         """The frames, forever: ``record`` for each new record, ``bridge`` when a poll did not
         observe the machine, ``heartbeat`` on every poll. Ends cleanly when the client goes away."""
+        with _STATS_LOCK:
+            _STATS["connected"] += 1
+            _STATS["connected_max"] = max(_STATS["connected_max"], _STATS["connected"])
         try:
             while True:
                 if disconnected is not None and await disconnected():
@@ -161,6 +182,9 @@ class Stream:
                 await asyncio.sleep(self.interval if result.observed else self.interval * 4)
         except (asyncio.CancelledError, GeneratorExit):
             return
+        finally:
+            with _STATS_LOCK:
+                _STATS["connected"] -= 1
 
 
 def frame(event: str, data: dict[str, Any]) -> str:

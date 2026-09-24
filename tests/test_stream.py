@@ -14,7 +14,7 @@ import uvicorn
 from sentinel.app import State, create_app
 from sentinel.bridge import BridgeResult
 from sentinel.redact import Identity, Redactor
-from sentinel.stream import LOGS, PRESETS, Stream, poll_script
+from sentinel.stream import LOGS, PRESETS, Stream, poll_script, stream_report
 from tests.conftest import FakeBridge, identity_result, real_bridge_or_skip
 
 TOKEN = "test-token-0123456789"
@@ -82,6 +82,7 @@ def test_the_first_frame_is_a_heartbeat_that_says_where_the_logs_are():
 
 
 def test_new_records_arrive_and_move_the_cursor():
+    before = stream_report()
     stream = Stream(stream_bridge(), None, interval=0)
     got = asyncio.run(take_frames(stream, polls=2))
     kinds = [name for name, _ in got]
@@ -90,6 +91,24 @@ def test_new_records_arrive_and_move_the_cursor():
     assert log == "System" and record["RecordId"] == 307404 and record["Message"].startswith("The system has rebooted")
     assert got[2][1]["cursors"]["System"] == 307404
     assert stream.cursors["Application"] == 4908829  # untouched: nothing new in that log
+    after = stream_report()
+    assert after["asked"] == before["asked"] + 2  # cursor and poll, both attributable to a stream
+    assert after["records_returned"] == before["records_returned"] + 1
+    assert after["connected"] == before["connected"]
+    assert after["connected_max"] >= 1
+
+
+def test_stream_counts_raw_returned_items_before_validation_and_redaction():
+    before = stream_report()
+    result = BridgeResult("ok", items=[{"log": "System", "record": RECORD}, {"malformed": True}], took_ms=1)
+    stream = Stream(stream_bridge(poll=result), None, limit=2)
+    stream.cursors = {"System": 307403, "Application": 4908829}
+    _, records = stream.poll()
+    assert len(records) == 1
+    after = stream_report()
+    assert after["asked"] == before["asked"] + 1
+    assert after["records_returned"] == before["records_returned"] + 2
+    assert after["polls_at_limit"] == before["polls_at_limit"] + 1
 
 
 def test_records_are_redacted_like_every_other_response():
@@ -194,9 +213,14 @@ def test_the_route_streams_and_the_server_lets_go_when_the_client_does():
     server, thread, port = serve(create_app(State(bridge=stream_bridge(), token=TOKEN), mcp=False))
     try:
         assert httpx.get(f"http://127.0.0.1:{port}/api/stream", timeout=5).status_code == 401
+        connected_before = stream_report()["connected"]
         seen = read_until_heartbeat(port, seconds=10)
         assert [name for name, _ in seen][0] == "heartbeat"
         assert seen[0][1]["cursors"] == {"System": 307403, "Application": 4908829}
+        deadline = time.monotonic() + 3
+        while stream_report()["connected"] != connected_before and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert stream_report()["connected"] == connected_before
     finally:
         server.should_exit = True
         thread.join(timeout=10)

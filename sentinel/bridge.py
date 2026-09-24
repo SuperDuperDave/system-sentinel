@@ -282,16 +282,22 @@ class Bridge:
         ``unavailable``. The retry sits above the transport because a session is started by a launch
         like any other. Native Windows never sees this path.
         """
-        if self.exe is None:
-            return BridgeResult("unavailable", error="powershell.exe was not found")
-        wait_until = time.monotonic() + timeout
-        result = self._answer(script, timeout=timeout, depth=depth, wait_until=wait_until)
-        for attempt in range(1, WSL_INTEROP_ATTEMPTS):
-            if not (result.outcome == "unavailable" and result.error and _wsl_interop_error(result.error)):
-                break
-            time.sleep(0.5 * attempt)
-            result = self._answer(script, timeout=timeout, depth=depth, wait_until=wait_until)
-        return result
+        _question_started()
+        result: BridgeResult | None = None
+        try:
+            if self.exe is None:
+                result = BridgeResult("unavailable", error="powershell.exe was not found")
+            else:
+                wait_until = time.monotonic() + timeout
+                result = self._answer(script, timeout=timeout, depth=depth, wait_until=wait_until)
+                for attempt in range(1, WSL_INTEROP_ATTEMPTS):
+                    if not (result.outcome == "unavailable" and result.error and _wsl_interop_error(result.error)):
+                        break
+                    time.sleep(0.5 * attempt)
+                    result = self._answer(script, timeout=timeout, depth=depth, wait_until=wait_until)
+            return result
+        finally:
+            _question_finished(result)
 
     def _answer(self, script: str, *, timeout: float, depth: int, wait_until: float) -> BridgeResult:
         """One attempt, through whichever transport can take it: a live session for preference, a
@@ -884,10 +890,35 @@ POOL_SIZE = _pool_size()
 
 _POOLS: dict[Bridge, Pool] = {}
 _POOLS_LOCK = threading.Lock()
+_QUESTIONS_LOCK = threading.Lock()
+_QUESTIONS = {"asked": 0, "busy": 0, "in_flight": 0, "in_flight_max": 0}
 _SESSIONS_ENDED = False
 _POPEN = subprocess.Popen
 # Weak keys retain an interruption marker until the owning thread is done with its process.
 _CHILDREN: weakref.WeakKeyDictionary[subprocess.Popen[bytes], bool] = weakref.WeakKeyDictionary()
+
+
+def _question_started() -> None:
+    with _QUESTIONS_LOCK:
+        _QUESTIONS["asked"] += 1
+        _QUESTIONS["in_flight"] += 1
+        _QUESTIONS["in_flight_max"] = max(_QUESTIONS["in_flight_max"], _QUESTIONS["in_flight"])
+
+
+def _question_finished(result: BridgeResult | None) -> None:
+    with _QUESTIONS_LOCK:
+        _QUESTIONS["in_flight"] -= 1
+        if result is not None and result.outcome == "unavailable" and result.cause == "busy":
+            _QUESTIONS["busy"] += 1
+
+
+def questions_report() -> dict[str, int]:
+    """Process-lifetime calls to Bridge.run, including one-shot launches and unanswered asks.
+
+    A retry within one call counts once. Direct Pool.ask calls are outside this boundary.
+    """
+    with _QUESTIONS_LOCK:
+        return dict(_QUESTIONS)
 
 
 def _spawn_child(cmd: list[str], cwd: str | None) -> subprocess.Popen[bytes]:
