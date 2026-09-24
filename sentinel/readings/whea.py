@@ -1081,7 +1081,7 @@ $meta = Read-LogMetadata 'System'
 def storms_script(window: Window, before: str = "") -> str:
     """Ask the Windows clock for the observed end and bucket-aligned System window."""
     stamp = before_stamp(before) if before.strip() else None
-    assignment = f"[datetimeoffset]::Parse('{stamp}').UtcDateTime" if stamp else "$queried"
+    assignment = f"[datetimeoffset]::Parse('{stamp}', [Globalization.CultureInfo]::InvariantCulture).UtcDateTime" if stamp else "$queried"
     return (LOG_METADATA_SCRIPT + STORMS_SCRIPT_TEMPLATE.replace("{bucket_seconds}", str(window.bucket_seconds))
             .replace("{count}", str(window.count)).replace("{cap}", str(RECORD_CAP)).replace("{extra}", str(RECORD_CAP + 1))
             .replace("{before_assignment}", assignment))

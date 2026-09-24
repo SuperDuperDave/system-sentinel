@@ -649,8 +649,17 @@ def _change_handoff_sections(envelope: dict[str, Any], selected: list[dict[str, 
                 if wanted is None or isinstance(ref, dict) and (ref.get("log"), ref.get("record_id")) in wanted:
                     entries.append(entry)
             if compact:
-                display = ("at", "source", "ref", "kind", "subject", "version", "publisher", "kb", "error_code", "status", "succeeded", "restart", "device_updated", "error")
-                entries = [{key: entry[key] for key in display if key in entry and entry[key] is not None} for entry in entries]
+                display = ("at", "source", "ref", "kind", "subject", "version", "publisher", "kb", "error_code", "status", "succeeded", "restart", "device_updated", "outside_window", "error")
+                compact_entries = []
+                for entry in entries:
+                    shown = {key: entry[key] for key in display if key in entry and entry[key] is not None}
+                    # False is the ordinary case; a true or unknown placement matters in a handoff.
+                    if entry.get("outside_window") is False:
+                        shown.pop("outside_window", None)
+                    elif "outside_window" in entry and entry["outside_window"] is None:
+                        shown["outside_window"] = None
+                    compact_entries.append(shown)
+                entries = compact_entries
             sections.append({**section, "data": entries})
         elif name in ("collection", "coverage") or (name == "summary" and selected is None):
             sections.append(section)

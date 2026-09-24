@@ -51,6 +51,12 @@ def take(sources: list[dict]):
     return take_changes(FakeBridge(sources), {"before": BEFORE, "hours": 24, "count": 3})
 
 
+def take_payload(payload: dict, *, before: str = BEFORE, hours: int = 24):
+    bridge = FakeBridge(payload["sources"])
+    bridge.run = lambda script, *, depth: BridgeResult("ok", items=[payload])
+    return take_changes(bridge, {"before": before, "hours": hours, "count": 3})
+
+
 def test_three_source_results_keep_exact_events_and_explain_what_they_mean():
     update = row("windows_update", 14, "2026-09-21T20:00:00Z", {"updateTitle": "Synthetic update (KB1234567)"})
     device = row("device_configuration", 14, "2026-09-21T20:00:01Z", {"DriverName": "oem9.inf", "DriverVersion": "1.2", "DriverProvider": "Example", "DeviceUpdated": "false"})
@@ -132,36 +138,38 @@ def test_failed_update_and_msi_removal_are_distinct_from_successful_changes():
 
 
 def test_seven_digit_utc_fractions_do_not_invent_a_retention_gap():
-    start = "2026-09-21T00:00:00.1234567Z"
+    before = "2026-09-22T00:00:00.123Z"
+    start = "2026-09-21T00:00:00.1230000Z"
     oldest = "2026-09-20T00:00:00.1234567Z"
     bridge = FakeBridge([source(name, oldest=oldest) for name in LOGS])
-    bridge.run = lambda script, *, depth: BridgeResult("ok", items=[{"window_start": start, "window_end": BEFORE, "queried_at": BEFORE, "sources": bridge.sources}])
-    reading = take_changes(bridge, {"before": BEFORE, "hours": 24, "count": 3})
+    bridge.run = lambda script, *, depth: BridgeResult("ok", items=[{"window_start": start, "window_end": before, "queried_at": before, "sources": bridge.sources}])
+    reading = take_changes(bridge, {"before": before, "hours": 24, "count": 3})
     assert reading.outcome == "empty" and not reading.warnings
-    assert all(reach == {"covered_from": start, "covered_from_inclusive": True, "covered_until": BEFORE, "complete": True} for reach in reading.section("coverage").data.values())
+    assert all(reach == {"covered_from": start, "covered_from_inclusive": True, "covered_until": before, "complete": True} for reach in reading.section("coverage").data.values())
     assert all("covered_from" not in raw for raw in reading.section("collection").data.values() if isinstance(raw, dict))
 
 
 def test_seventh_digit_changes_reach_and_rejects_a_row_before_the_window():
-    start = "2026-09-21T00:00:00.1234561Z"
-    oldest = "2026-09-21T00:00:00.1234560Z"
+    before = "2026-09-22T00:00:00.123Z"
+    start = "2026-09-21T00:00:00.1230000Z"
+    oldest = "2026-09-21T00:00:00.1229999Z"
     bridge = FakeBridge([source(name, oldest=oldest) for name in LOGS])
-    bridge.run = lambda script, *, depth: BridgeResult("ok", items=[{"window_start": start, "window_end": BEFORE, "queried_at": BEFORE, "sources": bridge.sources}])
-    reading = take_changes(bridge, {"before": BEFORE, "hours": 24, "count": 3})
-    assert reading.section("coverage").data["windows_update"] == {"covered_from": start, "covered_from_inclusive": True, "covered_until": BEFORE, "complete": True}
+    bridge.run = lambda script, *, depth: BridgeResult("ok", items=[{"window_start": start, "window_end": before, "queried_at": before, "sources": bridge.sources}])
+    reading = take_changes(bridge, {"before": before, "hours": 24, "count": 3})
+    assert reading.section("coverage").data["windows_update"] == {"covered_from": start, "covered_from_inclusive": True, "covered_until": before, "complete": True}
 
     old_row = row("windows_update", 2, oldest, {"updateTitle": "Synthetic update"})
     bridge.sources[0] = source("windows_update", [old_row], oldest=oldest)
-    outside = take_changes(bridge, {"before": BEFORE, "hours": 24, "count": 3})
+    outside = take_changes(bridge, {"before": before, "hours": 24, "count": 3})
     assert outside.section("records").data == [old_row]
     assert outside.section("collection").data["windows_update"]["row_issues"]["outside_window"] == 1
     assert outside.section("coverage").data["windows_update"]["complete"] is False
     assert any("outside the requested window" in warning for warning in outside.warnings)
 
-    later_oldest = "2026-09-21T00:00:00.1234562Z"
+    later_oldest = "2026-09-21T00:00:00.1230001Z"
     bridge.sources[0] = source("windows_update", oldest=later_oldest)
-    limited = take_changes(bridge, {"before": BEFORE, "hours": 24, "count": 3})
-    assert limited.section("coverage").data["windows_update"] == {"covered_from": later_oldest, "covered_from_inclusive": False, "covered_until": BEFORE, "complete": False}
+    limited = take_changes(bridge, {"before": before, "hours": 24, "count": 3})
+    assert limited.section("coverage").data["windows_update"] == {"covered_from": later_oldest, "covered_from_inclusive": False, "covered_until": before, "complete": False}
 
 
 @pytest.mark.parametrize("metadata_key, metadata_value", [("log_enabled", False), ("log_mode", "AutoBackup"), ("oldest_state", "failed")])
@@ -198,12 +206,13 @@ def test_duplicate_source_results_and_projection_errors_never_claim_a_clean_hist
 def test_window_and_count_are_bounded_in_the_log_query():
     script = changes_script(BEFORE, 24, 3)
     assert "$until = $until.AddTicks(-($until.Ticks % 10000))" in script
+    assert "[datetimeoffset]::Parse('2026-09-22T00:00:00.000Z', [Globalization.CultureInfo]::InvariantCulture)" in script
     assert script.count("Get-WinEvent -FilterXml") == 1  # one source query inside a three-source loop
     assert "Microsoft-Windows-Kernel-PnP/Configuration" in script
     assert "(EventID=19 or EventID=20)" in script and "(EventID=1033 or EventID=1034)" in script
     assert "@SystemTime&gt;='$startIso' and @SystemTime&lt;'$endIso'" in script
     assert "$queriedAt = (Get-Date).ToUniversalTime().ToString('o')" in script
-    for before, hours, count in (("not a time", 24, 3), (BEFORE, 0, 3), (BEFORE, 24, 501)):
+    for before, hours, count in (("not a time", 24, 3), ("1601-01-01T00:00:00Z", 1, 3), (BEFORE, 0, 3), (BEFORE, 24, 501)):
         with pytest.raises(ValueError):
             changes_script(before, hours, count)
 
@@ -224,3 +233,94 @@ def test_changes_future_end_does_not_claim_a_complete_requested_window():
     unknown = take_changes(bridge, {"before": BEFORE, "hours": 24, "count": 3})
     assert all(reach["complete"] is None and reach["covered_until"] is None
                for reach in unknown.section("coverage").data.values())
+
+
+def test_a_wrong_echo_cannot_make_an_empty_changes_window_look_complete():
+    payload = {"window_start": START, "window_end": "2026-09-22T00:00:00.001Z",
+               "queried_at": "2026-09-22T00:00:01Z", "sources": [source(name) for name in LOGS]}
+    reading = take_payload(payload)
+    assert reading.outcome == "failed" and reading.count is None
+    assert reading.section("collection").data["window_end"] == payload["window_end"]
+    assert all(reach == {"covered_from": None, "covered_from_inclusive": None, "covered_until": None, "complete": None}
+               for reach in reading.section("coverage").data.values())
+    assert any("collector's window does not match" in warning for warning in reading.warnings)
+
+    payload["window_end"] = BEFORE
+    payload["window_start"] = "2026-09-21T00:00:00.001Z"
+    shifted_start = take_payload(payload)
+    assert shifted_start.outcome == "failed" and all(reach["complete"] is None for reach in shifted_start.section("coverage").data.values())
+
+
+def test_millisecond_rounding_is_verified_but_an_unrounded_collector_echo_is_not():
+    before = "2026-09-22T00:00:00.0005Z"
+    payload = {"window_start": START, "window_end": BEFORE, "queried_at": "2026-09-22T00:00:01Z",
+               "sources": [source(name) for name in LOGS]}
+    reading = take_payload(payload, before=before)
+    assert reading.outcome == "empty" and all(reach["complete"] is True for reach in reading.section("coverage").data.values())
+    payload["window_end"] = before
+    unrounded = take_payload(payload, before=before)
+    assert unrounded.outcome == "failed" and all(reach["complete"] is None for reach in unrounded.section("coverage").data.values())
+
+
+def test_a_bad_echo_keeps_safe_rows_and_places_them_against_the_request():
+    inside = row("windows_update", 10, "2026-09-21T12:00:00Z", {"updateTitle": "Inside"})
+    after = row("windows_update", 11, "2026-09-22T00:00:00.0005Z", {"updateTitle": "After"})
+    payload = {"window_start": START, "window_end": "2026-09-22T00:00:00.001Z",
+               "queried_at": "2026-09-22T00:00:01Z",
+               "sources": [source("windows_update", [after, inside]), source("device_configuration"), source("msi")]}
+    reading = take_payload(payload)
+    assert reading.outcome == "ok" and reading.count == 1
+    assert reading.section("records").data == [inside, after]
+    assert [entry["outside_window"] for entry in reading.section("changes").data] == [False, True]
+    assert reading.section("collection").data["windows_update"]["row_issues"]["outside_window"] == 1
+    assert all(reach["complete"] is None for reach in reading.section("coverage").data.values())
+
+    payload["sources"][0] = source("windows_update", [after])
+    only_after = take_payload(payload)
+    assert only_after.outcome == "failed" and only_after.section("records").data == [after]
+
+    payload["window_end"] = None
+    payload["sources"][0] = source("windows_update", [inside])
+    malformed_echo = take_payload(payload)
+    assert malformed_echo.outcome == "ok" and malformed_echo.count == 1
+    assert malformed_echo.section("records").data == [inside]
+    assert malformed_echo.section("coverage").data["windows_update"]["complete"] is None
+
+
+def test_a_verified_live_window_can_answer_empty_with_observed_reach():
+    payload = {"window_start": "2026-09-21T23:00:00.3450000Z",
+               "window_end": "2026-09-22T00:00:00.3450000Z",
+               "queried_at": "2026-09-22T00:00:00.3460000Z",
+               "sources": [source(name) for name in LOGS]}
+    reading = take_payload(payload, before="", hours=1)
+    assert reading.outcome == "empty" and reading.count == 0
+    assert all(reach["complete"] is True and reach["covered_until"] == payload["window_end"]
+               for reach in reading.section("coverage").data.values())
+
+
+@pytest.mark.parametrize("start,end,queried", [
+    (START, "2026-09-22T00:00:00.0005Z", "2026-09-22T00:00:01Z"),
+    ("2026-09-21T01:00:00Z", BEFORE, "2026-09-22T00:00:01Z"),
+    (START, BEFORE, "2026-09-21T23:59:59Z"),
+])
+def test_live_changes_refuses_an_unverified_host_window_but_keeps_safe_rows(start: str, end: str, queried: str):
+    inside = row("msi", 4, "2026-09-21T12:00:00Z", {"[0]": "Observed"})
+    payload = {"window_start": start, "window_end": end, "queried_at": queried,
+               "sources": [source("windows_update"), source("device_configuration"), source("msi", [inside])]}
+    reading = take_payload(payload, before="")
+    assert reading.outcome == "failed" and reading.count is None
+    assert reading.section("records").data == [inside]
+    assert reading.section("changes").data[0]["outside_window"] is None
+    assert all(reach["complete"] is None for reach in reading.section("coverage").data.values())
+
+
+def test_changes_does_not_call_a_future_or_unclocked_window_empty():
+    payload = {"window_start": "2026-09-23T00:00:00Z", "window_end": "2026-09-24T00:00:00Z",
+               "queried_at": "2026-09-22T00:00:00Z", "sources": [source(name) for name in LOGS]}
+    future = take_payload(payload, before="2026-09-24T00:00:00Z")
+    assert future.outcome == "failed" and future.count is None
+    assert any("begins at or after" in warning for warning in future.warnings)
+    payload.update(window_start=START, window_end=BEFORE, queried_at=None)
+    unclocked = take_payload(payload)
+    assert unclocked.outcome == "failed" and unclocked.count is None
+    assert all(reach["covered_until"] is None for reach in unclocked.section("coverage").data.values())

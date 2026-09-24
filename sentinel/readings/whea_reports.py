@@ -126,7 +126,7 @@ REPORT_COVERAGE_BASIS = (
 
 def reports_script(window: Window, before: str = "") -> str:
     stamp = before_stamp(before) if before.strip() else None
-    assignment = f"[datetimeoffset]::Parse('{stamp}').UtcDateTime" if stamp else "$queried"
+    assignment = f"[datetimeoffset]::Parse('{stamp}', [Globalization.CultureInfo]::InvariantCulture).UtcDateTime" if stamp else "$queried"
     return LOG_METADATA_SCRIPT + SCRIPT.format(
         bucket_seconds=window.bucket_seconds, count=window.count, channel=CHANNEL,
         provider=CHANNEL_PROVIDER, cap=RECORD_CAP, extra=RECORD_CAP + 1,

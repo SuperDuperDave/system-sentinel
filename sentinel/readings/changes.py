@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 from collections import Counter
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from ..bridge import Bridge
@@ -128,30 +129,80 @@ CHANGES_BASIS = (
     "a driver update; its DeviceUpdated field is shown without inferring a cause. MSI 1033/1034 "
     "record installation/removal results, with success derived only from a documented status code. "
     "MSI status 1641 means restart initiated and 3010 means restart required. "
-    "A nearby event is a lead to inspect, not proof that it caused a later failure."
+    "outside_window says whether a returned row falls outside the requested millisecond interval; "
+    "null means the live window could not be verified. A nearby event is a lead to inspect, not "
+    "proof that it caused a later failure."
 )
+
+
+def _requested_window(before: str, hours: int) -> tuple[str | None, str | None]:
+    """The documented whole-millisecond request, independent of a collector's answer."""
+    if not before.strip():
+        return None, None
+    try:
+        end = _utc_stamp(before)
+    except ValueError as exc:
+        raise ValueError(f"parameter 'before': not an ISO timestamp ({exc})") from exc
+    at = _parse(end)
+    assert at is not None  # _utc_stamp just rendered a zoned UTC timestamp.
+    try:
+        start = at - timedelta(hours=hours)
+    except OverflowError as exc:
+        raise ValueError("parameter 'before': the requested window begins before Windows event-log time") from exc
+    if start < datetime(1601, 1, 1, tzinfo=UTC):
+        raise ValueError("parameter 'before': the requested window begins before Windows event-log time")
+    return start.isoformat(timespec="milliseconds").replace("+00:00", "Z"), end
+
+
 def changes_script(before: str, hours: int, count: int) -> str:
     if not 1 <= hours <= MAX_HOURS:
         raise ValueError(f"parameter 'hours': must be between 1 and {MAX_HOURS}")
     if not 1 <= count <= MAX_COUNT:
         raise ValueError(f"parameter 'count': must be between 1 and {MAX_COUNT}")
-    try:
-        stamp = _utc_stamp(before) if before.strip() else None
-    except ValueError as exc:
-        raise ValueError(f"parameter 'before': not an ISO timestamp ({exc})") from exc
-    assignment = f"$until = [datetimeoffset]::Parse('{stamp}').UtcDateTime" if stamp else "$until = (Get-Date).ToUniversalTime()"
+    _, stamp = _requested_window(before, hours)
+    assignment = f"$until = [datetimeoffset]::Parse('{stamp}', [Globalization.CultureInfo]::InvariantCulture).UtcDateTime" if stamp else "$until = (Get-Date).ToUniversalTime()"
     return LOG_METADATA_SCRIPT + CHANGES_SCRIPT.replace("{before_assignment}", assignment).replace("{hours}", str(hours)).replace("{count}", str(count)).replace("{{", "{").replace("}}", "}")
 
 
 def take_changes(bridge: Bridge, params: dict[str, Any]) -> Reading:
-    script = changes_script(str(params["before"]), int(params["hours"]), int(params["count"]))
+    before = str(params["before"]).strip()
+    hours = int(params["hours"])
+    script = changes_script(before, hours, int(params["count"]))
+    expected_start, expected_end = _requested_window(before, hours)
     result = bridge.run(script, depth=DEPTH)
     collection: dict[str, Any] = {}
     coverage: dict[str, dict[str, Any]] = {}
     rows: list[dict[str, Any]] = []
+    placed_rows: list[dict[str, Any]] = []
+    bounds_match = False
+    query_key = None
+    starts_after_query = False
+    known_reach = False
 
     def build(payload: dict[str, Any]) -> list[Section]:
+        nonlocal bounds_match, query_key, starts_after_query, known_reach
         collection.update({"window_start": payload.get("window_start"), "window_end": payload.get("window_end"), "queried_at": payload.get("queried_at")})
+        echoed_start, echoed_end = _stamp_key(collection["window_start"]), _stamp_key(collection["window_end"])
+        query_key = _stamp_key(collection["queried_at"])
+        if expected_end is not None and expected_start is not None:
+            bounds_match = echoed_start == _stamp_key(expected_start) and echoed_end == _stamp_key(expected_end)
+            # Preserve the collector's timestamp spelling on a verified answer; when it differs,
+            # place rows against the independent request, never against the wrong echo.
+            source_start, source_end = ((collection["window_start"], collection["window_end"])
+                                        if bounds_match else (expected_start, expected_end))
+        else:
+            # With no explicit before, only the host knows the window. Require its echo to be a
+            # whole millisecond, have the requested duration, and precede the pre-query clock.
+            bounds_match = (
+                echoed_start is not None and echoed_end is not None and query_key is not None
+                and echoed_end[0].microsecond % 1000 == 0 and echoed_end[1] == 0
+                and echoed_start == (echoed_end[0] - timedelta(hours=hours), 0)
+                and echoed_end <= query_key
+            )
+            source_start, source_end = (collection["window_start"], collection["window_end"]) if bounds_match else (None, None)
+        start_key = _stamp_key(source_start)
+        starts_after_query = start_key is not None and query_key is not None and start_key >= query_key
+        known_reach = bounds_match and query_key is not None and not starts_after_query
         sources = payload.get("sources")
         grouped: dict[str, list[dict[str, Any]]] = {name: [] for name in SOURCES}
         if isinstance(sources, list):
@@ -161,14 +212,18 @@ def take_changes(bridge: Bridge, params: dict[str, Any]) -> Reading:
                     if isinstance(name, str) and name in grouped:
                         grouped[name].append(source)
         for name in SOURCES:
-            source, records = _source(name, grouped[name][0] if len(grouped[name]) == 1 else None, int(params["count"]), collection["window_start"], collection["window_end"])
+            source, records = _source(name, grouped[name][0] if len(grouped[name]) == 1 else None, int(params["count"]), source_start, source_end)
             collection[name] = source
-            in_window = [row for row in records if _in_window(row, collection["window_start"], collection["window_end"])]
-            coverage[name] = window_coverage(source, in_window, collection["window_start"], collection["window_end"], collection["queried_at"],
-                                             end_is_query_time=not bool(str(params["before"]).strip()))
+            in_window = [row for row in records if _in_window(row, source_start, source_end)]
+            placed_rows.extend(in_window)
+            coverage[name] = (
+                window_coverage(source, in_window, source_start, source_end, collection["queried_at"], end_is_query_time=not bool(before))
+                if known_reach else {"covered_from": None, "covered_from_inclusive": None, "covered_until": None, "complete": None}
+            )
             rows.extend(records)
         rows.sort(key=lambda r: (str(r.get("TimeCreated") or ""), str(r.get("Log") or ""), int(r.get("RecordId") or 0)))
-        decoded = [_change(row) for row in rows]
+        can_place = _stamp_key(source_start) is not None and _stamp_key(source_end) is not None
+        decoded = [{**_change(row), "outside_window": not _in_window(row, source_start, source_end) if can_place else None} for row in rows]
         kinds = Counter(str(item.get("kind") or "unknown") for item in decoded)
         return [
             Section("records", "raw", rows),
@@ -181,11 +236,15 @@ def take_changes(bridge: Bridge, params: dict[str, Any]) -> Reading:
     reading = from_object("changes", params, script, result, build)
     if not reading.observed:
         return reading
-    if str(params["before"]).strip():
-        query_time, requested_end = _stamp_key(collection["queried_at"]), _stamp_key(collection["window_end"])
-        if query_time is None:
-            reading.warnings.append("the machine's query time was not reported; the requested window's upper reach is unknown")
-        elif requested_end is not None and requested_end > query_time:
+    if not bounds_match:
+        reading.warnings.append("the collector's window does not match the requested millisecond interval; returned rows remain visible but window coverage is unknown")
+    if query_key is None:
+        reading.warnings.append("the machine's query time was not reported; the requested window's upper reach is unknown")
+    elif starts_after_query:
+        reading.warnings.append("the requested window begins at or after the machine's query time; no absence in that window was observed")
+    elif before:
+        requested_end = _stamp_key(expected_end)
+        if requested_end is not None and requested_end > query_key:
             reading.warnings.append("the requested end is after the machine's query time; records logged after the query time are outside the covered reach")
     failures = [name for name in SOURCES if collection[name]["outcome"] not in ("ok", "empty")]
     for name in SOURCES:
@@ -201,13 +260,22 @@ def take_changes(bridge: Bridge, params: dict[str, Any]) -> Reading:
                 f"{name} log coverage could not be established" if coverage[name]["covered_from"] is None
                 else f"{name} does not cover the whole requested window"
             )
-    if rows:
+    if placed_rows:
         reading.outcome = "ok"
-        reading.count = len(rows)
-    elif failures:
-        reading.outcome = "denied" if all(collection[name]["outcome"] == "denied" for name in failures) else "failed"
+        reading.count = len(placed_rows)
+    elif failures or not known_reach or rows:
+        reading.outcome = "denied" if known_reach and failures and all(collection[name]["outcome"] == "denied" for name in failures) else "failed"
         reading.count = None
-        reading.error = {"kind": reading.outcome, "detail": "No change history could be established because " + " and ".join(failures) + " did not answer."}
+        reasons = [f"{', '.join(failures)} did not answer"] if failures else []
+        if not bounds_match:
+            reasons.append("the collector window did not match the requested interval")
+        if query_key is None:
+            reasons.append("the machine's query time was unavailable")
+        if starts_after_query:
+            reasons.append("the requested window begins at or after the machine's query time")
+        if rows and not placed_rows:
+            reasons.append("no returned record fell inside the requested window")
+        reading.error = {"kind": reading.outcome, "detail": "No change history could be established because " + "; ".join(reasons) + "."}
     else:
         reading.outcome = "empty"
         reading.count = 0
@@ -230,11 +298,10 @@ def _source(name: str, value: Any, limit: int, start: Any, end: Any) -> tuple[di
                 and type(value.get("limit")) is int and value["limit"] == limit and type(value.get("truncated")) is bool
                 and len(rows) <= limit and (outcome == "empty") == (len(rows) == 0)
                 and (not value["truncated"] or len(rows) == limit)
-                and _parse(start) is not None and _parse(end) is not None
             )
             if valid:
                 metadata = _metadata(value)
-                outside = sum(not _in_window(row, start, end) for row in rows)
+                outside = sum(not _in_window(row, start, end) for row in rows) if _stamp_key(start) is not None and _stamp_key(end) is not None else None
                 return {
                     **metadata, "outcome": outcome, "returned": len(rows), "limit": limit,
                     "truncated": value["truncated"], "error": None, "row_issues": {"outside_window": outside},
@@ -333,7 +400,7 @@ register(
         classes=("raw", "derived"),
         take=take_changes,
         params=(
-            Param("before", "str", "", "ISO timestamp; events strictly before it, or now when empty."),
+            Param("before", "str", "", "ISO timestamp; events before its end rounded down to the millisecond, or now when empty."),
             Param("hours", "int", 168, "Hours before the moment, 1 to 2160.", minimum=1, maximum=MAX_HOURS),
             Param("count", "int", 100, "Most recent records per source, 1 to 500; collection reports truncation.", minimum=1, maximum=MAX_COUNT),
         ),

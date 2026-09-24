@@ -126,7 +126,7 @@ def test_change_handoff_leads_with_meaning_and_keeps_raw_selection_available():
         "method": {"kind": "powershell"},
         "sections": [
             {"name": "records", "class": "raw", "data": [{"Log": "System", "RecordId": 7, "Id": 19, "Data": {"updateTitle": "Synthetic update"}}]},
-            {"name": "changes", "class": "derived", "basis": "Synthetic interpretation", "data": [{"at": "2026-09-20T00:00:00Z", "kind": "update_installed", "subject": "Synthetic update", "ref": {"log": "System", "record_id": 7}, "fields": {"updateTitle": "Synthetic update"}}]},
+            {"name": "changes", "class": "derived", "basis": "Synthetic interpretation", "data": [{"at": "2026-09-20T00:00:00Z", "kind": "update_installed", "subject": "Synthetic update", "outside_window": True, "ref": {"log": "System", "record_id": 7}, "fields": {"updateTitle": "Synthetic update"}}]},
             {"name": "summary", "class": "derived", "data": {"returned": 1}},
             {"name": "collection", "class": "raw", "data": {"windows_update": {"outcome": "ok"}}},
             {"name": "coverage", "class": "derived", "data": {"windows_update": {"complete": False}}},
@@ -134,7 +134,7 @@ def test_change_handoff_leads_with_meaning_and_keeps_raw_selection_available():
     }
     summary = "\n".join(_item_lines(1, {"kind": "reading", "title": "Changes", "reading": envelope, "verbosity": "summary"}))
     selected = "\n".join(_item_lines(1, {"kind": "reading", "title": "Changes", "reading": envelope, "verbosity": "full", "ids": ["System:7"]}))
-    assert "update_installed" in summary and '"complete": false' in summary
+    assert "update_installed" in summary and '"complete": false' in summary and '"outside_window": true' in summary
     assert '"fields"' not in summary and '"Id": 19' not in summary
     assert "update_installed" in selected and '"Id": 19' in selected
     assert selected.index('"kind": "update_installed"') < selected.index('"Id": 19')
@@ -146,6 +146,21 @@ def test_change_handoff_leads_with_meaning_and_keeps_raw_selection_available():
     failed = {**envelope, "outcome": "failed", "error": {"detail": "one source failed"}}
     unsuccessful = "\n".join(_item_lines(1, {"kind": "reading", "title": "Changes", "reading": failed, "verbosity": "summary"}))
     assert "one source failed" in unsuccessful and '"complete": false' in unsuccessful
+
+    unknown = {**envelope, "sections": [
+        envelope["sections"][0],
+        {**envelope["sections"][1], "data": [{**envelope["sections"][1]["data"][0], "outside_window": None}]},
+        *envelope["sections"][2:],
+    ]}
+    unknown_summary = "\n".join(_item_lines(1, {"kind": "reading", "title": "Changes", "reading": unknown, "verbosity": "summary"}))
+    assert '"outside_window": null' in unknown_summary
+    inside = {**unknown, "sections": [
+        unknown["sections"][0],
+        {**unknown["sections"][1], "data": [{**unknown["sections"][1]["data"][0], "outside_window": False}]},
+        *unknown["sections"][2:],
+    ]}
+    inside_summary = "\n".join(_item_lines(1, {"kind": "reading", "title": "Changes", "reading": inside, "verbosity": "summary"}))
+    assert '"outside_window"' not in inside_summary
 
     failed_storm = {**failed, "reading": "storms"}
     storm_handoff = "\n".join(_item_lines(1, {"kind": "reading", "title": "Hardware errors", "reading": failed_storm, "verbosity": "summary"}))

@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.9.1] - 2026-09-24
+
+### Fixed
+- The `changes` reading now derives a historical millisecond window from the request and checks both bounds returned by its collector. A mismatched or unreadable echo leaves coverage unknown; safe returned rows remain visible and are placed against the requested interval. An unverified, unclocked or entirely future empty window reports a failure rather than a complete absence. The reading count now counts only returned rows inside that requested interval; outside rows remain in raw and derived sections with an issue count and an `outside_window` marker on each interpreted entry.
+- Generated `changes`, System storm and Kernel-WHEA timeline scripts now parse explicit UTC bounds with invariant culture. A fixed-timestamp probe under `en-US`, `th-TH` and `ar-SA` parsed correctly before this change; the parser update is precautionary hardening, not evidence of a locale failure on the development machine.
+
+### Compatibility and limits
+- `changes` continues to round its end down to the millisecond used by its Event Log XPath query. A source that stops partway through still reports failure and does not expose partial rows from that source; independent source rows remain available. Full seven-digit filtering is deferred until event-time comparison on Windows is measured.
+
 ## [1.9.0] - 2026-09-24
 
 ### Changed

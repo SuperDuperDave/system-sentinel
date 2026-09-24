@@ -48,7 +48,7 @@ def reports(rows: list[dict[str, Any]], *, outcome: str | None = None, oldest: d
         def run(self, script: str, *, depth: int = 6) -> BridgeResult:
             width = int(re.search(r"\$bucketTicks = \[long\](\d+)", script).group(1))
             count = int(re.search(r"\(\[long\]\((\d+) - 1\)", script).group(1))
-            assigned = re.search(r"\$requestedUntil = \[datetimeoffset\]::Parse\('([^']+)'\)", script)
+            assigned = re.search(r"\$requestedUntil = \[datetimeoffset\]::Parse\('([^']+)', \[Globalization\.CultureInfo\]::InvariantCulture\)", script)
             requested_end = datetime.fromisoformat(assigned.group(1).replace("Z", "+00:00")) if assigned else NOW
             end = min(requested_end, NOW)
             last = int((end - timedelta(microseconds=1)).timestamp() // width) * width
@@ -210,7 +210,7 @@ def test_anchored_report_window_ends_before_a_bucket_boundary():
     assert data["buckets"]["from"] == "2026-09-23T05:00:00.000Z"
     assert data["buckets"]["to"] == "2026-09-23T06:00:00.000Z"
     assert data["coverage"]["kernel_whea"]["complete"] is True
-    assert "[datetimeoffset]::Parse('2026-09-23T06:00:00.000Z')" in whea_reports.reports_script(whea.window_for(1, 60, now=0), before)
+    assert "[datetimeoffset]::Parse('2026-09-23T06:00:00.000Z', [Globalization.CultureInfo]::InvariantCulture)" in whea_reports.reports_script(whea.window_for(1, 60, now=0), before)
 
 
 def test_future_report_anchor_preserves_the_requested_gap():

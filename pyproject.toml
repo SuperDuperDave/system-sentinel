@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "system-sentinel"
-version = "1.9.0"
+version = "1.9.1"
 description = "A stethoscope for a Windows computer: the machine's own record, in one place, for a person and for a local agent."
 readme = "README.md"
 license = { file = "LICENSE" }

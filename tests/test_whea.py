@@ -64,7 +64,7 @@ def storms(records: list[dict[str, Any]], outcome: str = "ok", *, oldest: str | 
             count = int(re.search(r"\(\[long\]\((\d+) - 1\)", script).group(1))
             machine_now = host_now if host_now is not None else time.time()
             rounded_end = datetime.fromtimestamp(int(machine_now * 1000) / 1000, UTC)
-            requested = re.search(r"\$requestedUntil = \[datetimeoffset\]::Parse\('([^']+)'\)", script)
+            requested = re.search(r"\$requestedUntil = \[datetimeoffset\]::Parse\('([^']+)', \[Globalization\.CultureInfo\]::InvariantCulture\)", script)
             end = min(rounded_end, datetime.fromisoformat(requested.group(1).replace("Z", "+00:00"))) if requested else rounded_end
             last = int((end - timedelta(microseconds=1)).timestamp() // bucket_seconds) * bucket_seconds
             start = whea._stamp(last - (count - 1) * bucket_seconds + start_shift)
@@ -711,6 +711,8 @@ def test_a_window_that_cannot_be_counted_is_refused_before_the_machine_is_asked(
 def test_the_query_bounds_the_window_by_the_logs_own_index():
     window = whea.window_for(24, 60, now=1_758_000_123.75)
     script = whea.storms_script(window)
+    anchored = whea.storms_script(window, before="2026-09-22T00:00:00Z")
+    assert "[datetimeoffset]::Parse('2026-09-22T00:00:00.000Z', [Globalization.CultureInfo]::InvariantCulture)" in anchored
     assert "Microsoft-Windows-WHEA-Logger" in script and "$currentBucketTicks" in script
     assert f"$bucketTicks = [long]{window.bucket_seconds}" in script and f"([long]({window.count} - 1)" in script
     assert f"-MaxEvents {whea.RECORD_CAP + 1}" in script and "NoMatchingEventsFound" in script

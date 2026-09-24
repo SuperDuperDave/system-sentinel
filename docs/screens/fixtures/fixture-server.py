@@ -329,7 +329,7 @@ def answer_whea_reports(script: str) -> BridgeResult:
     now = time.time()
     bucket_seconds = int(re.search(r"\$bucketTicks = \[long\](\d+)", script).group(1))
     count = int(re.search(r"\(\[long\]\((\d+) - 1\)", script).group(1))
-    requested = re.search(r"\$requestedUntil = \[datetimeoffset\]::Parse\('([^']+)'\)", script)
+    requested = re.search(r"\$requestedUntil = \[datetimeoffset\]::Parse\('([^']+)', \[Globalization\.CultureInfo\]::InvariantCulture\)", script)
     queried = int(now * 1000) / 1000
     until_time = min(_parse_stamp(requested.group(1)), queried) if requested else queried
     last = int((until_time - 0.000001) // bucket_seconds) * bucket_seconds
@@ -386,7 +386,7 @@ class FixtureBridge:
             bucket_seconds = int(re.search(r"\$bucketTicks = \[long\](\d+)", script).group(1))
             count = int(re.search(r"\(\[long\]\((\d+) - 1\)", script).group(1))
             queried = int(now * 1000) / 1000
-            requested = re.search(r"\$requestedUntil = \[datetimeoffset\]::Parse\('([^']+)'\)", script)
+            requested = re.search(r"\$requestedUntil = \[datetimeoffset\]::Parse\('([^']+)', \[Globalization\.CultureInfo\]::InvariantCulture\)", script)
             until_time = min(_parse_stamp(requested.group(1)), queried) if requested else queried
             last = int((until_time - 0.000001) // bucket_seconds) * bucket_seconds
             start = _powershell_stamp(last - (count - 1) * bucket_seconds)
