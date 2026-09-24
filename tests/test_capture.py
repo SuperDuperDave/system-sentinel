@@ -17,7 +17,7 @@ from sentinel.bridge import BridgeResult
 from sentinel.capture import MAX_LIST_MANIFEST_BYTES, STALE_PENDING_SECONDS, listing
 from sentinel.paths import captures_dir
 from sentinel.reading import REGISTRY, Reading
-from sentinel.stack import Prompts, Stack
+from sentinel.stack import Item, Prompts, Stack
 from tests.conftest import FakeBridge, LogBridge, identity_result, real_bridge_or_skip
 from tests.test_stack import EVENTS
 
@@ -71,6 +71,31 @@ def test_a_capture_holds_automatic_readings_the_stack_and_the_handoff(client: Te
     assert json.loads(files["readings/events.json"])["sections"][0]["data"][0]["Id"] == 41
     assert "it froze while idle" in files["composed.md"].decode()
     assert json.loads(files["stack.json"])["items"][0]["note"] == "it froze while idle"
+
+
+def test_capture_handoff_uses_the_same_stack_snapshot_as_its_saved_member(client: TestClient, monkeypatch: pytest.MonkeyPatch):
+    stack = client.app.state.sentinel.stack
+    stack.add(Item(id="earlier", added_at="2026-09-24T00:00:00Z", kind="note", title="Earlier", note="Earlier note"))
+    original_state = stack.state
+    changed = False
+
+    def edit_after_first_snapshot():
+        nonlocal changed
+        snapshot = original_state()
+        if not changed:
+            changed = True
+            stack.add(Item(id="later", added_at="2026-09-24T00:00:01Z", kind="note", title="Later", note="Later note"))
+        return snapshot
+
+    monkeypatch.setattr(stack, "state", edit_after_first_snapshot)
+    response = client.post("/api/captures", headers=AUTH)
+    assert response.status_code == 200
+    files = members(response.content)
+    snapshot = json.loads(files["stack.json"])
+    assert [item["note"] for item in snapshot["items"]] == ["Earlier note"]
+    assert "Earlier note" in files["composed.md"].decode()
+    assert "Later note" not in files["composed.md"].decode()
+    assert {item["note"] for item in original_state()["items"]} == {"Earlier note", "Later note"}
 
 
 def test_a_capture_is_redacted_unless_asked_by_name(client: TestClient):

@@ -164,13 +164,13 @@ async def _stack_add(state: State, arguments: dict[str, Any], redactor: Redactor
 
 
 async def _stack_remove(state: State, arguments: dict[str, Any], redactor: Redactor | None) -> Any:
-    state.stack.remove(str(arguments.get("id") or ""))
-    return _redacted(index_state(state.stack.state()), redactor)
+    remaining = state.stack.remove(str(arguments.get("id") or ""))
+    return _redacted(index_state(remaining), redactor)
 
 
 async def _stack_clear(state: State, _arguments: dict[str, Any], redactor: Redactor | None) -> Any:
-    state.stack.clear()
-    return _redacted(index_state(state.stack.state()), redactor)
+    cleared = state.stack.clear()
+    return _redacted(index_state(cleared), redactor)
 
 
 async def _compose(state: State, _arguments: dict[str, Any], redactor: Redactor | None) -> Any:

@@ -87,17 +87,18 @@ async def create(bridge: Bridge, stack: Stack, prompts: Prompts, redactor: Redac
                 members.append(entry)
 
             try:
-                state: dict[str, Any] = stack.state()
+                snapshot: dict[str, Any] = stack.state()
+                archive_state = snapshot
                 if redactor is not None:
-                    state, taken_out = redactor.redact(state)
+                    archive_state, taken_out = redactor.redact(snapshot)
                     removed.update(taken_out)
-                members.append({"path": STACK_MEMBER, "items": len(state.get("items") or []), "bytes": _write(archive, STACK_MEMBER, json.dumps(json_safe_integers(state), ensure_ascii=False, indent=1))})
+                members.append({"path": STACK_MEMBER, "items": len(archive_state.get("items") or []), "bytes": _write(archive, STACK_MEMBER, json.dumps(json_safe_integers(archive_state), ensure_ascii=False, indent=1))})
             except StoreUnavailable:
                 unavailable.append({"member": STACK_MEMBER, "reason": "saved Stack data unavailable"})
 
             if not unavailable:
                 try:
-                    composed = compose(stack, prompts, redactor)
+                    composed = compose(stack, prompts, redactor, stack_state=snapshot)
                     removed.update(composed["redacted"])
                     members.append({"path": COMPOSED_MEMBER, "items": composed["items"], "bytes": _write(archive, COMPOSED_MEMBER, composed["text"])})
                 except StoreUnavailable:

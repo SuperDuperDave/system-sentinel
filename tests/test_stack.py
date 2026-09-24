@@ -773,6 +773,41 @@ def test_a_stack_reader_holds_the_same_lock_as_a_writer(tmp_path):
     assert {item["id"] for item in writer.state()["items"]} == {"first", "second"}
 
 
+def test_remove_answer_is_the_state_its_transaction_wrote(client: TestClient, monkeypatch: pytest.MonkeyPatch):
+    stack = client.app.state.sentinel.stack
+    for item_id in ("first", "second"):
+        stack.add(Item(id=item_id, added_at="2026-09-24T00:00:00Z", kind="note", title=item_id, note=item_id))
+    original_remove = stack.remove
+
+    def remove_then_another_client_adds(item_id: str):
+        removed_state = original_remove(item_id)
+        stack.add(Item(id="later", added_at="2026-09-24T00:00:01Z", kind="note", title="later", note="later"))
+        return removed_state
+
+    monkeypatch.setattr(stack, "remove", remove_then_another_client_adds)
+    response = client.delete("/api/stack/items/first", headers=AUTH)
+    assert response.status_code == 200
+    assert [item["id"] for item in response.json()["items"]] == ["second"]
+    assert [item["id"] for item in stack.state()["items"]] == ["second", "later"]
+
+
+def test_mcp_clear_answer_is_the_state_its_transaction_wrote(client: TestClient, monkeypatch: pytest.MonkeyPatch):
+    stack = client.app.state.sentinel.stack
+    stack.add(Item(id="first", added_at="2026-09-24T00:00:00Z", kind="note", title="first", note="first"))
+    original_clear = stack.clear
+
+    def clear_then_another_client_adds():
+        cleared_state = original_clear()
+        stack.add(Item(id="later", added_at="2026-09-24T00:00:01Z", kind="note", title="later", note="later"))
+        return cleared_state
+
+    monkeypatch.setattr(stack, "clear", clear_then_another_client_adds)
+    answer = call(client, "stack_clear")
+    assert answer.get("isError") is not True
+    assert json.loads(answer["content"][0]["text"])["items"] == []
+    assert [item["id"] for item in stack.state()["items"]] == ["later"]
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Windows text-mode descriptor behavior")
 def test_windows_stack_json_has_no_doubled_carriage_returns(tmp_path):
     from sentinel.stack import Item

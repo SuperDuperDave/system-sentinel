@@ -268,7 +268,7 @@ class Stack:
                     return stored
             raise KeyError(item_id)
 
-    def remove(self, item_id: str) -> None:
+    def remove(self, item_id: str) -> dict[str, Any]:
         with self.store.transaction():
             state = self._state_locked()
             kept = [i for i in state["items"] if i["id"] != item_id]
@@ -276,12 +276,14 @@ class Stack:
                 raise KeyError(item_id)
             state["items"] = kept
             self.store.write(state)
+            return state
 
-    def clear(self) -> None:
+    def clear(self) -> dict[str, Any]:
         with self.store.transaction():
             state = self._state_locked()
             state["items"] = []
             self.store.write(state)
+            return state
 
     def choose(self, *, prompt_id: str | None = None, system_prompt: bool | None = None, set_prompt: bool = False) -> dict[str, Any]:
         """Change which prompt leads the handoff, or whether one does at all."""
@@ -464,13 +466,19 @@ def default_title(kind: str, envelope: dict[str, Any] | None, ids: list[int | st
     return f"{name} ({params})" if params else str(name)
 
 
-def compose(stack: Stack, prompts: Prompts, redactor: Redactor | None = None) -> dict[str, Any]:
+def compose(
+    stack: Stack,
+    prompts: Prompts,
+    redactor: Redactor | None = None,
+    *,
+    stack_state: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """The handoff: the prompt, then the evidence by rank, as Markdown. Redacted unless asked by name.
 
     The evidence passes through the redaction; the prompt does not. The prompt is the person's own
     text, and a handoff that rewrote what they wrote would be lying about one of the two.
     """
-    state = stack.state()
+    state = stack.state() if stack_state is None else stack_state
     prompt = prompts.get(state.get("prompt_id")) if state.get("system_prompt") else None
     items = state["items"]
     removed: list[str] = []

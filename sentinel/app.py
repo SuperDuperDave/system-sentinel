@@ -414,9 +414,9 @@ def create_app(state: State | None = None, mcp: bool = True) -> FastAPI:
 
     @app.delete("/api/stack", tags=["stack"])
     def stack_clear() -> Response:
-        state.stack.clear()
+        cleared = state.stack.clear()
         handoff_changed_from_route()
-        return guarded(index_state(state.stack.state()))
+        return guarded(index_state(cleared))
 
     @app.post("/api/stack/items", tags=["stack"], status_code=201)
     async def stack_add(item: NewStackItem, unredacted: bool = False) -> Response:
@@ -454,11 +454,11 @@ def create_app(state: State | None = None, mcp: bool = True) -> FastAPI:
     @app.delete("/api/stack/items/{item_id}", tags=["stack"])
     def stack_remove(item_id: str) -> Response:
         try:
-            state.stack.remove(item_id)
+            remaining = state.stack.remove(item_id)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=f"no item {item_id!r}") from exc
         handoff_changed_from_route()
-        return guarded(index_state(state.stack.state()))
+        return guarded(index_state(remaining))
 
     @app.get("/api/stack/composed", tags=["stack"])
     def stack_composed(unredacted: bool = False) -> dict[str, Any]:

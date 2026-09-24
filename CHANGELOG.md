@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.9.6] - 2026-09-24
+
+### Fixed
+- A capture now renders `composed.md` from the same saved Stack snapshot written as `stack.json`. An edit arriving between those steps can no longer make one ZIP contain two different versions of the investigation.
+- Stack remove and clear now return the exact index state their own transaction wrote on both HTTP and MCP. A second client's immediate edit cannot appear in that mutation's answer, and the routes avoid an unnecessary full-file reread.
+
+### Measurement and limits
+- [A reproducible synthetic Stack probe](docs/measurements/stack.md) measures direct saved-file reads and edits at several large evidence sizes without opening installed data. No storage migration is made: normal-use size and concurrent lock cost remain unmeasured, and full-file replacement still scales with saved evidence.
+
 ## [1.9.5] - 2026-09-24
 
 ### Changed
