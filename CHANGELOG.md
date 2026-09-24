@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.9.20] - 2026-09-24
+
+### Improved
+- New selection-dependent `event_record` reads one System or Application event by its log-local RecordId. An optional exact `time_created` checks that a log clear has not reused the id: `reference.status` distinguishes the same returned row, a different row now at that id, and no returned row. The reading keeps the shared raw projection and post-query log metadata; duplicate, interrupted, invalid and denied queries do not become absence. A reused id with a different time returns `empty` without exposing the unrelated row as the referenced event.
+- Signals now preserves each of its seven inputs' original `asked_at` and `count`. Unexpected-shutdown and repeated-stop leads carry bounded references to the raw Crash rows they actually used. Each ref names `event_record` and supplies tool-ready `params`, plus the citation's role. `refs_missing` counts non-null ids without one usable raw-row reference, including malformed, ambiguous or unsupported ids; `refs_omitted` counts valid references beyond the display cap. An agent or person can inspect one of those historical records through `event_record`, then compare its current result with the cited time. No extra bridge question is taken while Signals itself runs.
+
+### Limits
+- A matching log, RecordId and TimeCreated checks the returned row's identity at re-read time; it does not preserve the old row or its original log-retention reach. An empty exact result and post-query oldest-record metadata cannot prove why a row was not returned. A source query that stops or is ambiguous remains failed. The new references cover crash leads; pressure shares, Power ledger co-occurrences and changing machine state have no exact-row references yet, and a fresh read cannot reconstruct their original capped samples.
+- On the same synthetic fixtures, Signals grew from 6,617 to 10,277 MCP text bytes while still making seven source questions. The effect on human investigation time and agent cost has not been measured. `event_record` is an on-demand follow-up, omitted from automatic captures and the default measurement tour.
+
 ## [1.9.19] - 2026-09-24
 
 ### Improved

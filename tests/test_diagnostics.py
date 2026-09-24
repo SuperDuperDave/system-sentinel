@@ -38,7 +38,7 @@ from sentinel.readings.diagnostics import (
     transitions_query,
 )
 from sentinel.readings.reliability import RELIABILITY_SCRIPT_TEMPLATE, reliability_days
-from tests.conftest import FakeBridge, real_bridge_or_skip
+from tests.conftest import FakeBridge, log_collector_result, real_bridge_or_skip
 
 ROOT_PORT = "PCI\\VEN_1022&DEV_1483\\3&A&0&19"
 UPSTREAM = "PCI\\VEN_1022&DEV_43E9\\4&C&0&020A"
@@ -814,11 +814,91 @@ def test_the_unexpected_shutdown_signal_counts_crash_stops_once():
     assert with_crash["evidence"]["limit_reached"] is False
     assert with_crash["evidence"]["sources_complete"] is True
     assert with_crash["evidence"]["stops"] == [
-        {"started_at": s["started_at"], "announced_at": None, "reported_at": None, "anchor_at": s["started_at"], "code": (s["bugcheck"] or {}).get("code"), "name": (s["bugcheck"] or {}).get("name")} for s in STOPS
+        {"started_at": s["started_at"], "announced_at": None, "reported_at": None, "anchor_at": s["started_at"], "code": (s["bugcheck"] or {}).get("code"), "name": (s["bugcheck"] or {}).get("name"), "refs": [], "refs_total": 0, "refs_missing": 0, "refs_omitted": 0} for s in STOPS
     ]
     without, _ = take_signals_sync(_inputs(crash=None))
     assert not any(s["id"] == "transition:unexpected-shutdown" for s in without)
     assert any(s["id"] == "gap:inputs" for s in without)
+
+
+def test_crash_leads_cite_only_raw_log_rows_and_name_missing_or_omitted_refs():
+    at = "2026-09-19T03:12:04.1234567Z"
+    first = {**STOPS[0], "records": {"start": 11, "power_41": 12, "eventlog_6008": 13, "wer_1001": None, "report": [90]}}
+    second = {**STOPS[1], "records": {"start": 21, "power_41": 22, "eventlog_6008": None, "wer_1001": None, "report": []}}
+    raw = [
+        {"Log": "System", "RecordId": 11, "TimeCreated": at},
+        {"Log": "System", "RecordId": 12, "TimeCreated": at},
+        {"Log": "Application", "RecordId": 90, "TimeCreated": at},
+        {"Log": "System", "RecordId": 21, "TimeCreated": at},
+        {"Log": "System", "RecordId": 22, "TimeCreated": at},
+    ]
+    crash = _reading("crash", [
+        ("records", "raw", raw), ("stops", "derived", [first, second]),
+        ("collection", "raw", {"system": {"outcome": "ok", "bound_reached": False}, "reports": {"outcome": "ok", "bound_reached": False}}),
+    ])
+    leads, _ = take_signals_sync(_inputs(crash=crash))
+    shutdown = next(s for s in leads if s["id"] == "transition:unexpected-shutdown")
+    facts = shutdown["evidence"]["stops"][0]
+    assert (facts["refs_total"], facts["refs_missing"], facts["refs_omitted"]) == (4, 1, 0)
+    assert [(r["params"]["log"], r["params"]["record_id"], r["params"]["time_created"], r["role"]) for r in facts["refs"]] == [
+        ("System", 11, at, "start"), ("System", 12, at, "power_41"), ("Application", 90, at, "report"),
+    ]
+    ref = facts["refs"][0]
+    assert ref["reading"] == "event_record"
+    same = asyncio.run(take(ref["reading"], FakeBridge(log_collector_result([raw[0]], log=ref["params"]["log"], window_start=None, limit=1)), ref["params"]))
+    assert same.outcome == "ok" and same.section("reference").data["status"] == "same"
+    repeated = next(s for s in leads if s["id"] == "transition:repeated-stop:0x133")
+    assert (repeated["evidence"]["refs_total"], repeated["evidence"]["refs_missing"]) == (6, 1)
+    assert all(any(r["Log"] == ref["params"]["log"] and r["RecordId"] == ref["params"]["record_id"] and r["TimeCreated"] == ref["params"]["time_created"] for r in raw)
+               for ref in repeated["evidence"]["refs"])
+    pressure = next(s for s in leads if s["id"].startswith("pressure:"))
+    assert "refs" not in pressure["evidence"]
+
+    too_large = (1 << 53)
+    many = {**STOPS[0], "records": {"report": [*range(100, 112), too_large]}}
+    many_rows = [{"Log": "Application", "RecordId": record_id, "TimeCreated": at} for record_id in [*range(100, 112), too_large]]
+    capped = _reading("crash", [
+        ("records", "raw", many_rows), ("stops", "derived", [many]),
+        ("collection", "raw", {"system": {"outcome": "ok", "bound_reached": False}, "reports": {"outcome": "ok", "bound_reached": False}}),
+    ])
+    capped_lead = next(s for s in take_signals_sync(_inputs(crash=capped))[0] if s["id"] == "transition:unexpected-shutdown")
+    capped_fact = capped_lead["evidence"]["stops"][0]
+    assert (capped_fact["refs_total"], capped_fact["refs_missing"], capped_fact["refs_omitted"], len(capped_fact["refs"])) == (13, 1, 4, 8)
+
+    malformed = {**STOPS[0], "records": {"start": "bad", "power_41": 12, "report": [90]}}
+    unusable_rows = [raw[1], raw[1], {**raw[2], "TimeCreated": "not a time"}]
+    uncertain = _reading("crash", [
+        ("records", "raw", unusable_rows), ("stops", "derived", [malformed]),
+        ("collection", "raw", {"system": {"outcome": "ok", "bound_reached": False}, "reports": {"outcome": "ok", "bound_reached": False}}),
+    ])
+    uncertain_lead = next(s for s in take_signals_sync(_inputs(crash=uncertain))[0] if s["id"] == "transition:unexpected-shutdown")
+    uncertain_fact = uncertain_lead["evidence"]["stops"][0]
+    assert (uncertain_fact["refs_total"], uncertain_fact["refs_missing"], uncertain_fact["refs"]) == (3, 3, [])
+
+    one_readable_duplicate = _reading("crash", [
+        ("records", "raw", [raw[1], {**raw[1], "TimeCreated": "not a time"}]),
+        ("stops", "derived", [{**STOPS[0], "records": {"power_41": 12}}]),
+        ("collection", "raw", {"system": {"outcome": "ok", "bound_reached": False}, "reports": {"outcome": "ok", "bound_reached": False}}),
+    ])
+    duplicate_lead = next(s for s in take_signals_sync(_inputs(crash=one_readable_duplicate))[0] if s["id"] == "transition:unexpected-shutdown")
+    duplicate_fact = duplicate_lead["evidence"]["stops"][0]
+    assert (duplicate_fact["refs_total"], duplicate_fact["refs_missing"], duplicate_fact["refs"]) == (1, 1, [])
+
+
+def test_signals_method_reports_each_inputs_original_time_and_count(monkeypatch):
+    inputs = _inputs()
+    for number, reading in enumerate(inputs.values()):
+        reading.asked_at = f"2026-09-24T00:00:{number:02d}Z"
+        reading.count = number
+
+    async def canned(name, _bridge, _params):
+        return inputs[name]
+
+    monkeypatch.setattr(diagnostics_module, "take", canned)
+    signal = asyncio.run(take_signals(FakeBridge(), {}))
+    for source in signal.method["readings"]:
+        original = inputs[source["name"]]
+        assert source["asked_at"] == original.asked_at and source["count"] == original.count
 
 
 def test_two_shutdown_records_and_one_crash_stop_are_one_lead():

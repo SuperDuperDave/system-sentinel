@@ -122,9 +122,11 @@ def test_agent_guidance_routes_by_question_and_names_signals_limits():
     answer_terms = {"busy", "method", "moment", "outcome", "sections", "unavailable"}
     assert quoted <= set(REGISTRY) | set(ROUTE_TOOLS) | answer_terms
     assert "gap:inputs" in INSTRUCTIONS and "method.readings" in INSTRUCTIONS
+    assert "event_record" in quoted and all(term in INSTRUCTIONS for term in ("record_id", "time_created", "refs_missing", "refs_omitted", "asked_at"))
 
     description = REGISTRY["signals"].description
     assert "gap:inputs" in description and "method.readings" in description
+    assert "event_record" in description and "time_created" in description
     assert ("does not read the Kernel-WHEA/Errors log" in description) == (
         not any(name == "storms" or name.startswith("whea") for name, _ in SIGNAL_INPUTS)
     )

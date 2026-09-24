@@ -16,7 +16,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from ..bridge import Bridge, BridgeResult
+from ..bridge import Bridge, BridgeResult, Outcome
 from ..reading import Param, Reading, Section, Spec, from_bridge, register
 from .event_coverage import (
     LOG_METADATA_SCRIPT,
@@ -31,6 +31,7 @@ from .event_coverage import (
 
 LOGS = ("System", "Application")
 MAX_LOG_RECORDS = 2000  # per-request cap for the log and its progressively widened Record frame
+MAX_RECORD_ID = (1 << 53) - 1  # preserve exact identity across JSON number clients
 
 # One projection for every log reading (events, record, whea, the stream), so every client sees the
 # same record shape. It is built as a pscustomobject rather than Select-Object's calculated properties:
@@ -154,6 +155,13 @@ def record_script(log: str, before: str, count: int) -> str:
     return log_records_script(log, query_list(log, body), count, window_end=end, until_ticks=until_ticks)
 
 
+def event_record_script(log: str, record_id: int) -> str:
+    """Read one log-local id; the second-row probe makes a duplicate an error."""
+    if log not in LOGS or not 1 <= record_id <= MAX_RECORD_ID:
+        raise ValueError("an exact event needs a supported log and RecordId")
+    return log_records_script(log, query_list(log, f"*[System[EventRecordID={record_id}]]"), 1)
+
+
 def log_records_script(
     log: str, query: str, count: int, *, prelude: str = "", window_start: str = "$null", window_end: str = "$null", projection: str = RECORD_SELECT,
     from_ticks: str | None = None, until_ticks: str | None = None, oldest: bool = False,
@@ -258,6 +266,78 @@ def take_record(bridge: Bridge, params: dict[str, Any]) -> Reading:
     records = reading.section("records")
     if records and isinstance(records.data, list):
         records.data.reverse()  # oldest first: the reader follows time forward into the moment
+    return reading
+
+
+EXACT_EVENT_BASIS = (
+    "The requested log and RecordId select a current retained row. Its TimeCreated must also "
+    "match the supplied reference: a log clear can reuse an id. The log's oldest retained time "
+    "was read after the exact query and does not prove why an earlier row was not returned."
+)
+
+
+def take_event_record(bridge: Bridge, params: dict[str, Any]) -> Reading:
+    """One System or Application row by id, with an optional original-time check."""
+    log, record_id = params["log"], params["record_id"]
+    expected = str(params["time_created"] or "").strip()
+    if expected:
+        expected = exact_stamp(expected, "time_created", strict=True)[0]
+    normalized = {**params, "time_created": expected}
+    script = event_record_script(log, record_id)
+    reading = from_log_collector("event_record", normalized, script, bridge.run(script, depth=8), log, 1)
+    if not reading.observed:
+        return reading
+
+    body, collection = reading.section("records"), reading.section("collection")
+    assert body is not None and collection is not None
+    rows, source = body.data, collection.data
+    error: str | None = None
+    kind: Outcome = "failed"
+    if source["truncated"]:
+        error = "more than one matching event was returned for this log-local RecordId"
+    elif source["stopped"] is not None:
+        kind = source["stopped"]["kind"]
+        error = f"the exact query stopped before uniqueness could be established: {source['stopped']['detail']}"
+    elif rows and rows[0]["RecordId"] != record_id:
+        error = "the exact query returned a different RecordId"
+    if error:
+        reading.outcome, reading.count, reading.error = kind, None, {"kind": kind, "detail": error}
+        reading.sections = [collection]
+        return reading
+
+    if not expected:
+        if rows:
+            reading.warnings.append("RecordIds can be reused after a log is cleared; pass time_created from the reference to check identity.")
+        else:
+            reading.warnings.append("No retained row in this log matched the requested RecordId; this does not mean it never existed.")
+        return reading
+
+    oldest = source.get("log_oldest") if source.get("oldest_state") == "ok" else None
+    oldest_key = stamp_key(oldest)
+    expected_key = stamp_key(expected)
+    retention = "unknown" if oldest_key is None or expected_key is None else ("before_retained" if expected_key < oldest_key else "within_retained")
+    status = "not_returned"
+    found_at = None
+    if rows:
+        found_at = rows[0].get("TimeCreated")
+        found_key = stamp_key(found_at)
+        if found_key is None:
+            reading.outcome, reading.count = "failed", None
+            reading.error = {"kind": "failed", "detail": "the exact event's TimeCreated could not be compared with the reference"}
+            reading.sections = [collection]
+            return reading
+        status = "same" if found_key == expected_key else "id_reused"
+        if status == "id_reused":
+            reading.outcome, reading.count = "empty", 0
+            reading.sections = [collection]
+            reading.warnings.append("This RecordId now names a different event; the referenced record was not returned. The log may have been cleared.")
+    else:
+        reading.warnings.append("The referenced record was not returned; retention time alone cannot prove why.")
+    reading.sections.append(Section("reference", "derived", {
+        "log": log, "record_id": record_id, "time_created": expected,
+        "status": status, "retention": retention,
+        **({"found_time_created": found_at} if status == "id_reused" else {}),
+    }, basis=EXACT_EVENT_BASIS))
     return reading
 
 
@@ -496,5 +576,26 @@ register(
             Param("log", "str", "System", "Which log.", choices=LOGS),
         ),
         private=("MachineName", "user names inside Message", "profile paths inside Message", "CPER bytes in binary Properties"),
+    )
+)
+
+register(
+    Spec(
+        name="event_record",
+        description=(
+            "One exact System or Application event by log and RecordId, with every projected field. "
+            "Pass time_created from a reference to check that it is still the same record; a log clear can reuse an id. "
+            "A missing row is empty, while a failed, stopped or ambiguous query cannot establish absence. "
+            "The retention note cannot prove why a row disappeared. Use whea_record for decoded WHEA detail."
+        ),
+        classes=("raw", "derived"),
+        take=take_event_record,
+        params=(
+            Param("log", "str", None, "The System or Application log that owns the RecordId.", choices=LOGS),
+            Param("record_id", "int", None, "Log-local EventRecordID to inspect.", minimum=1, maximum=MAX_RECORD_ID),
+            Param("time_created", "str", "", "Optional original TimeCreated with Z or an offset and up to seven fractional digits; checks identity after id reuse."),
+        ),
+        private=("MachineName", "user names inside Message", "profile paths inside Message", "CPER bytes in binary Properties"),
+        requires_selection=True,
     )
 )

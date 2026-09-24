@@ -39,6 +39,8 @@ from typing import Any
 from .. import bridge as bridge_module
 from ..bridge import Bridge
 from ..reading import REGISTRY, Reading, Section, Spec, from_object, register, take
+from .event_coverage import exact_stamp
+from .events import MAX_RECORD_ID
 
 # The fabric nests deeper than the bridge's default depth: a group holds members
 # which hold their upstream chains.
@@ -1034,6 +1036,7 @@ def _transitions(observed: dict[str, Reading]) -> list[dict[str, Any]]:
 
     crash = observed.get("crash")
     stops = _rows(crash, "stops")
+    stop_rows = _stop_row_index(_records(crash))
     if stops:
         raw_limit = crash.params.get("count") if crash is not None else None
         limit = raw_limit if type(raw_limit) is int and raw_limit > 0 else SIGNAL_STOP_LIMIT
@@ -1054,11 +1057,11 @@ def _transitions(observed: dict[str, Reading]) -> list[dict[str, Any]]:
                 "Crash composed these stops from its returned System and Application records. This is a returned count, not a lifetime total. Inspect the record before each stop for context."
                 if sources_complete and not limit_reached
                 else "Crash composed these stops from the sources that answered. A source or query bound may hide other stops; inspect its collection coverage before treating this as a complete count.",
-                {"returned": len(stops), "limit": limit, "limit_reached": limit_reached, "sources_complete": sources_complete, "stops": [_stop_facts(stop) for stop in stops[:NEWEST_STOPS]]},
+                {"returned": len(stops), "limit": limit, "limit_reached": limit_reached, "sources_complete": sources_complete, "stops": [_stop_facts(stop, stop_rows) for stop in stops[:NEWEST_STOPS]]},
                 ["crash"],
             )
         )
-    out += _repeated_stops(stops)
+    out += _repeated_stops(stops, stop_rows)
     if counts.get("display driver reset") and (counts.get("wake") or counts.get("resume")):
         out.append(
             _signal(
@@ -1074,13 +1077,54 @@ def _transitions(observed: dict[str, Reading]) -> list[dict[str, Any]]:
     return out
 
 
-def _stop_facts(stop: dict[str, Any]) -> dict[str, Any]:
+def _stop_row_index(rows: list[dict[str, Any]]) -> dict[tuple[str, int], list[str | None]]:
+    """Only raw rows from Crash can substantiate a log-local stop reference."""
+    index: dict[tuple[str, int], list[str | None]] = defaultdict(list)
+    for row in rows:
+        log, record_id, at = row.get("Log"), row.get("RecordId"), row.get("TimeCreated")
+        if log not in ("System", "Application") or type(record_id) is not int or record_id < 1:
+            continue
+        try:
+            parsed = exact_stamp(at, "TimeCreated", strict=True)[0] if isinstance(at, str) else None
+        except ValueError:
+            parsed = None
+        index[(log, record_id)].append(parsed)
+    return index
+
+
+def _stop_refs(stops: list[dict[str, Any]], index: dict[tuple[str, int], list[str | None]], limit: int) -> dict[str, Any]:
+    refs: list[dict[str, Any]] = []
+    total = missing = 0
+    for stop in stops:
+        source = stop.get("records") or {}
+        if not isinstance(source, dict):
+            continue
+        requested = [("System", role, source.get(role)) for role in ("start", "power_41", "eventlog_6008", "wer_1001")]
+        reports = source.get("report")
+        if isinstance(reports, list):
+            requested.extend(("Application", "report", record_id) for record_id in reports)
+        for log, role, record_id in requested:
+            if record_id is None:
+                continue
+            total += 1
+            if type(record_id) is not int or not 1 <= record_id <= MAX_RECORD_ID:
+                missing += 1  # Malformed or outside the exact tool's supported id range.
+                continue
+            matches = index.get((log, record_id), [])
+            if len(matches) != 1 or matches[0] is None:
+                missing += 1  # No unique raw row; never invent its time.
+            elif len(refs) < limit:
+                refs.append({"role": role, "reading": "event_record", "params": {"log": log, "record_id": record_id, "time_created": matches[0]}})
+    return {"refs": refs, "refs_total": total, "refs_missing": missing, "refs_omitted": total - missing - len(refs)}
+
+
+def _stop_facts(stop: dict[str, Any], index: dict[tuple[str, int], list[str | None]]) -> dict[str, Any]:
     bugcheck = stop.get("bugcheck") or {}
     started, announced, reported = (stop.get(key) for key in ("started_at", "announced_at", "reported_at"))
-    return {"started_at": started, "announced_at": announced, "reported_at": reported, "anchor_at": started or announced or reported, "code": bugcheck.get("code"), "name": bugcheck.get("name")}
+    return {"started_at": started, "announced_at": announced, "reported_at": reported, "anchor_at": started or announced or reported, "code": bugcheck.get("code"), "name": bugcheck.get("name"), **_stop_refs([stop], index, 8)}
 
 
-def _repeated_stops(stops: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _repeated_stops(stops: list[dict[str, Any]], index: dict[tuple[str, int], list[str | None]]) -> list[dict[str, Any]]:
     """Stops that carry the same bug check, or that carry none at all. What they share is the lead;
     a stop that recorded nothing shares that with the others, which is why it is its own group."""
     groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -1105,7 +1149,7 @@ def _repeated_stops(stops: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "Each stop's Kernel-Power record carried bug check code 0, and the returned logs supplied no bug check for that stop. This does not establish why no code was recorded. The record before each start provides further context."
                 if none_recorded
                 else "More than one stop was announced with this bug check. What they have in common is a lead; whether they have one cause is for the dumps and the record before each start to say.",
-                {"stops": len(group), "code": None if none_recorded else code, "name": name, "started_at": [s.get("started_at") for s in group]},
+                {"stops": len(group), "code": None if none_recorded else code, "name": name, "started_at": [s.get("started_at") for s in group], **_stop_refs(group, index, 20)},
                 ["crash"],
             )
         )
@@ -1212,6 +1256,8 @@ async def take_signals(bridge: Bridge, params: dict[str, Any]) -> Reading:
             "name": name,
             "params": want,
             "outcome": _why(name, input_reading, reasons),
+            "asked_at": input_reading.asked_at if input_reading is not None else None,
+            "count": input_reading.count if input_reading is not None else None,
             "took_ms": input_reading.took_ms if input_reading is not None else None,
             "warnings": [_bounded_warning(w) for w in (input_reading.warnings if input_reading is not None else [])[:5]],
             "warnings_total": len(input_reading.warnings) if input_reading is not None else 0,
@@ -1434,7 +1480,8 @@ register(
             "them as hardware errors. Take whea or storms for hardware errors. "
             "An ok answer can still lack inputs: read the gap:inputs signal "
             "and each method.readings outcome. Empty means no pattern was noticed in what was observed, "
-            "not that the machine is healthy."
+            "not that the machine is healthy. Crash leads may carry bounded log-local refs; "
+            "call each ref's reading (event_record) with its params (log, record_id, time_created) to inspect one again."
         ),
         classes=("inferred",),
         take=take_signals,

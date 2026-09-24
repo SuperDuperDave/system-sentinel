@@ -10,7 +10,7 @@ PYTHONPATH=. .venv/bin/python scripts/measure_agent_answers.py
 
 In Windows PowerShell, use `$env:PYTHONPATH = '.'` and then `.\.venv\Scripts\python.exe scripts\measure_agent_answers.py`. The screen fixture supplies Health, Events, Record, Faults, Storms, WHEA and the Power input to Signals. Crash uses the test Crash records and dump inventory, with the source reach set for each requested stop count. Signals also uses synthetic Hardware from the system test, PCIe, Constraints and Reliability from the diagnostics test, and Events from the screen fixture; the script refuses a failed input even when the Signals envelope itself says `ok`. Its `record` anchor is the current UTC instant, and measured duration fields can vary, so byte counts can shift slightly between runs. The last row is 2,000 generated System records with a 512-character synthetic message payload and a 512-byte binary value represented as a plain hex string in `Properties`, matching the event collector's projected shape. The script uses a temporary home and reads no machine state. A test runs the eight default rows in CI to catch fixture or reading drift; the large generated row runs only when the measurement command is invoked.
 
-Measured with source version 1.9.19 on 2026-09-24; the answer bytes match the same 1.9.18 fixtures:
+Measured with source version 1.9.20 on 2026-09-24, using the same public fixtures as the 1.9.19 baseline:
 
 | Synthetic reading | Outcome | Count | MCP text bytes | MCP result bytes | Sections bytes | Method bytes |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
@@ -21,7 +21,7 @@ Measured with source version 1.9.19 on 2026-09-24; the answer bytes match the sa
 | faults | ok | 7 | 19,207 | 40,361 | 14,244 | 4,682 |
 | storms | ok | 40 | 18,207 | 37,236 | 12,046 | 5,738 |
 | whea | ok | 30 | 35,649 | 74,007 | 28,503 | 6,913 |
-| signals | ok | 11 | 6,617 | 14,004 | 5,687 | 710 |
+| signals | ok | 11 | 10,277 | 21,854 | 9,004 | 1,053 |
 | record: 2,000 generated rows | ok | 2,000 | 3,434,742 | 6,917,821 | 3,429,868 | 4,588 |
 
 For the heavy row, raw `Message` values account for 1,064,000 serialized bytes and raw `Properties` values for 2,056,000. Those fields dominate the 3,429,868-byte sections payload; the 4,588-byte method is a small part of this case. MCP result bytes include the text and structured representations plus their JSON wrapper, so they must not be interpreted as model-context bytes. The source can be requested with smaller counts or a narrower window; the raw answer itself is still complete for the request made.
@@ -34,15 +34,17 @@ The MCP guidance now starts with Health, then chooses a reading by the person's 
 
 | Synthetic path | Readings | MCP text bytes | Bridge questions |
 | --- | ---: | ---: | ---: |
-| Broad or unclear: Health + Signals | 2 | 7,567 | 8 |
+| Broad or unclear: Health + Signals | 2 | 11,227 | 8 |
 | Unexpected restart: Health + Crash + Record | 3 | 68,404 | 3 |
 | Hardware errors: Health + WHEA + Storms | 3 | 54,806 | 3 |
 | Program crashed or hung: Health + Faults | 2 | 20,157 | 2 |
-| Former eight-reading tour | 8 | 163,913 | 14 |
+| Former eight-reading tour | 8 | 167,573 | 14 |
 
-The byte totals are sums of the rows above; the bridge-question counts are printed by the same measurement script. A bridge question is one call to the **synthetic** bridge after the app's one-time identity lookup at startup. It does not measure Windows query time, session contention or another machine's records. The broad path returns only 4.6% as many MCP text bytes as the former tour, but its eight source questions exceed either directed three-reading path's three. This is why the smaller answer is the starting point for broad questions, not an unconditional second step. A specific question can end after fewer readings; the table includes likely follow-up reads for comparison. The original eight answers remain directly available when needed.
+The byte totals are sums of the rows above; the bridge-question counts are printed by the same measurement script. A bridge question is one call to the **synthetic** bridge after the app's one-time identity lookup at startup. It does not measure Windows query time, session contention or another machine's records. The broad path returns 6.7% as many MCP text bytes as the former tour, but its eight source questions exceed either directed three-reading path's three. This is why the smaller answer is the starting point for broad questions, not an unconditional second step. A specific question can end after fewer readings; the table includes likely follow-up reads for comparison. The original eight answers remain directly available when needed.
 
-Three direct Claude Code 2.1.280 probes with Opus 5.5 and requested high effort connected to a disposable stdio MCP server backed only by these public synthetic fixtures. The server offered the candidate's reading tools, with instructions as noted below; it logged each call's name, outcome and MCP text bytes. All three probes completed. This tests one client's choices under three prompts, not a before-and-after comparison or a typical user's session. The quick-check probe used the final depth guidance; the other two used the earlier question-directed wording from this same candidate.
+Compared with 1.9.19 on the same fixtures, Signals grew from 6,617 to 10,277 MCP text bytes (+3,660, about 55%). Crash leads now carry bounded log-local row references with explicit missing and omitted counts, and `method.readings` includes each input's original observation time and count. Each ref names `event_record` and includes tool-ready `params`. Signals still takes seven source questions; `event_record` is an optional exact follow-up, not part of this table. A pressure share or Power ledger co-occurrence still has no exact-row reference and a fresh read cannot reproduce its original capped sample. The byte increase is measured; any reduction in investigation time or total agent cost remains unmeasured.
+
+Three earlier direct Claude Code 2.1.280 probes with Opus 5.5 and requested high effort connected to a disposable stdio MCP server backed only by these public synthetic fixtures. The server offered the 1.9.19 candidate's reading tools, with instructions as noted below; it logged each call's name, outcome and MCP text bytes. All three probes completed. This tests one client's choices under three prompts, not a before-and-after comparison or a typical user's session. The quick-check probe used the final 1.9.19 depth guidance; the other two used the earlier question-directed wording from that candidate. They did not test the new `event_record` path or the larger 1.9.20 Signals answer.
 
 | Prompt | Observed tool sequence | Calls | MCP text bytes returned | Client cache-creation input tokens |
 | --- | --- | ---: | ---: | ---: |
