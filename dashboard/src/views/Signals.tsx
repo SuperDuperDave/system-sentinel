@@ -1,4 +1,5 @@
 import { AddToStack } from '../AddToStack';
+import { CitedRecord, eventRefGroups, evidenceWithoutRefRows } from '../CitedRecord';
 import { Reading, observed, section } from '../api';
 import { OutcomeLine } from '../Outcome';
 import { Head, MomentLink, RowList, Section, Tree } from '../Sections';
@@ -89,7 +90,8 @@ function Group({ cls, signals, reading }: { cls: string; signals: Signal[]; read
         inspect={(s) => (
           <div className={styles.evidence}>
             <p className="label">Evidence</p>
-            <Tree value={s.evidence} />
+            <Tree value={evidenceWithoutRefRows(s.evidence)} />
+            <Citations evidence={s.evidence} />
             <Jumps evidence={s.evidence} />
             <p className={`${styles.from} readout`}>read from {s.readings.join(', ')} · {s.id}</p>
             <div className={styles.stackLead}><AddToStack item={{ kind: 'selection', envelope: reading, ids: [s.id], title: s.title }} label="Stack this lead" /></div>
@@ -98,6 +100,24 @@ function Group({ cls, signals, reading }: { cls: string; signals: Signal[]; read
       />
     </div>
   );
+}
+
+function Citations({ evidence }: { evidence: Record<string, unknown> }) {
+  const groups = eventRefGroups(evidence);
+  const count = groups.reduce((total, group) => total + group.refs.length, 0);
+  const unusable = groups.reduce((total, group) => total + group.unusable, 0);
+  if (!groups.length) return null;
+  return <div className={styles.citations}>
+    <p className="label">Exact rows cited by this lead · {count}</p>
+    <p className={`${styles.citationNote} readout`}>Open one to ask the current log for the same record. This is a new observation; the lead above keeps the evidence from its original reading. The counts above and full evidence below name references that could not be made or were omitted by the cap.</p>
+    {unusable ? <p className={`${styles.citationNote} readout`}>{unusable} returned {unusable === 1 ? 'reference is' : 'references are'} incomplete and cannot be checked here.</p> : null}
+    {groups.map((group, index) => <div key={`${group.label ?? 'lead'}:${index}`}>
+      {group.label ? <p className={`${styles.groupLabel} readout`}>{group.label}</p> : null}
+      {!group.refs.length ? <p className={`${styles.citationNote} readout`}>No usable exact reference in this group. The returned evidence above names any missing references.</p> : null}
+      <ol>{group.refs.map((ref, position) => <li key={`${ref.params.log}:${ref.params.record_id}:${ref.params.time_created}:${position}`}><CitedRecord citation={ref} /></li>)}</ol>
+    </div>)}
+    <details className={styles.fullEvidence}><summary className="readout">Full lead evidence · every field Signals returned (inferred)</summary><Tree value={evidence} /></details>
+  </div>;
 }
 
 /** The five rule families in one scan, with exact counts and anchors to the evidence below. */

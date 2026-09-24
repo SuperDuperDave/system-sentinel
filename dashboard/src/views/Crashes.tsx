@@ -1,5 +1,6 @@
 import { ReactNode, useEffect, useRef, useState } from 'react';
 import { AddToStack } from '../AddToStack';
+import { CitedRecord, eventRef } from '../CitedRecord';
 import { EventRecord, Reading, type RecordId, observed } from '../api';
 import { OutcomeLine, clock } from '../Outcome';
 import { Basis, Facts, Head, MomentLink, RowList, Section, Segmented, Value, ago, basisOf, byDay, duration, part, size, useKeepButtonInPlace } from '../Sections';
@@ -547,6 +548,13 @@ function StopDetail({ stop, envelope }: { stop: Stop; envelope: Reading | null }
       <Facts rows={rows} />
       {stop.dump?.path && stop.dump.bytes != null ? <DumpHeaderDetail path={stop.dump.path} /> : null}
       {stop.last_record_before?.Message ? <p className={styles.lastRecordMessage}>{stop.last_record_before.Message}</p> : null}
+      <StopRawRows stop={stop} envelope={envelope} />
+      {stop.last_record_before ? <CitedRecord key={`last:${stop.last_record_before.RecordId}:${stop.last_record_before.TimeCreated}`}
+        citation={eventRef({ role: 'last_before_restart', reading: 'event_record', params: { log: 'System', record_id: stop.last_record_before.RecordId, time_created: stop.last_record_before.TimeCreated } })}
+        held={stop.last_record_before}
+        heldAt={envelope?.asked_at}
+        heldKind="projection"
+      /> : null}
       <div className={styles.actions}>
         <MomentLink at={moment} />
         {envelope && ids.length ? (
@@ -555,6 +563,30 @@ function StopDetail({ stop, envelope }: { stop: Stop; envelope: Reading | null }
       </div>
     </>
   );
+}
+
+/** The raw rows already gathered for this stop; no machine question is needed to read them. */
+function StopRawRows({ stop, envelope }: { stop: Stop; envelope: Reading | null }) {
+  const raw = part<EventRecord[]>(envelope, 'records') ?? [];
+  const named: { role: string; log: 'System' | 'Application'; id: RecordId }[] = [];
+  for (const [role, id] of Object.entries({ start: stop.records.start, power_41: stop.records.power_41, eventlog_6008: stop.records.eventlog_6008, wer_1001: stop.records.wer_1001 })) {
+    if (id !== null && id !== undefined) named.push({ role, log: 'System', id });
+  }
+  for (const id of stop.records.report ?? []) named.push({ role: 'report', log: 'Application', id });
+  if (!named.length) return null;
+  return <section className={styles.stopRaw} aria-label="Raw records cited by this stop">
+    <p className="label">Records cited by this stop · {named.length}</p>
+    <p className={`${styles.quiet} readout`}>The rows below came with this crash reading. Check the current log only when you ask; that check may return a different result.</p>
+    <ol>{named.map(({ role, log, id }) => {
+      const matches = raw.filter((row) => row.Log === log && String(row.RecordId) === String(id));
+      const held = matches.length === 1 ? matches[0] : null;
+      const citation = held ? eventRef({ role, reading: 'event_record', params: { log, record_id: id, time_created: held.TimeCreated } }) : null;
+      return <li key={`${role}:${log}:${id}`}>
+        {held ? <CitedRecord key={`${log}:${id}:${held.TimeCreated}`} citation={citation} held={held} heldAt={envelope?.asked_at} />
+          : <p className={`${styles.quiet} readout`}>{log} record {id} was cited, but {matches.length > 1 ? 'more than one matching raw row was returned' : 'no matching raw row was returned'} in this crash reading. No exact time reference can be made here.</p>}
+      </li>;
+    })}</ol>
+  </section>;
 }
 
 /** Keep each location's observation available beside the files or inspection it supports. */

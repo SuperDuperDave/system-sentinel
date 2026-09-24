@@ -54,6 +54,14 @@ a.classCard:hover, a.classCard:focus-visible { background: var(--lit); text-deco
 }
 
 .evidence > p:first-child { margin: 0 0 6px; }
+.citations { margin-top: 16px; }
+.citations > p:first-child { margin: 0 0 4px; }
+.citationNote { max-width: 74ch; margin: 0 0 6px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.citations ol { list-style: none; margin: 0; padding: 0; }
+.citations li + li { border-top: 1px solid var(--rule-soft); }
+.groupLabel { margin: 13px 0 0; color: var(--body); font-size: 12px; }
+.fullEvidence { margin-top: 10px; }
+.fullEvidence summary { width: fit-content; min-height: 40px; padding: 9px 0; cursor: pointer; color: var(--body); }
 /* The ways into the log from a lead, set apart by the gap rather than by a rule. */
 .jumps { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 20px; margin: 10px 0 0; }
 .from { margin: 10px 0 0; color: var(--muted); overflow-wrap: anywhere; }

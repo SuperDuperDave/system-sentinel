@@ -83,6 +83,22 @@ summary line are the last things visible). Status and trace took priority, as in
 `fixture-server.py` finds the repository root by walking up from its own path (three levels, as
 committed); `SENTINEL_REPO_ROOT` overrides that if the script is copied somewhere else.
 
+The in-place cited-record interaction has a separate synthetic browser check. With the fixture
+server and Playwright module path above running, use:
+
+```
+NODE_PATH=/some/scratch/dir/node_modules TOKEN_FILE=/some/scratch/dir/token PORT=8021 \
+  node docs/screens/fixtures/check-cited-records.cjs
+```
+
+It intercepts only synthetic Crash, Signals and exact-record reading envelopes. At 1440 and 390
+pixels it checks that opening a stop or lead leaves its control in place, an exact lookup happens
+only after a click, and same/reused/missing/failed/denied/transport-loss results remain distinct.
+The fixture also checks System WER and Application report roles, missing or ambiguous held rows,
+grouped and unusable references, and that a changed citation on retake starts closed. It checks
+horizontal overflow in both views. Set `SCREENSHOT_DIR` to an existing scratch directory to save
+the inspected screens; they are not part of the five published screenshots.
+
 ## The social preview
 
 `social-preview.png` is the card a shared link to the repository shows: 1280×640, the identity's

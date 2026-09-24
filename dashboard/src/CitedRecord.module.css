@@ -1,0 +1,11 @@
+.citation { margin: 12px 0; min-width: 0; }
+.identity { margin: 0 0 6px; color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
+.note, .status { max-width: 74ch; color: var(--body); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.note { margin: 7px 0; }
+.status { margin: 8px 0; }
+.status:empty { display: none; }
+.check { min-height: 40px; margin: 4px 0; padding: 8px 0; color: var(--ink); text-align: left; text-decoration: underline; text-underline-offset: 3px; }
+.check:disabled { opacity: .7; }
+.raw { margin-top: 5px; }
+.raw summary { width: fit-content; min-height: 40px; padding: 9px 0; color: var(--ink); cursor: pointer; }
+.raw pre { max-height: 360px; margin: 8px 0; padding: 12px; overflow: auto; background: var(--inspection-well); color: var(--body); font-size: 11.5px; white-space: pre; }

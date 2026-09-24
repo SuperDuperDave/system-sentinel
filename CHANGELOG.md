@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.9.23] - 2026-09-24
+
+### Improved
+- Signals now offers each cited System or Application event beside its lead. A person explicitly checks the current log for the same log, record ID and original time; the result distinguishes the same row, an ID now naming another event, a row no longer returned, and a lookup that failed or was denied. The lead keeps its original evidence and omitted-reference counts, with the complete returned evidence behind a disclosure. An exact re-read can be stacked for an agent.
+- Opening a crash stop now exposes the raw rows already returned in its Crash reading, without another machine request. The last pre-restart record's six-field, first-message-line projection is separately labeled derived. Each held row can be rechecked by exact identity on request. These inspections stay beside the stop or lead at desktop and phone widths.
+
+### Limits
+- A current-log lookup is a new observation; it cannot restore a cleared or rotated event. The held Crash rows retain the original reading's scope and default redaction. A missing or ambiguous raw row has no invented exact-time reference. The reported loss of place after leaving and returning to a view is still under investigation; this release makes cited rows inspectable in place and does not change cross-view navigation.
+- The reproducible synthetic browser check in `docs/screens/fixtures/check-cited-records.cjs` verifies deliberate exact requests, reference changes on retake, result distinctions and the clicked control's position at 1440 and 390 pixels. It establishes behavior against its fixture, not a measurement of the person's installed app.
+
 ## [1.9.22] - 2026-09-24
 
 ### Improved

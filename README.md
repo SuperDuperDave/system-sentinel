@@ -24,6 +24,8 @@ The dashboard address remembers the view you opened (`?view=machine`, for exampl
 
 Record shows when the returned System log rows cluster and which sources appear most often. Select a bar or source to open its exact row. The overview describes the returned sample; the detailed rows and their raw properties remain below it.
 
+Crashes keeps each stop's cited System and Application rows beside its timeline, with the last pre-restart record's shorter projection labeled separately. Signals names the exact rows behind a lead. Inspect either in place; checking the current log again is a separate action, and the result says whether the same row remains, its ID was reused, or the row was not returned. The original observation stays visible.
+
 Diagnostics takes deeper readings when asked. Memory shows the returned modules, reported slot population and configured speed beside each module's rating; the original Windows fields and derivation stay open below the overview.
 PCIe keeps the present Windows device inventory, groups devices only where their reported parent chains support it, and shows when relationships are incomplete. The full raw PCI records remain available beneath the map.
 
