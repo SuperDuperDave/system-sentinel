@@ -13,7 +13,7 @@ import asyncio
 import json
 import re
 import struct
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -127,7 +127,7 @@ def clean_sessions(count: int) -> list[dict[str, Any]]:
     announce nothing."""
     out = []
     for i in range(count):
-        day = f"2026-08-{i + 1:02d}"
+        day = (datetime(2026, 8, 1, tzinfo=UTC) + timedelta(days=i)).strftime("%Y-%m-%d")
         out.append(
             {"RecordId": 5000 + i * 2, "Id": 12, "ProviderName": "Microsoft-Windows-Kernel-General", "Log": "System",
              "LevelDisplayName": "Information", "TimeCreated": f"{day}T08:00:00.0000000Z", "Message": "The operating system started.",
@@ -450,6 +450,83 @@ def test_one_report_however_many_records_it_was_written_across():
     assert stop["power"]["whea_boot_error_count"] == 2
 
 
+def test_late_conflicting_report_stays_raw_without_lending_its_bucket_or_dump():
+    body = payload()
+    for report in body["reports"]:
+        if report["RecordId"] in (2000, 2001, 2002):
+            report["TimeCreated"] = f"2026-09-12T06:{17 + report['RecordId'] - 2000:02}:10.0000000Z"
+    body["reports"].sort(key=lambda row: row["TimeCreated"], reverse=True)
+    reading = crash(body, count=20)
+    stop = stop_named(reading, "2026-09-12T06:14:58.000Z")
+    assert reading.outcome == "ok" and reading.count == 5
+    assert all(not ({2000, 2001, 2002} & set(item["records"]["report"])) for item in reading.section("stops").data)
+    assert stop["bugcheck"]["code"] == "0x133" and stop["bugcheck"]["bucket"] is None
+    assert stop["dump"]["name"] == "091226-12345-01.dmp" and stop["dump"]["matched_by"] == "time"
+    assert stop["records"]["report"] == [] and stop["reported_at"] is None
+    assert {row["RecordId"] for row in reading.section("records").data} >= {2000, 2001, 2002}
+    assert {row["RecordId"] for row in reading.section("decoded").data} >= {2000, 2001, 2002}
+    assert len(reading.warnings) == 1 and all(value in reading.warnings[0] for value in ("2000, 2001, 2002", "0x1a", "1301", "0x133", "not attached"))
+    # The earlier stop can still use its own minidump by time. A later live-kernel WATCHDOG
+    # file in the same window is a different kind of observation, not this stop's dump.
+    earlier = stop_named(reading, "2026-09-09T09:59:57.000Z")
+    assert earlier["dump"]["name"] == "090926-11111-01.dmp" and earlier["dump"]["matched_by"] == "time"
+    signals, basis = take_signals_sync({"crash": reading})
+    lead = next(item for item in signals if item["id"] == "transition:unexpected-shutdown")
+    assert lead["evidence"]["returned"] == 5
+    assert "Observed with warnings: crash" in basis
+
+
+def test_only_conflicting_report_group_is_detached_from_a_41_session():
+    body = payload()
+    for report in body["reports"]:
+        if report["RecordId"] in (2000, 2001, 2002):
+            report["TimeCreated"] = f"2026-09-12T06:{17 + report['RecordId'] - 2000:02}:10.0000000Z"
+    consistent = record(2002)
+    consistent["RecordId"] = 2200
+    consistent["TimeCreated"] = "2026-09-12T06:20:10.0000000Z"
+    consistent["Properties"][0] = "0x133_synthetic"
+    consistent["Properties"][5] = "133"
+    consistent["Properties"][15] = "\\\\?\\C:\\Windows\\Minidump\\091226-12345-01.dmp"
+    consistent["Properties"][19] = "synthetic-133-report"
+    body["reports"].append(consistent)
+    body["reports"].sort(key=lambda row: row["TimeCreated"], reverse=True)
+    reading = crash(body, count=5)
+    stop = stop_named(reading, "2026-09-12T06:14:58.000Z")
+    assert stop["records"]["report"] == [2200] and stop["reported_at"] == "2026-09-12T06:20:10.000Z"
+    assert stop["bugcheck"]["bucket"] == "0x133_synthetic"
+    assert len(reading.warnings) == 1 and "2000, 2001, 2002" in reading.warnings[0]
+
+
+@pytest.mark.parametrize("reported_code", ["0x1a", "0000001a", "", "0"])
+def test_a_matching_or_unreadable_report_code_does_not_refute_its_41_session(reported_code: str):
+    body = payload()
+    latest = next(row for row in body["reports"] if row["RecordId"] == 2002)
+    latest["Properties"][5] = reported_code
+    reading = crash(body, count=5)
+    stop = stop_named(reading, "2026-09-09T09:59:57.000Z")
+    assert stop["records"]["report"] == [2000, 2001, 2002]
+    assert stop["dump"]["matched_by"] == "report" and not reading.warnings
+
+
+def test_a_zero_code_41_cannot_refute_a_report_filed_in_its_session():
+    body = payload()
+    for report in body["reports"]:
+        if report["RecordId"] in (2000, 2001, 2002):
+            report["TimeCreated"] = f"2026-09-02T07:{5 + report['RecordId'] - 2000:02}:10.0000000Z"
+    body["reports"].sort(key=lambda row: row["TimeCreated"], reverse=True)
+    reading = crash(body, count=5)
+    stop = next(item for item in reading.section("stops").data if item["records"]["power_41"] == 900)
+    assert stop["bugcheck"]["code"] == "0x1a" and stop["bugcheck"]["source"] == "BlueScreen report"
+    assert stop["records"]["report"] == [2000, 2001, 2002]
+    assert not reading.warnings
+
+
+def test_a_live_kernel_file_alone_is_not_the_time_matched_dump_for_a_stop():
+    live = next(file for file in load()["dumps"] if "LiveKernelReports" in file["path"])
+    reading = crash(payload(reports=[], dumps=[live]), count=5)
+    assert stop_named(reading, "2026-09-09T09:59:57.000Z")["dump"] is None
+
+
 def test_a_dump_with_nothing_to_name_it_is_matched_by_the_time_it_was_written():
     stop = stop_named(crash(payload(), count=5), "2026-09-12T06:14:58.000Z")
     assert stop["records"]["wer_1001"] is None and stop["records"]["report"] == []
@@ -498,7 +575,12 @@ def test_the_count_is_how_many_stops_were_asked_for():
 def test_the_cap_warns_when_it_bites_rather_than_reporting_a_quiet_machine():
     reading = crash(payload(system=clean_sessions(18), reports=[]), count=1)
     assert reading.outcome == "empty" and reading.count == 0
-    assert reading.warnings == ["the query's record bound was reached after 0 stops; ask for fewer, or take `events` over the window"]
+    assert reading.warnings == ["the query's record bound was reached after 0 stops; the 36-record System bound is shared with clean starts and shutdowns; a larger count (up to 20) raises the bound and may reach older retained records."]
+    assert crash(payload(system=clean_sessions(18), reports=[]), count=2).section("collection").data["system"]["returned"] == 36
+    at_limit = crash(payload(system=clean_sessions(132), reports=[]), count=20)
+    assert at_limit.outcome == "empty" and "take `events` over an older System window" in at_limit.warnings[0]
+    moment = crash(payload(system=clean_sessions(24), reports=[]), count=1, moment="2026-08-01T00:00:00Z")
+    assert any("fixed 48-record System window" in warning and "Moving the moment later skips intervening history" in warning for warning in moment.warnings)
 
 
 def test_a_sub_query_that_did_not_answer_is_a_warning_not_a_silence():

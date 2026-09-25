@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.9.30] - 2026-09-25
+
+### Improved
+- Crash no longer lends a BlueScreen report's module bucket or attached dump to a session whose returned Kernel-Power 41 names a different nonzero bug-check code. The report remains in raw and decoded records with a warning; it is not assigned to another stop or counted as one. Other report groups in the same session remain attached when their codes agree or cannot be compared.
+- A stop whose dump is inferred only by file time now chooses among crash-dump locations, leaving LiveKernelReports files to their own evidence channel. An exact dump path named by a System bug-check record or BlueScreen report still takes precedence.
+- When Crash's System record bound is reached, its warning now names the actual next step: a larger count raises the bound and may reach older retained records, up to 20; at that limit, inspect an older System window with Events. Moment reads disclose their fixed 48-record window and that moving the moment forward skips intervening history.
+
+### Limits
+- A code conflict is reason to withhold the report-to-stop association; it does not establish which other stop the report describes. A late report with the same code remains indistinguishable by code alone. The conflict was reproduced with synthetic returned rows; one bounded local reading had seven stops with attached reports and no code conflicts, so no frequency is claimed. Time proximity alone remains a weaker dump match than an explicit path, and incomplete dump inventory still qualifies it.
+
 ## [1.9.29] - 2026-09-24
 
 ### Improved

@@ -234,7 +234,10 @@ STOPS_BASIS = (
     "A System WER 1001 alone is warned and left unplaced because its filing time cannot establish the stop's session. "
     "The EventLog 6008 and the WER-SystemErrorReporting 1001 in an established stop's session are associated "
     "with it by filing session; this does not prove the 1001's underlying stop is the same one. The same time "
-    "placement applies to a BlueScreen report; a report that falls in no fetched session is a stop of "
+    "placement applies to a BlueScreen report, except that a report with a parsed nonzero code conflicting "
+    "with a returned session's nonzero Kernel-Power 41 code is left raw and decoded with a warning, not "
+    "attached or counted as another stop; matching codes alone do not prove a shared stop. A report that "
+    "falls in no fetched session is a stop of "
     "its own, with only what the report says, and a 41 before the first fetched start is a stop with no known "
     "start, unless the query's record bound is what cut the start off, in which case that session is left for a "
     "larger count. started_at is the start's StartTime, stopped_at is Windows' own estimate from the 6008's binary "
@@ -242,7 +245,7 @@ STOPS_BASIS = (
     "returned start of a stop the 41 announced; a stop without a returned start or a 41 has no anchored pre-start "
     "lookup. A record before an unanchored 41 may already be from the new boot. The dump is the file "
     "the 1001 names, else a .dmp the report attached, else "
-    "the newest returned dump written between the stop and half an hour past the start or the report, because the file is "
+    "the newest returned non-live-kernel dump written between the stop and half an hour past the start or the report, because the file is "
     "written while the machine comes back; matched_by says which. Collection names each event-log query's "
     "outcome, bound and retained reach. Missing queries preserve surviving evidence; no_bugcheck_recorded is null when "
     "incomplete queries or missing Application retention cannot establish absence, and last_record_collection distinguishes a failed lookup "
@@ -801,6 +804,8 @@ def compose(payload: dict[str, Any], count: int, moment: str | None) -> dict[str
         open_end = not (moment and capped and nxt is None)
         session["reports"] = [g for g in unplaced if _within(g["at"], session["begins_at"], nxt) and (open_end or g["at"] <= system_end)]
         unplaced = [g for g in unplaced if g not in session["reports"]]
+        session["reports"], conflicts = _consistent_reports(session)
+        warnings.extend(conflicts)
     if capped and not moment:
         unplaced = []
     for index, session in enumerate(found):
@@ -838,7 +843,13 @@ def compose(payload: dict[str, Any], count: int, moment: str | None) -> dict[str
     else:
         stops = sorted(in_session + orphans, key=lambda s: _sort_key(s["_at"]), reverse=True)[:count]
     if capped and len(stops) < count:
-        warnings.append(f"the query's record bound was reached after {len(stops)} stops; ask for fewer, or take `events` over the window")
+        prefix = f"the query's record bound was reached after {len(stops)} stops;"
+        if moment:
+            warnings.append(f"{prefix} this moment read has a fixed {MOMENT_RECORDS}-record System window. Take `events` over the desired interval to inspect unreturned records. Moving the moment later skips intervening history.")
+        elif count < MAX_STOPS:
+            warnings.append(f"{prefix} the {record_cap(count, moment)}-record System bound is shared with clean starts and shutdowns; a larger count (up to {MAX_STOPS}) raises the bound and may reach older retained records.")
+        else:
+            warnings.append(f"{prefix} the {record_cap(count, moment)}-record System bound is the largest Crash request; take `events` over an older System window for Kernel-Power 41 and EventLog 6008 records.")
     if collection["reports"].get("bound_reached"):
         warnings.append("the bug check report bound was reached; older or later reports may be outside this reading")
 
@@ -899,6 +910,31 @@ def _query_result(value: Any, rows: Any, limit: int | None = None) -> tuple[dict
 
 def _is_stop(session: dict[str, Any]) -> bool:
     return _find(session["records"], KERNEL_POWER, 41) is not None or bool(session.get("reports")) or bool(session.get("marker"))
+
+
+def _consistent_reports(session: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
+    """A filing time alone cannot give a 41 stop another code's module or attached dump."""
+    reports = session["reports"]
+    power = _find(session["records"], KERNEL_POWER, 41)
+    if power is None:
+        return reports, []
+    own = bugcheck_from_41(named(list(power.get("Properties") or []), KERNEL_POWER_41))
+    if own is None:
+        return reports, []
+    kept, warnings = [], []
+    for group in reports:
+        code = group["facts"].get("code")
+        if not code or not _number(code, base=16) or code == own["code"]:
+            kept.append(group)
+            continue
+        ids = ", ".join(str(record_id) for record_id in group["record_ids"])
+        warnings.append(
+            f"BlueScreen report records {ids} name code {code}, which conflicts with Kernel-Power 41 "
+            f"record {power.get('RecordId')} ({own['code']}) in the filing session. Their raw and decoded rows "
+            "remain, but they were not attached to this stop or counted as another stop; filing time "
+            "does not establish which stop they describe."
+        )
+    return kept, warnings
 
 
 def _lone_marker(session: dict[str, Any], previous: dict[str, Any] | None) -> tuple[dict[str, Any] | None, str | None]:
@@ -1150,7 +1186,9 @@ def _dump_by_time(dumps: list[dict[str, Any]], stopped_at: str | None, started_a
         return None
     end = close + DUMP_WRITE_MARGIN
     begin = (_parse(stopped_at) - timedelta(minutes=1)) if _parse(stopped_at) else _parse(started_at) - timedelta(hours=1) if _parse(started_at) else close - WHOLE_DUMP_WINDOW
-    candidates = [(m, f) for f in dumps if (m := _parse(f.get("modified"))) and begin <= m <= end]
+    # A live kernel dump observes a recoverable event; proximity to a restart does not make it
+    # that stop's crash dump. Exact paths named by a 1001 or BlueScreen report still take priority.
+    candidates = [(m, f) for f in dumps if f.get("source") != "live_kernel" and (m := _parse(f.get("modified"))) and begin <= m <= end]
     if not candidates:
         return None
     newest = max(candidates, key=lambda pair: pair[0])[1]
@@ -1465,7 +1503,9 @@ register(
             "when System retention establishes that start. Otherwise it keeps returned stop and report "
             "evidence with a warning: the log does not announce a freeze, the next start does. "
             "An empty answer can still warn about an unplaced EventLog 6008 or System bug-check record; inspect "
-            "the warnings and raw rows before calling the returned window clean."
+            "the warnings and raw rows before calling the returned window clean. A BlueScreen report whose code "
+            "conflicts with this session's nonzero Kernel-Power 41 stays raw and decoded with a warning rather "
+            "than lending that stop its module or attached dump."
         ),
         classes=("raw", "derived"),
         take=take_crash,
