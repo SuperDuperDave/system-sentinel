@@ -42,6 +42,26 @@ The MCP guidance now starts with Health, then chooses a reading by the person's 
 
 The byte totals are sums of the rows above; the bridge-question counts are printed by the same measurement script. A bridge question is one call to the **synthetic** bridge after the app's one-time identity lookup at startup. It does not measure Windows query time, session contention or another machine's records. The broad path returns 6.7% as many MCP text bytes as the former tour, but its eight source questions exceed either directed three-reading path's three. This is why the smaller answer is the starting point for broad questions, not an unconditional second step. A specific question can end after fewer readings; the table includes likely follow-up reads for comparison. The original eight answers remain directly available when needed.
 
+## Signals class content reach in 1.9.27
+
+The same synthetic command was run from the exact published `v1.9.26` source archive and the
+1.9.27 candidate on 2026-09-24 local time. This isolates the new per-run
+`method.class_content_inputs` field from the other changes since the older table above.
+
+| Synthetic answer | 1.9.26 | 1.9.27 | Added |
+| --- | ---: | ---: | ---: |
+| Signals method JSON | 1,053 B | 1,259 B | 206 B |
+| Signals MCP text | 10,952 B | 11,158 B | 206 B |
+| Signals full MCP result | 23,270 B | 23,716 B | 446 B |
+| Health + Signals MCP text | 11,902 B | 12,108 B | 206 B |
+| Health + Signals bridge questions | 8 | 8 | 0 |
+
+The result includes text and structured content, so its byte delta is larger than one JSON
+field. These are transfer-shape measurements from public synthetic inputs, not client context
+usage, Windows latency or a real-machine sample. The new field names content inputs consulted by
+each class during composition; the existing `method.readings` still owns each input's outcome and
+warnings. The separate `gap:inputs` lead checks all input outcomes.
+
 Compared with 1.9.19 on the same fixtures, Signals grew from 6,617 to 10,277 MCP text bytes (+3,660, about 55%). Crash leads now carry bounded log-local row references with explicit missing and omitted counts, and `method.readings` includes each input's original observation time and count. Each ref names `event_record` and includes tool-ready `params`. Signals still takes seven source questions; `event_record` is an optional exact follow-up, not part of this table. At this 1.9.20 measurement point, a pressure share or Power ledger co-occurrence had no exact-row reference. A fresh read cannot reproduce the original capped sample. Version 1.9.22 adds bounded refs for the display-reset lead only; see the [aggregate-evidence measurement](signals-aggregate-evidence.md). The byte increase is measured; any reduction in investigation time or total agent cost remains unmeasured.
 
 Three earlier direct Claude Code 2.1.280 probes with Opus 5.5 and requested high effort connected to a disposable stdio MCP server backed only by these public synthetic fixtures. The server offered the 1.9.19 candidate's reading tools, with instructions as noted below; it logged each call's name, outcome and MCP text bytes. All three probes completed. This tests one client's choices under three prompts, not a before-and-after comparison or a typical user's session. The quick-check probe used the final 1.9.19 depth guidance; the other two used the earlier question-directed wording from that candidate. They did not test the new `event_record` path or the larger 1.9.20 Signals answer.

@@ -32,7 +32,7 @@ from __future__ import annotations
 import asyncio
 import re
 from collections import Counter, defaultdict
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator, Mapping
 from datetime import UTC, datetime
 from typing import Any
 
@@ -873,19 +873,51 @@ INDEX_FALL = 0.5
 CLASSES = ("suppressions", "gaps", "pressure", "transitions", "mismatches")
 
 
+class _ContentReads(Mapping[str, Reading]):
+    """Give a rule the observed inputs while recording which envelopes it inspected."""
+
+    def __init__(self, observed: dict[str, Reading]):
+        self._observed = observed
+        self.names: set[str] = set()
+
+    def __getitem__(self, name: str) -> Reading:
+        self.names.add(name)
+        return self._observed[name]
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._observed)
+
+    def __len__(self) -> int:
+        return len(self._observed)
+
+
 def take_signals_sync(readings: dict[str, Reading | None], reasons: dict[str, str] | None = None) -> tuple[list[dict[str, Any]], str]:
     """The five classes, from whichever inputs were observed. Pure: the tests hold it to this."""
-    reasons = reasons or {}
+    signals, basis, _ = _run_signal_rules(readings, reasons or {})
+    return signals, basis
+
+
+def _run_signal_rules(readings: dict[str, Reading | None], reasons: dict[str, str]) -> tuple[list[dict[str, Any]], str, dict[str, list[str]]]:
+    """Run each family over the same evidence and retain its actual content dependencies.
+
+    The missing-input lead separately checks the outcome of every input, including those a
+    particular family's content rules never open. `class_content_inputs` describes only the
+    content side of that distinction; method.readings owns each input's outcome and warnings.
+    """
     observed = {name: r for name, r in readings.items() if r is not None and r.observed}
     signals: list[dict[str, Any]] = []
-    signals += _suppressions(observed)
-    signals += _gaps(observed, readings, reasons)
-    signals += _pressure(observed)
-    signals += _transitions(observed)
-    signals += _mismatches(observed)
+    used: dict[str, list[str]] = {}
+    for cls, rule in (("suppressions", _suppressions), ("gaps", _gaps), ("pressure", _pressure),
+                      ("transitions", _transitions), ("mismatches", _mismatches)):
+        tracked = _ContentReads(observed)
+        signals += rule(tracked)
+        if cls == "gaps" and (input_gap := _input_gap(readings, reasons)) is not None:
+            signals.append(input_gap)
+        used[cls] = [name for name in _SIGNAL_INPUT_SCOPES if name in tracked.names]
+        used[cls] += sorted(tracked.names - _SIGNAL_INPUT_SCOPES.keys())
     order = {name: i for i, name in enumerate(CLASSES)}
     signals.sort(key=lambda s: order.get(s["class"], len(CLASSES)))  # stable: each class keeps its own order
-    return signals, _basis(readings, reasons)
+    return signals, _basis(readings, reasons), used
 
 
 def _why(name: str, reading: Reading | None, reasons: dict[str, str]) -> str:
@@ -924,7 +956,7 @@ def _signal(cls: str, ident: str, title: str, summary: str, evidence: dict[str, 
     return {"id": ident, "class": cls, "title": title, "summary": summary, "evidence": evidence, "readings": readings}
 
 
-def _suppressions(observed: dict[str, Reading]) -> list[dict[str, Any]]:
+def _suppressions(observed: Mapping[str, Reading]) -> list[dict[str, Any]]:
     """What is switched off or bypassed, so the machine has less to tell about itself."""
     out: list[dict[str, Any]] = []
     fast = _first(_derived(observed.get("power")).get("fast_startup"), _config(observed.get("hardware")).get("fast_startup"))
@@ -966,8 +998,8 @@ def _suppressions(observed: dict[str, Reading]) -> list[dict[str, Any]]:
     return out
 
 
-def _gaps(observed: dict[str, Reading], readings: dict[str, Reading | None], reasons: dict[str, str]) -> list[dict[str, Any]]:
-    """Where the record has a hole: a device that cannot speak, or a reading that did not answer."""
+def _gaps(observed: Mapping[str, Reading]) -> list[dict[str, Any]]:
+    """Content gaps in returned PCI relations and device state."""
     out: list[dict[str, Any]] = []
     coverage = _section(observed.get("pcie"), "coverage") or {}
     if coverage.get("returned_devices") and coverage.get("relations") in ("partial", "none"):
@@ -992,22 +1024,25 @@ def _gaps(observed: dict[str, Reading], readings: dict[str, Reading | None], rea
                 ["constraints"],
             )
         )
-    missing = [name for name, r in readings.items() if r is None or not r.observed]
-    if missing:
-        out.append(
-            _signal(
-                "gaps",
-                "gap:inputs",
-                "Part of the evidence was not observed",
-                "These readings did not answer, so nothing they would have shown could be noticed here. This is a hole in the evidence, not a clean result.",
-                {"not_observed": {name: _why(name, readings[name], reasons) for name in missing}},
-                sorted(observed),
-            )
-        )
     return out
 
 
-def _pressure(observed: dict[str, Reading]) -> list[dict[str, Any]]:
+def _input_gap(readings: dict[str, Reading | None], reasons: dict[str, str]) -> dict[str, Any] | None:
+    """One global status check, separate from what each family's rules read as content."""
+    missing = [name for name, r in readings.items() if r is None or not r.observed]
+    if not missing:
+        return None
+    return _signal(
+        "gaps",
+        "gap:inputs",
+        "Part of the evidence was not observed",
+        "These readings did not answer, so nothing they would have shown could be noticed here. This is a hole in the evidence, not a clean result.",
+        {"not_observed": {name: _why(name, readings[name], reasons) for name in missing}},
+        list(readings),
+    )
+
+
+def _pressure(observed: Mapping[str, Reading]) -> list[dict[str, Any]]:
     """Who wrote a large share of the returned event sample, without inferring a time burst."""
     events = observed.get("events")
     records = _records(events)
@@ -1046,7 +1081,7 @@ def _pressure(observed: dict[str, Reading]) -> list[dict[str, Any]]:
     return out
 
 
-def _transitions(observed: dict[str, Reading]) -> list[dict[str, Any]]:
+def _transitions(observed: Mapping[str, Reading]) -> list[dict[str, Any]]:
     """What the machine did between states, and what sat beside it."""
     out: list[dict[str, Any]] = []
     derived = _derived(observed.get("power"))
@@ -1242,7 +1277,7 @@ def _index_fall(days: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ]
 
 
-def _mismatches(observed: dict[str, Reading]) -> list[dict[str, Any]]:
+def _mismatches(observed: Mapping[str, Reading]) -> list[dict[str, Any]]:
     """Where two parts of the record disagree, or a part is out of step with the rest."""
     out: list[dict[str, Any]] = []
     gpu = (_fingerprint(observed.get("hardware")).get("gpu")) or {}
@@ -1313,7 +1348,7 @@ async def gather_signal_inputs(bridge: Bridge) -> tuple[dict[str, Reading | None
 def compose_signals(readings: dict[str, Reading | None], reasons: dict[str, str], params: dict[str, Any]) -> Reading:
     """Infer leads from held input envelopes; never issue a second machine question."""
     wanted = list(SIGNAL_INPUTS)
-    signals, basis = take_signals_sync(readings, reasons)
+    signals, basis, class_content_inputs = _run_signal_rules(readings, reasons)
     observed = [name for name, r in readings.items() if r is not None and r.observed]
     input_sources = []
     for name, want in wanted:
@@ -1336,7 +1371,7 @@ def compose_signals(readings: dict[str, Reading | None], reasons: dict[str, str]
         reading="signals",
         params=params,
         outcome="ok" if (observed and signals) else ("empty" if observed else "unavailable"),
-        method={"kind": "readings", "readings": input_sources},
+        method={"kind": "readings", "readings": input_sources, "class_content_inputs": class_content_inputs},
         count=len(signals),
     )
     # Nothing was observed, so nothing here is a finding: the section stays empty and the
@@ -1561,7 +1596,10 @@ register(
             "System WHEA-Logger records can appear among its recent System events, but no signal classifies "
             "them as hardware errors. Take whea or storms for hardware errors. "
             "An ok answer can still lack inputs: read the gap:inputs signal "
-            "and each method.readings outcome. Empty means no pattern was noticed in what was observed, "
+            "and each method.readings outcome. method.class_content_inputs names the input envelopes "
+            "each class actually inspected on this run; join it with their outcomes and warnings "
+            "before calling a class quiet. gap:inputs checks every input's status separately. "
+            "Empty means no pattern was noticed in what was observed, "
             "not that the machine is healthy. Leads that cite exact raw rows carry bounded log-local refs; "
             "call each ref's reading (event_record) with its params (log, record_id, time_created) to inspect one again."
         ),

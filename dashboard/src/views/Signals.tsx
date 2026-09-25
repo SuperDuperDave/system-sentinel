@@ -26,6 +26,36 @@ interface Input {
   warnings_total?: number;
 }
 
+type ClassContentInputs = Record<string, string[]>;
+
+interface ClassReach {
+  state: 'all' | 'partial' | 'none' | 'unrecorded';
+  missed: Input[];
+  warned: Input[];
+}
+
+function classReach(cls: string, inputs: Input[], byClass: ClassContentInputs | undefined): ClassReach {
+  const names = byClass?.[cls];
+  if (!Array.isArray(names) || !names.length || !names.every((name) => typeof name === 'string')) {
+    return { state: 'unrecorded', missed: [], warned: [] };
+  }
+  const found = names.map((name) => inputs.find((input) => input.name === name));
+  if (found.some((input) => !input)) return { state: 'unrecorded', missed: [], warned: [] };
+  const selected = found as Input[];
+  const missed = selected.filter((input) => input.outcome !== 'ok' && input.outcome !== 'empty');
+  const warned = selected.filter((input) => (input.outcome === 'ok' || input.outcome === 'empty') && warningCount(input) > 0);
+  return { state: missed.length === selected.length ? 'none' : missed.length ? 'partial' : 'all', missed, warned };
+}
+
+function quietLabel(reach: ClassReach): string {
+  if (reach.state === 'unrecorded') return 'No lead returned · class input reach unrecorded';
+  const missing = reach.missed.map((input) => `${input.name} ${input.outcome}`).join(', ');
+  const warned = reach.warned.length ? `${reach.warned.map((input) => input.name).join(', ')} warned` : '';
+  if (reach.state === 'none') return `Could not assess · ${missing}`;
+  if (reach.state === 'partial') return `No lead from answered inputs · ${missing}${warned ? ` · ${warned}` : ''}`;
+  return warned ? `No lead · ${warned}` : 'No lead returned';
+}
+
 /**
  * Signals: what the tool noticed across several readings at once.
  *
@@ -43,12 +73,12 @@ export function Signals() {
   const reading = taken.reading;
   const signals = section(reading, 'signals') ?? [];
   const head = observed(reading) ? reading?.sections.find((s) => s.name === 'signals') : undefined;
-  const inputs = ((reading?.method ?? {}) as { readings?: Input[] }).readings ?? [];
+  const method = (reading?.method ?? {}) as { readings?: Input[]; class_content_inputs?: ClassContentInputs };
+  const inputs = method.readings ?? [];
   const missingInputs = inputs.some((input) => input.outcome !== 'ok' && input.outcome !== 'empty');
   const warnedInputs = inputs.some((input) => warningCount(input) > 0);
   const emptyLimit = missingInputs && warnedInputs ? 'missing inputs and input warnings limit this reading' : missingInputs ? 'missing inputs limit this reading' : warnedInputs ? 'input warnings may limit this reading' : '';
   const groups = CLASSES.map((cls) => [cls, signals.filter((s) => s.class === cls)] as const);
-  const silent = groups.filter(([, found]) => found.length === 0).map(([cls]) => cls);
 
   useLayoutEffect(() => {
     const saved = returnTo.current;
@@ -72,14 +102,13 @@ export function Signals() {
       {taken.reading && !observed(taken.reading) ? (
         <p className={styles.unobserved}>No input could be observed, so no rule could run. Signals are read from other readings, not from the machine directly.</p>
       ) : null}
-      {head ? <SignalOverview groups={groups} /> : null}
+      {head ? <SignalOverview groups={groups} inputs={inputs} classContentInputs={method.class_content_inputs} /> : null}
       {inputs.length ? <Inputs inputs={inputs} /> : null}
 
       {head && reading ? (
         <div className={styles.section}>
           <Section title="What was noticed" cls={head.class} basis={head.basis}>
             {groups.map(([cls, found]) => (found.length ? <Group key={cls} cls={cls} signals={found} reading={reading} openId={signalId?.startsWith(`${cls}:`) ? signalId.slice(cls.length + 1) : null} onOpenChange={(id) => setSignalId(id === null ? null : `${cls}:${id}`)} /> : null))}
-            {signals.length && silent.length ? <p className={`${styles.silent} readout`}>No signal in {silent.join(', ')}.</p> : null}
           </Section>
         </div>
       ) : null}
@@ -111,7 +140,7 @@ function Group({ cls, signals, reading, openId, onOpenChange }: { cls: string; s
             <Tree value={evidenceWithoutRefRows(s.evidence)} />
             <Citations evidence={s.evidence} />
             <Jumps evidence={s.evidence} sourceKey={`signal:${s.id}`} />
-            <p className={`${styles.from} readout`}>read from {s.readings.join(', ')} · {s.id}</p>
+            <p className={`${styles.from} readout`}>{s.id === 'gap:inputs' ? 'input status checked for' : 'read from'} {s.readings.join(', ')} · {s.id}</p>
             <div className={styles.stackLead}><AddToStack item={{ kind: 'selection', envelope: reading, ids: [s.id], title: s.title }} label="Stack this lead" /></div>
           </div>
         )}
@@ -139,7 +168,7 @@ function Citations({ evidence }: { evidence: Record<string, unknown> }) {
 }
 
 /** The five rule families in one scan, with exact counts and anchors to the evidence below. */
-function SignalOverview({ groups }: { groups: readonly (readonly [string, Signal[]])[] }) {
+function SignalOverview({ groups, inputs, classContentInputs }: { groups: readonly (readonly [string, Signal[]])[]; inputs: Input[]; classContentInputs?: ClassContentInputs }) {
   const max = Math.max(1, ...groups.map(([, found]) => found.length));
   const total = groups.reduce((n, [, found]) => n + found.length, 0);
   return (
@@ -149,16 +178,17 @@ function SignalOverview({ groups }: { groups: readonly (readonly [string, Signal
           <p className="label">Pattern map</p>
           <h2 id="signal-map-title" className="display">Where rules found leads</h2>
         </div>
-        <p className={styles.overviewNote}>{total ? `${total} leads to inspect.` : 'No rule matched the observed inputs.'} Counts show patterns, not health or severity.</p>
+        <p className={styles.overviewNote}>{total ? `${total} ${total === 1 ? 'lead' : 'leads'} to inspect.` : 'No rule matched the observed inputs.'} Counts show patterns, not health or severity.</p>
       </div>
       <div className={styles.classGrid}>
         {groups.map(([cls, found], index) => {
+          const reach = classReach(cls, inputs, classContentInputs);
           const contents = (
             <>
               <span className={`${styles.classTop} readout`}>{String(index + 1).padStart(2, '0')} / {cls}</span>
-              <strong className={styles.classCount}>{found.length}</strong>
+              <strong className={styles.classCount}>{!found.length && reach.state === 'none' ? '—' : found.length}</strong>
               <span className={styles.classBar} aria-hidden="true">{found.length ? <span style={{ width: `${(found.length / max) * 100}%` }} /> : null}</span>
-              <span className={`${styles.classAction} readout`}>{found.length ? `Inspect ${found.length === 1 ? 'lead' : 'leads'} ↗` : 'No lead returned'}</span>
+              <span className={`${styles.classAction} readout`}>{found.length ? `Inspect ${found.length === 1 ? 'lead' : 'leads'} ↗` : quietLabel(reach)}</span>
             </>
           );
           return found.length ? <a href={`#signal-${cls}`} className={styles.classCard} key={cls}>{contents}</a> : <div className={styles.classCard} key={cls}>{contents}</div>;
@@ -255,5 +285,5 @@ const WHAT: Record<string, string> = {
   gaps: 'Places the record has a hole: something that cannot report.',
   pressure: 'Which sources wrote the largest share of returned log records.',
   transitions: 'What the machine did between one power state and the next.',
-  mismatches: 'Where two readings of the same thing do not agree.',
+  mismatches: 'Returned configuration or device state that stands out.',
 };

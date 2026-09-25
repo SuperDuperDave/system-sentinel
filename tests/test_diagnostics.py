@@ -856,6 +856,41 @@ def test_signals_can_be_ok_while_an_input_failed_and_names_that_gap(monkeypatch)
     assert any("power was not observed (failed)" in warning for warning in reading.warnings)
 
 
+def test_signals_names_actual_class_content_reads_beside_missing_input_outcomes():
+    power = _reading("power", [])
+    power.warnings.append("synthetic transition source did not answer")
+    inputs = _inputs(events=_reading("events", [], outcome="failed"), crash=_reading("crash", [], outcome="timeout"), power=power)
+    reading = compose_signals(inputs, {}, {})
+    usage = reading.method["class_content_inputs"]
+    assert usage == {
+        "suppressions": ["hardware", "power", "constraints"],
+        "gaps": ["pcie", "constraints"],
+        "pressure": ["events"],
+        "transitions": ["power", "crash", "reliability"],
+        "mismatches": ["hardware", "pcie"],
+    }
+    by_name = {item["name"]: item for item in reading.method["readings"]}
+    assert by_name["events"]["outcome"] == "failed" and by_name["crash"]["outcome"] == "timeout"
+    assert by_name["power"]["outcome"] == "ok" and by_name["power"]["warnings_total"] == 1
+    leads = reading.section("signals").data
+    assert not any(item["class"] == "pressure" for item in leads)
+    gap = next(item for item in leads if item["id"] == "gap:inputs")
+    assert gap["evidence"]["not_observed"] == {"events": "failed", "crash": "timeout"}
+    assert gap["readings"] == list(inputs), "this lead checks every input outcome, unlike the class content rules"
+
+
+def test_every_lost_content_lead_names_the_input_its_class_inspected():
+    complete = compose_signals(_inputs(), {}, {})
+    baseline = {lead["id"]: lead["class"] for lead in complete.section("signals").data}
+    for name, _ in diagnostics_module.SIGNAL_INPUTS:
+        missing = compose_signals(_inputs(**{name: _reading(name, [], outcome="failed")}), {}, {})
+        returned = {lead["id"] for lead in missing.section("signals").data}
+        lost_classes = {cls for ident, cls in baseline.items() if ident not in returned}
+        classes_that_read_it = {cls for cls, names in missing.method["class_content_inputs"].items() if name in names}
+        assert lost_classes, f"fixture did not exercise a {name} content rule"
+        assert lost_classes <= classes_that_read_it, f"{name} lost a lead without class provenance"
+
+
 def test_the_disabled_device_is_a_suppression_and_the_one_that_will_not_start_is_a_gap():
     signals, _ = take_signals_sync(_inputs())
     assert any(s["id"] == "suppression:disabled:HDAUDIO\\A" for s in signals)

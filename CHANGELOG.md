@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.9.27] - 2026-09-24
+
+### Improved
+- Signals now records which input envelopes each rule family actually inspected in this observation. Agents can join `method.class_content_inputs` with the existing input outcomes and warning counts; the global missing-input lead still checks all input statuses and names them. This adds no machine query or second saved verdict.
+- The five class cards distinguish a quiet result from a class with no answered content input, a partial set of inputs, or an answered input with warnings. The broad “No signal in …” line is removed because it could appear beside failed sources. Older held envelopes say their class input reach was not recorded. The one-lead heading and the mismatches description now match their actual values and rules.
+
+### Limits
+- Class reach describes the content inputs the rules consulted on this run, not every subquery inside an input or proof that a warning hid a lead. Inspect each input's collection section and warning text for exact limits. A quiet class is a result of these rules over this returned scope, never a health verdict.
+
 ## [1.9.26] - 2026-09-24
 
 ### Improved

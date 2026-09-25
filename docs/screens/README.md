@@ -130,6 +130,20 @@ redaction state are visible, complete saved JSON is reachable, and a refused mem
 download available. The capture answers are synthetic, so this checks interface behavior and
 overflow rather than a particular person's saved archive.
 
+The Signals silence check uses the same fixture server and Playwright setup:
+
+```
+NODE_PATH=/some/scratch/dir/node_modules TOKEN_FILE=/some/scratch/dir/token PORT=8021 \
+  node docs/screens/fixtures/check-signals-silence.cjs
+```
+
+At desktop and phone widths it shows a failed Events input as unable to assess pressure, a timed-out
+Crash input with a warning as partial transition reach without calling it an answered warning,
+an answered Power input with a warning as warned, and an older envelope without class input
+provenance as unrecorded. The obsolete broad “No signal in”
+line stays absent. These are synthetic states; the check does not measure their frequency on a
+person's machine.
+
 ## The social preview
 
 `social-preview.png` is the card a shared link to the repository shows: 1280×640, the identity's
