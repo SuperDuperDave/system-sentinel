@@ -57,7 +57,7 @@ Every claim the page at mainthread.ai/work/system-sentinel/ could make about the
 | Claim | Source or check |
 | --- | --- |
 | An agent registers the server once and every reading is a tool | `docs/API.md` ("Claude Code"); check: `claude mcp add --transport http system-sentinel http://127.0.0.1:8000/mcp --header "Authorization: Bearer $TOKEN"` then list tools |
-| Forty-two MCP tools: the thirty-one readings, nine stack tools and two capture tools | `sentinel/mcp_server.py` (`STACK_TOOLS`, `CAPTURE_TOOLS`); check: `tools/list` over JSON-RPC at `/mcp` (see `tests/test_mcp.py`) |
+| Forty-three MCP tools: the thirty-one readings, nine stack tools and three capture tools | `sentinel/mcp_server.py` (`STACK_TOOLS`, `CAPTURE_TOOLS`); check: `tools/list` over JSON-RPC at `/mcp` (see `tests/test_mcp.py`) |
 | Every tool says what it does to the machine: the readings and the read-only stack tools are annotated read-only, `stack_remove` and `stack_clear` destructive, and none of them opens onto the world, so a client stops confirming thirty-one harmless readings | `sentinel/mcp_server.py` (one `effect` per tool, annotations derived from it); `tests/test_mcp.py` |
 | Every reading answers an agent with typed structured content beside the text, against one shared schema for the envelope, so a client branches on `outcome` and a section's `class` as fields rather than parsing a string | `sentinel/mcp_server.py` (`ENVELOPE_SCHEMA`, `structuredContent`); `tests/test_mcp.py` |
 | The prompt library and the catalog are reachable as MCP prompts and resources, not only as tool calls | `sentinel/mcp_server.py` (`prompts/list`, `prompts/get`, `sentinel://catalog`, `sentinel://handoff`); `tests/test_mcp.py` |

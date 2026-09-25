@@ -72,6 +72,7 @@ INSTRUCTIONS = (
     "Stack list and change tools return a provenance index; 'stack_item' returns one complete stored item, "
     "and 'compose' returns the handoff at each item's chosen verbosity, with a structured prompt status and same-snapshot Stack index. "
     "The catalog and that handoff are also resources: sentinel://catalog and sentinel://handoff."
+    " 'capture_list' finds saved observations; 'capture_read' opens a saved manifest or one named reading without asking the machine again."
 )
 
 CATALOG_URI = "sentinel://catalog"
@@ -238,6 +239,14 @@ async def _capture_list(_state: State, _arguments: dict[str, Any], _redactor: Re
     return {"captures": await anyio.to_thread.run_sync(capture.listing)}
 
 
+async def _capture_read(_state: State, arguments: dict[str, Any], redactor: Redactor | None) -> Any:
+    name = str(arguments.get("name") or "")
+    reading = arguments.get("reading")
+    if reading is not None and not isinstance(reading, str):
+        raise ValueError("reading must be a reading name from this capture's manifest")
+    return await anyio.to_thread.run_sync(lambda: capture.read_saved(name, reading, redactor))
+
+
 STACK_TOOLS: dict[str, RouteTool] = {
     tool.name: tool
     for tool in (
@@ -328,6 +337,13 @@ CAPTURE_TOOLS: dict[str, RouteTool] = {
         # Only bounded outcome counts and privacy state leave the manifest; there are no identity
         # fields to reveal through an unredacted variant of this tool.
         RouteTool("capture_list", "The captures on disk, newest first, with each readable manifest's redaction state, reading outcomes and omitted count. Captures are never deleted by the tool.", _NO_ARGUMENTS, _capture_list, carries_machine_data=False),
+        RouteTool(
+            "capture_read",
+            "Read a saved capture's bounded manifest or one named JSON reading, without asking the machine again. "
+            "The answer names its capture and preserves the reading's original asked_at. Redacted by default; the full ZIP remains available over HTTP.",
+            {"type": "object", "properties": {"name": {"type": "string"}, "reading": {"type": "string"}}, "required": ["name"]},
+            _capture_read,
+        ),
     )
 }
 

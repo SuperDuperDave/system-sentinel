@@ -73,9 +73,9 @@ def client():
         yield c
 
 
-def call(surface: Surface, name: str, **arguments) -> types.CallToolResult:
+def call(surface: Surface, tool_name: str, **arguments) -> types.CallToolResult:
     """One tool call, the way the transport makes it. Synchronous like the rest of the suite."""
-    return asyncio.run(surface.call_tool(None, types.CallToolRequestParams(name=name, arguments=arguments)))
+    return asyncio.run(surface.call_tool(None, types.CallToolRequestParams(name=tool_name, arguments=arguments)))
 
 
 def prompt(surface: Surface, name: str) -> types.GetPromptResult:
@@ -149,7 +149,7 @@ def test_every_tool_says_what_it_does_to_the_machine():
     reads = {name for name, tool in listed.items() if tool.annotations.read_only_hint}
     destroys = {name for name, tool in listed.items() if tool.annotations.destructive_hint}
     assert READING_TOOLS <= reads  # taking a reading asks the machine and changes nothing
-    assert {"stack_list", "compose", "prompts_list", "capture_list"} <= reads
+    assert {"stack_list", "compose", "prompts_list", "capture_list", "capture_read"} <= reads
     assert destroys == {"stack_remove", "stack_clear"}
     for name in ("stack_add", "stack_update", "stack_prompt", "capture_create"):
         assert listed[name].annotations.read_only_hint is False and listed[name].annotations.destructive_hint is False, name
@@ -438,3 +438,25 @@ def test_an_unredacted_capture_still_needs_a_reason(surface: Surface):
     assert made["warnings"] == ["unredacted, because: sending it to the board vendor"]
     with zipfile.ZipFile(captures_dir() / made["capture"]) as archive:
         assert json.loads(archive.read("manifest.json"))["reason"] == "sending it to the board vendor"
+
+
+def test_agent_can_read_one_saved_capture_member_without_retaking_it(surface: Surface):
+    made = payload(call(surface, "capture_create", unredacted=True, reason="investigating a prior stop"))
+    name = made["capture"]
+    surface.state.learn()  # Settle the one identity lookup used by default redaction first.
+    scripts = len(surface.state.bridge.scripts)
+
+    index = payload(call(surface, "capture_read", name=name))
+    assert index["capture"]["name"] == name
+    assert "crash" in {entry["reading"] for entry in index["readings"]}
+    assert (call(surface, "capture_read", name=name, reading="events", unredacted=True)).is_error is True
+
+    masked = payload(call(surface, "capture_read", name=name, reading="events"))
+    assert masked["reading"]["reading"] == "events"
+    assert masked["reading"]["sections"][0]["data"][0]["MachineName"] == "<host>"
+    assert "host" in masked["reading"]["redacted"]
+    exact = payload(call(surface, "capture_read", name=name, reading="events", unredacted=True, reason="checking original host fields"))
+    assert exact["reading"]["sections"][0]["data"][0]["MachineName"] == "TESTBOX"
+    assert exact["warnings"][-1] == "unredacted, because: checking original host fields"
+    assert len(surface.state.bridge.scripts) == scripts
+    assert call(surface, "capture_read", name=name, reading="../token").is_error is True

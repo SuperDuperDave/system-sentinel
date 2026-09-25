@@ -6,6 +6,8 @@ import { Head, Segmented, ago, day, size } from '../Sections';
 import { useApp } from '../store';
 import {
   Capture,
+  CaptureContents,
+  CapturedReading,
   Composed,
   Prompt,
   StackItem,
@@ -16,6 +18,8 @@ import {
   composed as composedText,
   createCapture,
   getCaptures,
+  getCaptureContents,
+  getCapturedReading,
   getPrompts,
   patchItem,
   patchPrompt,
@@ -421,6 +425,7 @@ function Captures({ captures, onTaken, guard }: { captures: Capture[]; onTaken: 
                   </>
                 ) : <span>Manifest {captureManifestState(c.manifest?.status)} · privacy and reading outcomes unknown</span>}
               </span>
+              <CaptureContentsView name={c.name} />
             </li>
           ))}
         </ul>
@@ -429,6 +434,84 @@ function Captures({ captures, onTaken, guard }: { captures: Capture[]; onTaken: 
       )}
     </>
   );
+}
+
+/** Open the saved index first, then one member. Neither action asks Windows again. */
+function CaptureContentsView({ name }: { name: string }) {
+  const [open, setOpen] = useState(false);
+  const [contents, setContents] = useState<CaptureContents | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+  const [chosen, setChosen] = useState<string | null>(null);
+  const [held, setHeld] = useState<CapturedReading | null>(null);
+  const [readingProblem, setReadingProblem] = useState<string | null>(null);
+  const setSession = useApp((s) => s.setSession);
+
+  useEffect(() => {
+    if (!open || contents) return;
+    let active = true;
+    setProblem(null);
+    getCaptureContents(name).then((answer) => {
+      if (active) { setContents(answer); setProblem(null); }
+    }).catch((error: unknown) => {
+      if (!active) return;
+      if (error instanceof Unauthorized) setSession('closed');
+      else setProblem(error instanceof Error ? error.message : String(error));
+    });
+    return () => { active = false; };
+  }, [open, contents, name, setSession]);
+
+  useEffect(() => {
+    if (!open || !chosen) return;
+    let active = true;
+    getCapturedReading(name, chosen).then((answer) => {
+      if (active) { setHeld(answer); setReadingProblem(null); }
+    }).catch((error: unknown) => {
+      if (!active) return;
+      if (error instanceof Unauthorized) setSession('closed');
+      else { setHeld(null); setReadingProblem(error instanceof Error ? error.message : String(error)); }
+    });
+    return () => { active = false; };
+  }, [open, chosen, name, setSession]);
+
+  return <details className={styles.captureContents} onToggle={(event) => setOpen(event.currentTarget.open)}>
+    <summary className="readout">Contents · saved readings</summary>
+    {open ? <div className={styles.captureContentsBody}>
+      <p className="readout">These are held observations from the capture. Opening one does not take a new reading. Download the ZIP for every saved member and its original bytes.</p>
+      {problem ? <p className={styles.captureProblem} role="status">Contents unavailable: {problem}. The ZIP download is still available.</p> : null}
+      {!problem && !contents ? <p className="readout">Reading the saved index…</p> : null}
+      {contents ? <>
+        <p className="readout">Captured {contents.capture.captured_at} · Sentinel {contents.capture.version ?? 'version unknown'} · {contents.capture.unredacted ? 'original ZIP was saved unredacted; this view masks known identifiers' : 'original ZIP was saved redacted'}</p>
+        <ul className={styles.savedReadings}>
+          {contents.readings.map((item) => <li key={item.reading}>
+            <button type="button" className={styles.action} aria-pressed={chosen === item.reading} onClick={() => { setChosen(chosen === item.reading ? null : item.reading); setHeld(null); setReadingProblem(null); }}>
+              {item.reading}
+            </button>
+            <span className="readout">{item.outcome} · {size(item.bytes)}{item.observed_by ? ` · observed by ${item.observed_by}` : ''}</span>
+          </li>)}
+        </ul>
+        {contents.omitted_count ? <p className="readout">{contents.omitted_count} selection-dependent {contents.omitted_count === 1 ? 'reading was' : 'readings were'} omitted: {contents.omitted.join(', ') || 'names unavailable'}.</p> : null}
+        {contents.unavailable.length ? <p className="readout">Saved context unavailable: {contents.unavailable.join(', ')}.</p> : null}
+        {chosen ? <div className={styles.savedReading}>
+          {readingProblem ? <p className={styles.captureProblem} role="status">Saved reading unavailable: {readingProblem}. Download the ZIP to inspect the original file.</p> : null}
+          {!held && !readingProblem ? <p className="readout">Opening {chosen} from the capture…</p> : null}
+          {held ? <>
+            <p className="readout"><strong>{held.reading.reading}</strong> · {held.reading.outcome} · taken {held.reading.asked_at} · {held.reading.count ?? 'count unknown'} returned</p>
+            {held.member.saved_redacted.length ? <p className="readout">Masked when saved: {held.member.saved_redacted.join(', ')}.</p> : null}
+            {held.reading.warnings?.length ? <p className="readout">Original reading warnings: {held.reading.warnings.join(' · ')}</p> : null}
+            <SavedReadingJson reading={held.reading} />
+          </> : null}
+        </div> : null}
+      </> : null}
+    </div> : null}
+  </details>;
+}
+
+function SavedReadingJson({ reading }: { reading: CapturedReading['reading'] }) {
+  const [open, setOpen] = useState(false);
+  return <details onToggle={(event) => setOpen(event.currentTarget.open)}>
+    <summary className="readout">Complete saved reading · JSON</summary>
+    {open ? <pre>{JSON.stringify(reading, null, 2)}</pre> : null}
+  </details>;
 }
 
 function captureOutcome(outcome: string): string {

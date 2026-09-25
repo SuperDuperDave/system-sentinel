@@ -117,6 +117,19 @@ after a 401 and fresh sign-in. It also checks that an unanswered changed count m
 without moving focus later. Its readings are synthetic;
 it does not measure the installed application's timing or prove the reported click path.
 
+The saved-capture Contents check uses the same fixture server and Playwright setup:
+
+```
+NODE_PATH=/some/scratch/dir/node_modules TOKEN_FILE=/some/scratch/dir/token PORT=8021 \
+  node docs/screens/fixtures/check-capture-contents.cjs
+```
+
+At desktop and phone widths it verifies that the manifest and selected saved reading load only
+after their controls open, neither action takes a new machine reading, original capture time and
+redaction state are visible, complete saved JSON is reachable, and a refused member leaves the ZIP
+download available. The capture answers are synthetic, so this checks interface behavior and
+overflow rather than a particular person's saved archive.
+
 ## The social preview
 
 `social-preview.png` is the card a shared link to the repository shows: 1280×640, the identity's

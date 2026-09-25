@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.9.26] - 2026-09-24
+
+### Improved
+- A saved capture can now be inspected without taking another machine reading. The dashboard opens its bounded Contents index on demand and lets a person open one held JSON reading beside the ZIP download. The authenticated HTTP routes and MCP `capture_read` provide the same saved manifest and individual reading to agents. Each answer names the capture, retains the reading's original `asked_at`, and distinguishes it from a fresh observation.
+- Default saved-member reads apply the current redaction policy even to a ZIP originally saved unredacted. `member.saved_redacted` keeps the capture-time removal kinds separately; the returned reading's `redacted` list is the union after this read. MCP still requires a reason for an unredacted answer. The selected member must be unique, listed in the manifest, within an 8 MiB uncompressed read limit, and valid JSON with the expected reading identity and outcome.
+
+### Limits
+- Contents is a bounded index, not a full integrity scan of the ZIP. Opening a damaged, mismatched or oversized member refuses it by name; the ZIP download remains the route to every original member and exact bytes. `stack.json` and the plain-text `composed.md` are not exposed by the JSON reading route. A capture saved redacted cannot recover removed values; stacking a returned client envelope keeps supplied-envelope provenance rather than asserting that Sentinel re-took it.
+
 ## [1.9.25] - 2026-09-24
 
 ### Improved

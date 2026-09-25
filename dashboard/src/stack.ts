@@ -68,6 +68,22 @@ export interface Capture {
     | { status: 'missing' | 'unreadable' | 'limit' };
 }
 
+export interface CaptureContents {
+  capture: { name: string; file_bytes: number; captured_at: string; version: string | null; unredacted: boolean; saved_redaction_gaps: string[] | null };
+  readings: { reading: string; outcome: string; bytes: number; took_ms?: number; observed_by?: string; params?: Record<string, unknown>; scope?: string }[];
+  omitted: string[];
+  omitted_count: number;
+  unavailable: string[];
+  scope: string;
+}
+
+export interface CapturedReading {
+  capture: CaptureContents['capture'];
+  member: CaptureContents['readings'][number] & { saved_redacted: string[] };
+  reading: Reading;
+  warnings: string[];
+}
+
 /** The boundary refused this evidence because the stack already holds it. */
 export class Duplicate extends Error {
   readonly id: string;
@@ -138,6 +154,12 @@ export const removePrompt = (id: string): Promise<Prompt[]> =>
   send<{ prompts: Prompt[] }>(`/api/prompts/${id}`, { method: 'DELETE' }).then((b) => b.prompts);
 
 export const getCaptures = (): Promise<Capture[]> => send<{ captures: Capture[] }>('/api/captures').then((b) => b.captures);
+
+export const getCaptureContents = (name: string): Promise<CaptureContents> =>
+  send<CaptureContents>(`/api/captures/${encodeURIComponent(name)}/manifest`);
+
+export const getCapturedReading = (name: string, reading: string): Promise<CapturedReading> =>
+  send<CapturedReading>(`/api/captures/${encodeURIComponent(name)}/readings/${encodeURIComponent(reading)}`);
 
 /**
  * Take readings that need no exact selection and hand back the ZIP. Heavy readings are included,

@@ -117,3 +117,14 @@
 .captureMeta { color: var(--muted); }
 .captureDetails { display: flex; flex-basis: 100%; flex-wrap: wrap; gap: 2px 16px; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
 .captureUnredacted { color: var(--ink); }
+.captureContents { flex-basis: 100%; min-width: 0; margin: 4px 0 0; }
+.captureContents > summary { cursor: pointer; color: var(--ink); width: fit-content; }
+.captureContentsBody { margin: 10px 0 4px; padding: 12px; border: 1px solid var(--rule-soft); min-width: 0; }
+.captureContentsBody p { margin: 0 0 9px; }
+.savedReadings { list-style: none; padding: 0; margin: 10px 0; display: grid; gap: 4px; }
+.savedReadings li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; min-width: 0; }
+.savedReadings button { text-align: left; }
+.savedReading { border-top: 1px solid var(--rule-soft); padding-top: 10px; min-width: 0; }
+.savedReading summary { cursor: pointer; }
+.savedReading pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 48vh; overflow: auto; }
+.captureProblem { color: var(--ink); border-left: 2px solid var(--phosphor); padding-left: 9px; overflow-wrap: anywhere; }

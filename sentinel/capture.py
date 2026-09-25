@@ -23,6 +23,7 @@ import tempfile
 import threading
 import time
 import zipfile
+import zlib
 from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -47,8 +48,21 @@ STACK_MEMBER = "stack.json"
 COMPOSED_MEMBER = "composed.md"
 MANIFEST_MEMBER = "manifest.json"
 MAX_LIST_MANIFEST_BYTES = 256 * 1024
+MAX_READ_MEMBER_BYTES = 8 * 1024 * 1024
+READING_NAME = re.compile(r"^[a-z][a-z0-9_.]{0,63}$")
+_REDACTION_KINDS = {"host", "user", "serial", "mac", "address", "cper"}
 STALE_PENDING_SECONDS = 24 * 60 * 60
 logger = logging.getLogger(__name__)
+
+
+class CaptureReadError(ValueError):
+    """A saved file cannot answer a requested read without inventing evidence."""
+
+    def __init__(self, status: int, code: str, detail: str):
+        self.status = status
+        self.code = code
+        self.detail = detail
+        super().__init__(f"{code}: {detail}")
 
 
 @dataclass(frozen=True)
@@ -232,7 +246,7 @@ def listing() -> list[dict[str, Any]]:
     directory = captures_dir()
     _reap_stale_pending(directory)
     for path in directory.glob("capture-*.zip"):
-        if NAME.match(path.name):
+        if NAME.match(path.name) and not path.is_symlink():
             try:
                 stat = path.stat()
             except OSError:  # a capture removed between the directory scan and this entry
@@ -326,7 +340,183 @@ def find(name: str) -> Path | None:
     if not NAME.match(name):
         return None
     path = captures_dir() / name
-    return path if path.is_file() else None
+    try:
+        return path if not path.is_symlink() and path.is_file() and path.resolve().parent == captures_dir().resolve() else None
+    except OSError:
+        return None
+
+
+def read_saved(name: str, reading: str | None = None, redactor: Redactor | None = None) -> dict[str, Any]:
+    """Read a bounded saved JSON member, never taking another machine reading.
+
+    The manifest is an index, not proof that every ZIP member remains intact. A selected member
+    is checked against both the index and ZIP before its bytes are parsed or returned.
+    """
+    path = find(name)
+    if path is None:
+        raise CaptureReadError(404, "capture_missing", "No capture has that name.")
+    if reading is not None and not READING_NAME.fullmatch(reading):
+        raise CaptureReadError(422, "reading_name", "Choose a reading name from this capture's manifest.")
+    try:
+        with zipfile.ZipFile(path) as archive:
+            manifest, entries = _read_saved_manifest(archive)
+            info = {
+                "name": name,
+                "file_bytes": path.stat().st_size,
+                "captured_at": manifest["created_at"],
+                "version": manifest.get("version"),
+                "unredacted": manifest["unredacted"],
+                "saved_redaction_gaps": manifest.get("redaction_gaps"),
+            }
+            if reading is None:
+                payload = {
+                    "capture": info,
+                    "readings": [_reading_entry(entry) for entry in manifest["members"] if entry["path"].startswith("readings/")],
+                    "omitted": [entry["reading"] for entry in manifest.get("omitted", []) if READING_NAME.fullmatch(entry["reading"])],
+                    "omitted_count": len(manifest.get("omitted", [])),
+                    "unavailable": [entry["member"] for entry in manifest.get("unavailable", [])],
+                    "scope": "Manifest index only; opening a reading checks its saved member. The ZIP holds the full archive.",
+                }
+            else:
+                member_name = READINGS_MEMBER.format(name=reading)
+                indexed = [entry for entry in manifest["members"] if entry.get("path") == member_name]
+                if len(indexed) != 1:
+                    raise CaptureReadError(404, "reading_missing", "That reading is not listed in this capture. Download the ZIP for its full contents.")
+                entry = indexed[0]
+                zipped = entries.get(member_name, [])
+                if len(zipped) != 1:
+                    raise CaptureReadError(422, "member_unreadable", "The saved reading member is missing or duplicated. Download the ZIP for review.")
+                member = zipped[0]
+                if member.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED):
+                    raise CaptureReadError(422, "member_unreadable", "The saved reading uses unsupported compression. Download the ZIP for review.")
+                if member.file_size > MAX_READ_MEMBER_BYTES or entry["bytes"] > MAX_READ_MEMBER_BYTES:
+                    raise CaptureReadError(413, "member_limit", "This reading is too large for one answer. Download the ZIP for full access.")
+                if member.file_size != entry["bytes"]:
+                    raise CaptureReadError(422, "member_unreadable", "The saved reading size disagrees with its manifest. Download the ZIP for review.")
+                raw = archive.open(member).read(member.file_size + 1)
+                if len(raw) != member.file_size:
+                    raise CaptureReadError(422, "member_unreadable", "The saved reading is incomplete. Download the ZIP for review.")
+                try:
+                    saved = json.loads(raw.decode("utf-8"))
+                except (UnicodeError, ValueError) as exc:
+                    raise CaptureReadError(422, "member_unreadable", "The saved reading is not valid JSON. Download the ZIP for review.") from exc
+                if (not isinstance(saved, dict) or saved.get("reading") != reading
+                        or saved.get("outcome") != entry["outcome"] or not isinstance(saved.get("asked_at"), str)
+                        or (isinstance(entry.get("params"), dict) and saved.get("params") != entry["params"])):
+                    raise CaptureReadError(422, "member_mismatch", "The saved reading disagrees with its manifest. Download the ZIP for review.")
+                try:
+                    taken_at = datetime.fromisoformat(saved["asked_at"].replace("Z", "+00:00"))
+                except ValueError as exc:
+                    raise CaptureReadError(422, "member_mismatch", "The saved reading has an invalid time. Download the ZIP for review.") from exc
+                if taken_at.tzinfo is None:
+                    raise CaptureReadError(422, "member_mismatch", "The saved reading time lacks a zone. Download the ZIP for review.")
+                saved_redactions = saved.get("redacted")
+                recorded_redactions = sorted({kind for kind in saved_redactions if isinstance(kind, str) and kind in _REDACTION_KINDS}) if isinstance(saved_redactions, list) else []
+                payload = {
+                    "capture": info,
+                    "member": {**_reading_entry(entry), "saved_redacted": recorded_redactions},
+                    "reading": saved,
+                    "warnings": ["Held observation from this capture; no new machine reading was taken."],
+                }
+                if not manifest["unredacted"]:
+                    payload["warnings"].append("This capture was saved redacted; an unredacted request cannot recover removed values.")
+    except CaptureReadError:
+        raise
+    except (OSError, EOFError, KeyError, ValueError, RuntimeError, NotImplementedError, zipfile.BadZipFile, zlib.error) as exc:
+        raise CaptureReadError(422, "capture_unreadable", "The capture could not be read. Download the ZIP for review.") from exc
+
+    if redactor is None:
+        return payload
+    saved_redactions = payload.get("reading", {}).get("redacted") if reading is not None else None
+    body, removed = redactor.redact(payload)
+    body["redacted"] = removed
+    body["redaction_gaps"] = redactor.gaps()
+    body["capture"]["saved_redaction_gaps"] = payload["capture"]["saved_redaction_gaps"]
+    if reading is not None:
+        held = body["reading"]
+        body["member"]["saved_redacted"] = payload["member"]["saved_redacted"]
+        held["redacted"] = sorted(set(removed) | {kind for kind in saved_redactions if isinstance(kind, str) and kind in _REDACTION_KINDS}) if isinstance(saved_redactions, list) else removed
+        held["redaction_gaps"] = redactor.gaps()
+    return body
+
+
+def _read_saved_manifest(archive: zipfile.ZipFile) -> tuple[dict[str, Any], dict[str, list[zipfile.ZipInfo]]]:
+    entries: dict[str, list[zipfile.ZipInfo]] = {}
+    for info in archive.infolist():
+        # A ZIP path is never extracted. Refusing unsafe names still prevents a malformed archive
+        # from being mistaken for one Sentinel wrote.
+        if info.filename != MANIFEST_MEMBER and info.filename not in (STACK_MEMBER, COMPOSED_MEMBER) and not (
+            info.filename.startswith("readings/") and info.filename.endswith(".json")
+            and READING_NAME.fullmatch(info.filename[len("readings/"):-len(".json")])
+        ):
+            raise CaptureReadError(422, "capture_unreadable", "The capture contains an unsupported member name. Download the ZIP for review.")
+        entries.setdefault(info.filename, []).append(info)
+    manifests = entries.get(MANIFEST_MEMBER, [])
+    if len(manifests) != 1 or manifests[0].file_size > MAX_LIST_MANIFEST_BYTES:
+        raise CaptureReadError(422, "manifest_unreadable", "The capture manifest is missing, duplicated or over its read limit. Download the ZIP for review.")
+    if manifests[0].compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED):
+        raise CaptureReadError(422, "manifest_unreadable", "The capture manifest uses unsupported compression. Download the ZIP for review.")
+    raw = archive.open(manifests[0]).read(MAX_LIST_MANIFEST_BYTES + 1)
+    if len(raw) > MAX_LIST_MANIFEST_BYTES or len(raw) != manifests[0].file_size:
+        raise CaptureReadError(422, "manifest_unreadable", "The capture manifest is incomplete or exceeds its read limit. Download the ZIP for review.")
+    try:
+        manifest = json.loads(raw.decode("utf-8"))
+    except (UnicodeError, ValueError) as exc:
+        raise CaptureReadError(422, "manifest_unreadable", "The capture manifest is not valid JSON. Download the ZIP for review.") from exc
+    if (not isinstance(manifest, dict) or manifest.get("tool") != "system-sentinel"
+            or (manifest.get("version") is not None and not isinstance(manifest["version"], str)) or not isinstance(manifest.get("created_at"), str)
+            or type(manifest.get("unredacted")) is not bool or type(manifest.get("readings")) is not int
+            or not isinstance(manifest.get("members"), list)):
+        raise CaptureReadError(422, "manifest_unreadable", "The capture manifest has an unsupported shape. Download the ZIP for review.")
+    try:
+        stamp = datetime.fromisoformat(manifest["created_at"].replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise CaptureReadError(422, "manifest_unreadable", "The capture time is invalid. Download the ZIP for review.") from exc
+    if stamp.tzinfo is None:
+        raise CaptureReadError(422, "manifest_unreadable", "The capture time lacks a zone. Download the ZIP for review.")
+    seen: set[str] = set()
+    reading_count = 0
+    for entry in manifest["members"]:
+        if not isinstance(entry, dict) or not isinstance(entry.get("path"), str) or type(entry.get("bytes")) is not int or entry["bytes"] < 0:
+            raise CaptureReadError(422, "manifest_unreadable", "The capture member index is invalid. Download the ZIP for review.")
+        path = entry["path"]
+        if path in seen or path not in entries:
+            raise CaptureReadError(422, "manifest_unreadable", "The capture member index is duplicated or missing a member. Download the ZIP for review.")
+        seen.add(path)
+        if path.startswith("readings/"):
+            name = path[len("readings/"):-len(".json")]
+            if entry.get("reading") != name or entry.get("outcome") not in OUTCOMES:
+                raise CaptureReadError(422, "manifest_unreadable", "The capture reading index is invalid. Download the ZIP for review.")
+            reading_count += 1
+        elif path not in (STACK_MEMBER, COMPOSED_MEMBER):
+            raise CaptureReadError(422, "manifest_unreadable", "The capture member index names an unsupported member. Download the ZIP for review.")
+    if reading_count != manifest["readings"]:
+        raise CaptureReadError(422, "manifest_unreadable", "The capture reading count disagrees with its index. Download the ZIP for review.")
+    for key in ("omitted", "unavailable"):
+        if key in manifest and (not isinstance(manifest[key], list) or any(not isinstance(entry, dict) for entry in manifest[key])):
+            raise CaptureReadError(422, "manifest_unreadable", "The capture omission index is invalid. Download the ZIP for review.")
+    if any(not isinstance(entry.get("reading"), str) for entry in manifest.get("omitted", [])) or any(
+        entry.get("member") not in (STACK_MEMBER, COMPOSED_MEMBER) for entry in manifest.get("unavailable", [])
+    ):
+        raise CaptureReadError(422, "manifest_unreadable", "The capture omission index is invalid. Download the ZIP for review.")
+    gaps = manifest.get("redaction_gaps")
+    if gaps is not None and (not isinstance(gaps, list) or any(type(gap) is not str or gap not in ("host", "user") for gap in gaps)):
+        raise CaptureReadError(422, "manifest_unreadable", "The capture redaction index is invalid. Download the ZIP for review.")
+    return manifest, entries
+
+
+def _reading_entry(entry: dict[str, Any]) -> dict[str, Any]:
+    """Expose the useful saved scope, without echoing unknown manifest keys."""
+    result = {key: entry[key] for key in ("reading", "outcome", "bytes")}
+    if type(entry.get("took_ms")) is int and entry["took_ms"] >= 0:
+        result["took_ms"] = entry["took_ms"]
+    if isinstance(entry.get("observed_by"), str) and entry["observed_by"] == "signals":
+        result["observed_by"] = entry["observed_by"]
+    if isinstance(entry.get("params"), dict):
+        result["params"] = entry["params"]
+    if isinstance(entry.get("scope"), str):
+        result["scope"] = entry["scope"]
+    return result
 
 
 def _publish(temporary: Path, at: datetime) -> Path:

@@ -611,6 +611,24 @@ def create_app(state: State | None = None, mcp: bool = True) -> FastAPI:
             raise HTTPException(status_code=404, detail=f"no capture {name!r}")
         return FileResponse(path, media_type="application/zip", filename=path.name)
 
+    @app.get("/api/captures/{name}/manifest", tags=["captures"])
+    def captures_manifest(name: str, unredacted: bool = False) -> JSONResponse:
+        """A bounded index of saved readings, without taking another machine reading."""
+        try:
+            body = capture.read_saved(name, redactor=None if unredacted else state.redactor)
+        except capture.CaptureReadError as exc:
+            raise HTTPException(status_code=exc.status, detail=str(exc)) from exc
+        return JSONResponse(json_safe_integers(body))
+
+    @app.get("/api/captures/{name}/readings/{reading}", tags=["captures"])
+    def captures_reading(name: str, reading: str, unredacted: bool = False) -> JSONResponse:
+        """One held JSON reading, checked against its saved manifest and redacted by default."""
+        try:
+            body = capture.read_saved(name, reading, None if unredacted else state.redactor)
+        except capture.CaptureReadError as exc:
+            raise HTTPException(status_code=exc.status, detail=str(exc)) from exc
+        return JSONResponse(json_safe_integers(body))
+
     if mcp_app is not None:
         # The MCP route joins the main router at exactly /mcp. A mounted sub-app would match
         # only /mcp/, and the static mount at / would answer /mcp with 405 first.

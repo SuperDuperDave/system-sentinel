@@ -380,6 +380,142 @@ def test_captures_are_listed_and_fetched_and_nothing_wanders(client: TestClient)
     assert client.get(f"/api/captures/{name}").status_code == 401
 
 
+def test_capture_manifest_and_one_reading_are_held_evidence_without_a_new_question(client: TestClient):
+    made = client.post("/api/captures", headers=AUTH)
+    assert made.status_code == 200
+    name = made.headers["X-Capture-Name"]
+    original = json.loads(members(made.content)["readings/events.json"])
+    questions = len(client.bridge.scripts)
+
+    assert client.get(f"/api/captures/{name}/manifest").status_code == 401
+    index = client.get(f"/api/captures/{name}/manifest", headers=AUTH)
+    assert index.status_code == 200
+    catalog = index.json()
+    assert catalog["capture"]["name"] == name
+    assert {entry["reading"] for entry in catalog["readings"]} == AUTOMATIC
+    assert catalog["omitted_count"] == len(SELECTED)
+
+    answer = client.get(f"/api/captures/{name}/readings/events", headers=AUTH)
+    assert answer.status_code == 200
+    held = answer.json()
+    assert held["capture"]["name"] == name and held["member"]["reading"] == "events"
+    assert held["member"]["saved_redacted"] == original["redacted"]
+    assert held["reading"] == original
+    assert held["reading"]["asked_at"] == original["asked_at"]
+    assert "Held observation" in held["warnings"][0]
+    assert len(client.bridge.scripts) == questions
+    assert client.get(f"/api/captures/{name}/readings/unknown", headers=AUTH).status_code == 404
+    assert client.get(f"/api/captures/{name}/readings/..%2Ftoken", headers=AUTH).status_code in (404, 422)
+
+
+def test_an_unredacted_capture_is_masked_on_member_read_by_default(client: TestClient):
+    made = client.post("/api/captures?unredacted=true", headers=AUTH)
+    name = made.headers["X-Capture-Name"]
+    original = json.loads(members(made.content)["readings/events.json"])
+    assert original["sections"][0]["data"][0]["MachineName"] == "TESTBOX"
+
+    masked = client.get(f"/api/captures/{name}/readings/events", headers=AUTH).json()
+    assert masked["reading"]["sections"][0]["data"][0]["MachineName"] == "<host>"
+    assert "host" in masked["reading"]["redacted"]
+    assert masked["member"]["saved_redacted"] == []
+    assert masked["capture"]["unredacted"] is True
+    assert "TESTBOX" not in json.dumps(masked)
+
+    exact = client.get(f"/api/captures/{name}/readings/events?unredacted=true", headers=AUTH).json()
+    assert exact["reading"] == original
+    assert exact["reading"]["sections"][0]["data"][0]["MachineName"] == "TESTBOX"
+    assert client.get(f"/api/captures/{name}", headers=AUTH).content == made.content
+
+
+def test_saved_redaction_cannot_be_reversed_by_an_unredacted_member_request(client: TestClient):
+    made = client.post("/api/captures", headers=AUTH)
+    name = made.headers["X-Capture-Name"]
+    answer = client.get(f"/api/captures/{name}/readings/events?unredacted=true", headers=AUTH).json()
+    assert answer["capture"]["unredacted"] is False
+    assert answer["reading"]["sections"][0]["data"][0]["MachineName"] == "<host>"
+    assert "host" in answer["member"]["saved_redacted"]
+    assert any("cannot recover" in warning for warning in answer["warnings"])
+
+
+def test_capture_read_refuses_duplicate_mismatched_oversize_and_unsafe_members():
+    name = "capture-20260920T000030Z.zip"
+    path = captures_dir() / name
+    member = "readings/crash.json"
+    raw = json.dumps({"reading": "crash", "outcome": "empty", "asked_at": "2026-09-20T00:00:00Z"}).encode()
+    base = {"tool": "system-sentinel", "version": __version__, "created_at": "2026-09-20T00:00:00Z", "unredacted": False,
+            "readings": 1, "members": [{"path": member, "reading": "crash", "outcome": "empty", "bytes": len(raw)}]}
+
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("manifest.json", json.dumps(base))
+        archive.writestr(member, raw)
+        with pytest.warns(UserWarning, match="Duplicate name"):
+            archive.writestr(member, raw)
+    with pytest.raises(capture.CaptureReadError, match="duplicated") as duplicate:
+        capture.read_saved(name, "crash")
+    assert duplicate.value.status == 422
+
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("manifest.json", json.dumps({**base, "members": [{**base["members"][0], "bytes": len(raw) + 1}]}))
+        archive.writestr(member, raw)
+    with pytest.raises(capture.CaptureReadError, match="size disagrees") as mismatch:
+        capture.read_saved(name, "crash")
+    assert mismatch.value.status == 422
+
+    wrong = json.dumps({"reading": "events", "outcome": "empty", "asked_at": "2026-09-20T00:00:00Z"}).encode()
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("manifest.json", json.dumps({**base, "members": [{**base["members"][0], "bytes": len(wrong)}]}))
+        archive.writestr(member, wrong)
+    with pytest.raises(capture.CaptureReadError, match="disagrees with its manifest") as identity:
+        capture.read_saved(name, "crash")
+    assert identity.value.status == 422
+
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("manifest.json", json.dumps(base))
+        archive.writestr("../token", "secret")
+        archive.writestr(member, raw)
+    with pytest.raises(capture.CaptureReadError, match="unsupported member name") as unsafe:
+        capture.read_saved(name, "crash")
+    assert unsafe.value.status == 422
+
+    large = b" " * (capture.MAX_READ_MEMBER_BYTES + 1)
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("manifest.json", json.dumps({**base, "members": [{**base["members"][0], "bytes": len(large)}]}))
+        archive.writestr(member, large)
+    with pytest.raises(capture.CaptureReadError, match="too large") as oversized:
+        capture.read_saved(name, "crash")
+    assert oversized.value.status == 413
+
+
+def test_capture_download_and_member_read_refuse_a_symlink_outside_the_capture_directory(client: TestClient, tmp_path):
+    outside = tmp_path / "outside.zip"
+    with zipfile.ZipFile(outside, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("manifest.json", "{}")
+    name = "capture-20260920T000031Z.zip"
+    (captures_dir() / name).symlink_to(outside)
+    assert capture.find(name) is None
+    assert name not in {entry["name"] for entry in capture.listing()}
+    assert client.get(f"/api/captures/{name}", headers=AUTH).status_code == 404
+    assert client.get(f"/api/captures/{name}/manifest", headers=AUTH).status_code == 404
+
+
+def test_capture_index_does_not_echo_unvalidated_member_fields():
+    name = "capture-20260920T000032Z.zip"
+    raw = json.dumps({"reading": "crash", "outcome": "empty", "asked_at": "2026-09-20T00:00:00Z"})
+    manifest = {"tool": "system-sentinel", "version": __version__, "created_at": "2026-09-20T00:00:00Z",
+                "unredacted": False, "readings": 1, "members": [
+                    {"path": "readings/crash.json", "reading": "crash", "outcome": "empty", "bytes": len(raw),
+                     "params": "PRIVATE-HOST", "scope": {"unexpected": "PRIVATE-HOST"}, "took_ms": "PRIVATE-HOST", "observed_by": "PRIVATE-HOST"},
+                    {"path": "stack.json", "bytes": 2, "reading": "PRIVATE-HOST"},
+                ]}
+    with zipfile.ZipFile(captures_dir() / name, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("manifest.json", json.dumps(manifest))
+        archive.writestr("readings/crash.json", raw)
+        archive.writestr("stack.json", "{}")
+    index = capture.read_saved(name)
+    assert [entry["reading"] for entry in index["readings"]] == ["crash"]
+    assert "PRIVATE-HOST" not in json.dumps(index)
+
+
 def test_two_captures_in_the_same_second_do_not_overwrite_each_other(client: TestClient):
     names = {client.post("/api/captures", headers=AUTH).headers["X-Capture-Name"] for _ in range(2)}
     assert len(names) == 2
@@ -689,6 +825,10 @@ def test_listing_counts_omissions_without_echoing_untrusted_manifest_strings():
         if omitted is not None:
             assert listed[name]["omitted"] == omitted
         assert "PRIVATE-HOST" not in json.dumps(listed[name])
+    legacy = capture.read_saved("capture-20260920T000011Z.zip")
+    assert legacy["capture"]["version"] is None
+    assert legacy["omitted_count"] == 1 and legacy["omitted"] == []
+    assert "PRIVATE-HOST" not in json.dumps(legacy)
 
 
 @pytest.mark.host

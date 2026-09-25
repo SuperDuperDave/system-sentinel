@@ -19,7 +19,7 @@ from typing import Any
 
 from scripts.measure_agent_answers import AgentSizeBridge
 from sentinel import __version__
-from sentinel.capture import create
+from sentinel.capture import create, read_saved
 from sentinel.reading import REGISTRY, Reading, Section, Spec
 from sentinel.stack import Prompts, Stack
 
@@ -88,6 +88,8 @@ def measure(*, saturated: bool) -> dict[str, Any]:
                 with zipfile.ZipFile(result.path) as archive:
                     member_bytes = {info.filename: info.file_size for info in archive.infolist()}
                     params = {name: json.loads(archive.read(f"readings/{name}.json"))["params"] for name in extra_calls}
+                answer_bytes = {name: len(json.dumps(read_saved(result.name, name), ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+                                for name in ("signals", "crash", "events")}
                 return {
                     "fixture": "saturated" if saturated else "ordinary",
                     "version": __version__,
@@ -97,6 +99,7 @@ def measure(*, saturated: bool) -> dict[str, Any]:
                     "zip_bytes": result.path.stat().st_size,
                     "uncompressed_bytes": sum(member_bytes.values()),
                     "member_bytes": {name: member_bytes[f"readings/{name}.json"] for name in ("signals", "crash", "events")},
+                    "read_answer_bytes": answer_bytes,
                     "saved_params": params,
                 }
             finally:

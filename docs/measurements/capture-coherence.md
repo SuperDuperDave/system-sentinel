@@ -18,3 +18,14 @@ The ordinary case combines the screen fixture and test reading payloads. The sat
 The seven removed calls are the second takes of Signals' inputs. This is a count reduction, not a measured time saving. The ordinary ZIP grew about 1.7%. The saturated ZIP grew about 179 kB, or 2.49 times its former size, because it now retains evidence Signals had already queried and discarded from the archive. In that case `events.json` grew from 89,499 to 356,663 uncompressed bytes when its saved scope widened from 50 error/critical rows to the actual 200 rows at levels 1–4. `crash.json` grew from 10,517 to 40,129 bytes when the saved stop scope widened from five to twenty. The same raw rows are present in Signals' input observation; trimming the member would break offline inspection of what Signals actually used.
 
 Events and Crash have fixed row and stop limits, but individual event messages and properties can be large. These fixtures do not bound real capture bytes, test Windows latency, estimate how often users make captures or establish a typical compression ratio. A multi-megabyte real Events member or a concrete sharing-size limit would justify a separately designed byte budget with an explicit omitted-byte count; silently narrowing Signals inside captures or discarding the source rows would weaken the evidence contract.
+
+## Saved-member access in 1.9.26
+
+The same synthetic script now opens each named member through `capture.read_saved`, with no additional bridge call, and counts compact UTF-8 JSON answer bytes. Both fixtures still produced 25 source questions. In this run the ordinary ZIP was 72,201 bytes and the saturated ZIP was 298,708 bytes; these ZIP sizes vary slightly with generated timestamps. The selected answers were:
+
+| Fixture | Signals | Crash | Events |
+| --- | ---: | ---: | ---: |
+| Ordinary | 11,296 B | 41,055 B | 31,578 B |
+| Saturated | 12,145 B | 37,590 B | 341,234 B |
+
+The saved-member answer includes capture provenance and the complete selected JSON reading. The ZIP members are pretty-printed, so compact answer bytes can be smaller than saved member bytes even with the wrapper. MCP carries text and structured content for the same answer; the figures count one compact representation, not a client's context use or network transfer. The 8 MiB member read limit is a safety bound, not a measured real-machine maximum. Larger or non-JSON original members remain in the ZIP.
