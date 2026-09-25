@@ -228,14 +228,19 @@ DECODED_BASIS = (
 
 STOPS_BASIS = (
     "Sessions are bounded by Kernel-General 12; a stop is a session that holds a Kernel-Power 41 or a bug check "
-    "report. The EventLog 6008 and the WER-SystemErrorReporting 1001 in the same session belong to that stop, as "
-    "does a BlueScreen report whose time falls inside it; a report that falls in no fetched session is a stop of "
+    "report. A lone EventLog 6008 also establishes a stop when its binary stop estimate falls before this returned "
+    "start, no earlier than the previous returned start when known, and after a previous returned clean shutdown. "
+    "A missing start, repeated marker, unreadable or inconsistent estimate is warned and left unplaced. "
+    "A System WER 1001 alone is warned and left unplaced because its filing time cannot establish the stop's session. "
+    "The EventLog 6008 and the WER-SystemErrorReporting 1001 in an established stop's session are associated "
+    "with it by filing session; this does not prove the 1001's underlying stop is the same one. The same time "
+    "placement applies to a BlueScreen report; a report that falls in no fetched session is a stop of "
     "its own, with only what the report says, and a 41 before the first fetched start is a stop with no known "
     "start, unless the query's record bound is what cut the start off, in which case that session is left for a "
     "larger count. started_at is the start's StartTime, stopped_at is Windows' own estimate from the 6008's binary "
     "value, reported_at is when the report was filed, and last_record_before is the last System record before the "
-    "returned start of a stop the 41 announced; without a returned start, no pre-start lookup is "
-    "made because a record before the 41 may already be from the new boot. The dump is the file "
+    "returned start of a stop the 41 announced; a stop without a returned start or a 41 has no anchored pre-start "
+    "lookup. A record before an unanchored 41 may already be from the new boot. The dump is the file "
     "the 1001 names, else a .dmp the report attached, else "
     "the newest returned dump written between the stop and half an hour past the start or the report, because the file is "
     "written while the machine comes back; matched_by says which. Collection names each event-log query's "
@@ -798,6 +803,13 @@ def compose(payload: dict[str, Any], count: int, moment: str | None) -> dict[str
         unplaced = [g for g in unplaced if g not in session["reports"]]
     if capped and not moment:
         unplaced = []
+    for index, session in enumerate(found):
+        marker, problem = _lone_marker(session, found[index - 1] if index else None)
+        if marker is not None:
+            session["marker"] = marker
+        if problem is not None:
+            session["marker_problem"] = problem
+            warnings.append(problem)
     complete = all(_observed(collection[name]) and not collection[name]["bound_reached"] for name in ("system", "reports"))
     in_session = [
         dict(_stop(session, dumps, before, before_collection,
@@ -886,7 +898,50 @@ def _query_result(value: Any, rows: Any, limit: int | None = None) -> tuple[dict
 
 
 def _is_stop(session: dict[str, Any]) -> bool:
-    return _find(session["records"], KERNEL_POWER, 41) is not None or bool(session.get("reports"))
+    return _find(session["records"], KERNEL_POWER, 41) is not None or bool(session.get("reports")) or bool(session.get("marker"))
+
+
+def _lone_marker(session: dict[str, Any], previous: dict[str, Any] | None) -> tuple[dict[str, Any] | None, str | None]:
+    """Place a 6008 without a 41 only when its own stop estimate fits returned starts."""
+    if _find(session["records"], KERNEL_POWER, 41) is not None or session.get("reports"):
+        return None, None
+    shutdowns = [row for row in session["records"] if _is(row, EVENTLOG, 6008)]
+    bugchecks = [row for row in session["records"] if _is(row, WER_SYSTEM, 1001)]
+    if not shutdowns:
+        if bugchecks:
+            return None, f"System bug-check record {bugchecks[0].get('RecordId')} was returned without a stop anchor; its filing time cannot place the stop in this session."
+        return None, None
+
+    marker = shutdowns[0]
+    label = f"EventLog 6008 record {marker.get('RecordId')}"
+    if session["start"] is None:
+        problem = "the next start was not returned"
+    elif len(shutdowns) != 1:
+        problem = f"{len(shutdowns)} shutdown markers were returned in one session"
+    else:
+        times = stop_times(list(marker.get("Properties") or []))
+        estimate = stamp_key(times[0]) if times else None
+        started = stamp_key(_start_time(session))
+        earlier = stamp_key(_start_time(previous)) if previous and previous["start"] is not None else None
+        clean_rows = [row for row in previous["records"] if _is(row, KERNEL_GENERAL, 13)] if previous else []
+        clean_times = [stamp_key(row.get("TimeCreated")) for row in clean_rows]
+        if estimate is None:
+            problem = "its binary stop estimate could not be read"
+        elif started is None:
+            problem = "the next start time could not be read"
+        elif previous and previous["start"] is not None and earlier is None:
+            problem = "the previous returned start time could not be read"
+        elif any(time is None for time in clean_times):
+            problem = "the previous clean-shutdown time could not be read"
+        elif estimate >= started:
+            problem = "its stop estimate is at or after the next start"
+        elif earlier is not None and estimate < earlier:
+            problem = "its stop estimate is before the previous returned start"
+        elif clean_times and estimate <= max(time for time in clean_times if time is not None):
+            problem = "its stop estimate is at or before a previous returned clean shutdown"
+        else:
+            return marker, None
+    return None, f"{label} reports an unexpected shutdown, but no stop was placed: {problem}."
 
 
 def _start_time(session: dict[str, Any]) -> str | None:
@@ -919,9 +974,11 @@ def _from_moment(found: list[dict[str, Any]], stops: list[dict[str, Any]], orpha
     )[:count]
     if not _is_stop(found[opened]):
         started = first_start["at"]
+        if found[opened].get("marker_problem"):
+            return available, [f"the first start after {moment}, at {started}, could not be classified: {found[opened]['marker_problem']} Later returned stops remain available"], first_start
         if any(not _observed(collection[name]) or collection[name]["bound_reached"] for name in ("system", "reports")) or _reaches(collection["reports"], first_start["started_at"] or started) is not True:
             return available, [f"the first start after {moment}, at {started}, could not be classified because the stop queries or Application retention are incomplete; later returned stops remain available"], first_start
-        return [], [f"the first start after {moment}, at {started}, announced no unplanned stop: no Kernel-Power 41 and no bug check report in that session"], first_start
+        return [], [f"the first start after {moment}, at {started}, announced no unplanned stop: no Kernel-Power 41, EventLog 6008 or bug check report in that session"], first_start
     return available, [], first_start
 
 
@@ -929,7 +986,7 @@ def _stop(session: dict[str, Any], dumps: list[dict[str, Any]], before: dict[Any
     records = session["records"]
     start = session["start"]
     power = _find(records, KERNEL_POWER, 41)
-    shutdown = _find(records, EVENTLOG, 6008)
+    shutdown = session.get("marker") or _find(records, EVENTLOG, 6008)
     wer = _find(records, WER_SYSTEM, 1001)
     groups = session.get("reports") or []
     latest = groups[-1] if groups else None
@@ -940,7 +997,7 @@ def _stop(session: dict[str, Any], dumps: list[dict[str, Any]], before: dict[Any
     stopped_at = stopped[0] if stopped else None
 
     bugcheck = _bugcheck(power, wer, latest)
-    last_record = before.get(start.get("RecordId")) if start else None
+    last_record = before.get(start.get("RecordId")) if start and power else None
     at = started_at or announced_at
     reported_at = _iso(groups[0]["at"]) if groups else None
     no_bugcheck = bool(power) and not bugcheck and _number(_field(power, KERNEL_POWER_41, "BugcheckCode")) == 0
@@ -957,10 +1014,13 @@ def _stop(session: dict[str, Any], dumps: list[dict[str, Any]], before: dict[Any
         "power": _power_facts(power),
         "dump": _dump(wer, latest, dumps, stopped_at, started_at, reported_at),
         "last_record_before": _last_record(last_record),
-        "last_record_collection": before_collection.get(start.get("RecordId") if start else None, {
-            "outcome": "not_returned" if start else "not_requested", "returned": 0,
-            "error": "No lookup result was returned for this stop." if start else "The next start was not returned, so no pre-start record was requested.",
-        }),
+        "last_record_collection": (
+            {"outcome": "not_requested", "returned": 0, "error": "No Kernel-Power 41 anchored a pre-start lookup for this stop."}
+            if start and not power else before_collection.get(start.get("RecordId") if start else None, {
+                "outcome": "not_returned" if start else "not_requested", "returned": 0,
+                "error": "No lookup result was returned for this stop." if start else "The next start was not returned, so no pre-start record was requested.",
+            })
+        ),
         "quiet_seconds": _seconds((last_record or {}).get("TimeCreated"), at) if last_record else None,
         "records": {
             "start": (start or {}).get("RecordId"),
@@ -1403,7 +1463,9 @@ register(
             "and the last System record before the next start, which may be later than the stop estimate. "
             "Give it a moment and it reports what the first start at or after that moment announced "
             "when System retention establishes that start. Otherwise it keeps returned stop and report "
-            "evidence with a warning: the log does not announce a freeze, the next start does."
+            "evidence with a warning: the log does not announce a freeze, the next start does. "
+            "An empty answer can still warn about an unplaced EventLog 6008 or System bug-check record; inspect "
+            "the warnings and raw rows before calling the returned window clean."
         ),
         classes=("raw", "derived"),
         take=take_crash,

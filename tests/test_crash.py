@@ -12,7 +12,8 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-from datetime import UTC
+import struct
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -37,6 +38,7 @@ from sentinel.readings.crash import (
     named,
     since_clause,
 )
+from sentinel.readings.diagnostics import take_signals_sync
 from tests.conftest import FakeBridge, identity_result, log_collector_marker, log_collector_result, real_bridge_or_skip
 from tests.test_dump_inventory import dump_inventory
 
@@ -137,6 +139,16 @@ def clean_sessions(count: int) -> list[dict[str, Any]]:
              "Properties": [f"{day}T22:00:00.0000000Z"]}
         )
     return sorted(out, key=lambda r: r["TimeCreated"], reverse=True)
+
+
+def marker_estimate(row: dict[str, Any], at: str) -> dict[str, Any]:
+    """Put a precise synthetic UTC stop estimate into both 6008 SYSTEMTIME slots."""
+    value = datetime.fromisoformat(at.replace("Z", "+00:00"))
+    words = (value.year, value.month, value.weekday(), value.day, value.hour, value.minute, value.second, value.microsecond // 1000)
+    part = struct.pack("<8H", *words)
+    properties = list(row["Properties"])
+    properties[7] = (part + part).hex().upper()
+    return {**row, "Properties": properties}
 
 
 # ---------------------------------------------------------------- the queries
@@ -275,6 +287,102 @@ def test_a_stop_with_every_record_in_its_session():
     }
     assert stop["quiet_seconds"] == 1038
     assert stop["records"] == {"start": 1000, "power_41": 1001, "eventlog_6008": 1002, "wer_1001": 1003, "report": []}
+
+
+def test_a_lone_6008_with_an_estimate_between_returned_starts_is_a_cited_stop():
+    # A prior clean 13 does not refute the later 6008: both can be in the returned history.
+    system = clean_sessions(1) + [record(1000), record(1002)]
+    reading = crash(payload(system=sorted(system, key=lambda row: row["TimeCreated"], reverse=True), reports=[], before=[]))
+    assert reading.outcome == "ok" and reading.count == 1 and not reading.warnings
+    stop = reading.section("stops").data[0]
+    assert stop["stopped_at"] == "2026-09-05T18:12:44.113Z" and stop["down_seconds"] == 1034
+    assert stop["announced_at"] is None and stop["power"] is None and stop["bugcheck"] is None
+    assert stop["no_bugcheck_recorded"] is False
+    assert stop["records"] == {"start": 1000, "power_41": None, "eventlog_6008": 1002, "wer_1001": None, "report": []}
+    assert stop["last_record_collection"]["outcome"] == "not_requested"
+    assert "No Kernel-Power 41" in stop["last_record_collection"]["error"]
+    lead = next(item for item in take_signals_sync({"crash": reading})[0] if item["id"] == "transition:unexpected-shutdown")
+    assert lead["evidence"]["returned"] == 1
+    assert any(ref["role"] == "eventlog_6008" and ref["params"]["record_id"] == 1002
+               for fact in lead["evidence"]["stops"] for ref in fact["refs"])
+
+
+@pytest.mark.parametrize("case, reason", [
+    ("after_start", "at or after the next start"),
+    ("before_previous", "before the previous returned start"),
+    ("malformed", "binary stop estimate could not be read"),
+    ("repeated", "2 shutdown markers"),
+    ("no_start", "next start was not returned"),
+])
+def test_a_lone_6008_is_not_placed_without_consistent_single_marker_evidence(case: str, reason: str):
+    start, marker = record(1000), record(1002)
+    system = [start, marker]
+    if case == "after_start":
+        system[1] = marker_estimate(marker, "2026-09-05T18:31:00Z")
+    elif case == "before_previous":
+        previous = record(1000)
+        previous["RecordId"] = 999
+        previous["TimeCreated"] = "2026-09-05T18:20:00.0000000Z"
+        previous["Properties"][6] = "2026-09-05T18:19:58.0000000Z"
+        system.insert(0, previous)
+    elif case == "malformed":
+        broken = {**marker, "Properties": list(marker["Properties"])}
+        broken["Properties"][7] = broken["Properties"][7][:40]
+        system[1] = broken
+    elif case == "repeated":
+        system.append({**marker, "RecordId": 1004})
+    else:
+        system = [marker]
+    reading = crash(payload(system=sorted(system, key=lambda row: row["TimeCreated"], reverse=True), reports=[], before=[]))
+    assert reading.outcome == "empty" and reading.count == 0 and reading.section("stops").data == []
+    assert len(reading.section("records").data) == len(reading.section("decoded").data) == len(system)
+    assert any("EventLog 6008 record 1002" in warning and reason in warning for warning in reading.warnings)
+
+
+def test_a_lone_6008_before_the_previous_clean_shutdown_is_not_another_stop():
+    previous = record(1000)
+    previous["RecordId"] = 999
+    previous["TimeCreated"] = "2026-09-05T18:00:00.0000000Z"
+    previous["Properties"][6] = "2026-09-05T17:59:58.0000000Z"
+    clean = clean_sessions(1)[0]
+    clean["TimeCreated"] = "2026-09-05T18:20:00.0000000Z"
+    system = [previous, clean, record(1000), record(1002)]
+    reading = crash(payload(system=sorted(system, key=lambda row: row["TimeCreated"], reverse=True), reports=[], before=[]))
+    assert reading.outcome == "empty" and reading.section("stops").data == []
+    assert any("at or before a previous returned clean shutdown" in warning for warning in reading.warnings)
+
+
+def test_a_system_bug_check_record_without_an_anchoring_stop_stays_visible_but_unplaced():
+    system = [record(1000), record(1003)]
+    body = payload(system=sorted(system, key=lambda row: row["TimeCreated"], reverse=True), reports=[], before=[])
+    reading = crash(body)
+    assert reading.outcome == "empty" and reading.section("stops").data == []
+    assert any("System bug-check record 1003" in warning and "cannot place" in warning for warning in reading.warnings)
+    moment = crash(body, moment="2026-09-05T18:00:00Z")
+    assert moment.outcome == "empty" and any("could not be classified" in warning for warning in moment.warnings)
+    assert not any("announced no unplanned stop" in warning for warning in moment.warnings)
+
+
+def test_a_system_bug_check_record_joins_a_stop_placed_by_6008_without_a_41():
+    system = [record(1000), record(1002), record(1003)]
+    reading = crash(payload(system=sorted(system, key=lambda row: row["TimeCreated"], reverse=True), reports=[], before=[]))
+    assert reading.outcome == "ok" and reading.count == 1 and not reading.warnings
+    stop = reading.section("stops").data[0]
+    assert stop["records"]["power_41"] is None and stop["records"]["eventlog_6008"] == 1002
+    assert stop["records"]["wer_1001"] == 1003
+    assert stop["bugcheck"]["source"] == "WER-SystemErrorReporting 1001"
+
+
+def test_a_session_placed_report_without_a_41_did_not_request_the_pre_start_lookup():
+    report = record(2100)
+    report["TimeCreated"] = "2026-09-05T18:31:00.0000000Z"
+    # Even an inconsistent returned lookup must not become this no-41 stop's pre-start row.
+    reading = crash(payload(system=[record(1000)], reports=[report], before=[load()["before"][0]]))
+    assert reading.outcome == "ok" and reading.count == 1
+    stop = reading.section("stops").data[0]
+    assert stop["records"]["power_41"] is None and stop["records"]["report"] == [2100]
+    assert stop["last_record_collection"]["outcome"] == "not_requested"
+    assert stop["last_record_before"] is None and stop["quiet_seconds"] is None
 
 
 def test_a_stop_whose_start_is_beyond_the_logs_retention():
@@ -471,8 +579,25 @@ def test_a_moment_whose_next_start_announced_nothing_is_empty_and_says_which_sta
     assert reading.section("stops").data == []
     assert reading.warnings == [
         "the first start after 2026-09-06T00:00:00Z, at 2026-09-07T08:00:00.000Z, announced no unplanned stop: "
-        "no Kernel-Power 41 and no bug check report in that session"
+        "no Kernel-Power 41, EventLog 6008 or bug check report in that session"
     ]
+
+
+def test_a_moment_with_only_a_6008_returns_the_first_starts_stop_or_its_uncertainty():
+    system = [record(1000), record(1002)]
+    body = payload(system=sorted(system, key=lambda row: row["TimeCreated"]), reports=[], before=[])
+    observed = crash(body, moment="2026-09-05T18:00:00Z")
+    assert observed.outcome == "ok" and observed.count == 1
+    assert observed.section("coverage").data["first_start"]["established"] is True
+    assert not any("announced no unplanned stop" in warning for warning in observed.warnings)
+
+    broken = record(1002)
+    broken["Properties"][7] = broken["Properties"][7][:40]
+    body = payload(system=sorted([record(1000), broken], key=lambda row: row["TimeCreated"]), reports=[], before=[])
+    uncertain = crash(body, moment="2026-09-05T18:00:00Z")
+    assert uncertain.outcome == "empty" and uncertain.count == 0
+    assert any("first start" in warning and "could not be classified" in warning for warning in uncertain.warnings)
+    assert not any("announced no unplanned stop" in warning for warning in uncertain.warnings)
 
 
 def test_a_moment_with_no_start_after_it_is_empty_and_says_so():

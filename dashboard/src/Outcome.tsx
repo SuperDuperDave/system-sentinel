@@ -86,7 +86,7 @@ export function OutcomeLine<T>({ taken, noun = 'records', singular, emptyText }:
       {taken.held && taken.state === 'lost' ? <p className={`${styles.line} readout`} role="status"><Glyph kind="warn" /> Latest take could not reach Sentinel: {taken.problem}. The held reading remains visible.</p> : null}
       {taken.held && taken.latestFailure ? <p className={`${styles.line} readout`} role="status"><Glyph kind="warn" /> Latest take was not observed: {NOT_OBSERVED[taken.latestFailure.outcome] ?? taken.latestFailure.outcome}{taken.latestFailure.error?.detail ? ` · ${firstLine(taken.latestFailure.error.detail)}` : ''}. The held reading remains visible.</p> : null}
       {r.warnings.length ? (
-        <ul className={styles.warnings} aria-label="What did not answer">
+        <ul className={styles.warnings} aria-label="Warnings and limits">
           {r.warnings.map((w, i) => (
             <li key={i} className={`${styles.warning} readout`}><Glyph kind="warn" /> {firstLine(w)}</li>
           ))}

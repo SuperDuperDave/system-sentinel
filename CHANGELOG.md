@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.9.28] - 2026-09-24
+
+### Improved
+- Crashes now composes a stop from EventLog 6008 without Kernel-Power 41 when its binary stop estimate fits returned starts and the previous returned clean-shutdown record. Its exact 6008 row remains raw, and Signals counts and cites that composed stop once. A stop without a 41 labels the pre-start lookup **not requested**, because the collector only anchors that lookup on a 41.
+- When 6008 is the only stop candidate, a missing start, repeated marker, unreadable or inconsistent estimate stays visible with a warning instead of becoming a confident stop. A System bug-check 1001 by itself also stays visible with a warning because filing time does not place its stop in this session. The Crashes empty line says no stop was established from returned records, leaving these source warnings meaningful. Agents receive the same warning through the reading and MCP guidance.
+
+### Limits
+- A 6008-only stop has no 41 announcement or power fields. Its stop time is Windows' estimate, and a nearby record or matched file is context, not cause. Synthetic cases establish the false-empty state and the correction; they do not establish how often marker-only cases occur. This change adds no Windows query or PowerShell branch.
+
 ## [1.9.27] - 2026-09-24
 
 ### Improved

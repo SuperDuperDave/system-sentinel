@@ -144,6 +144,18 @@ provenance as unrecorded. The obsolete broad “No signal in”
 line stays absent. These are synthetic states; the check does not measure their frequency on a
 person's machine.
 
+The Crash marker check uses that same fixture server and Playwright setup:
+
+```
+NODE_PATH=/some/scratch/dir/node_modules TOKEN_FILE=/some/scratch/dir/token PORT=8021 \
+  node docs/screens/fixtures/check-crash-markers.cjs
+```
+
+At desktop and phone widths it shows a stop supported by EventLog 6008 without a 41, including
+the unrequested pre-start lookup. A second synthetic answer returns a System bug-check marker
+that cannot place a stop, so the empty state stays qualified and the warning remains visible.
+It checks that a new empty answer removes the earlier stop and does not overflow the page.
+
 ## The social preview
 
 `social-preview.png` is the card a shared link to the repository shows: 1280×640, the identity's

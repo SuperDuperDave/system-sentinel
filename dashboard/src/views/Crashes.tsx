@@ -228,7 +228,7 @@ export function Crashes() {
         <Segmented value={stopCount} onChange={(count) => setCrashesView({ stopCount: count })} options={STOP_COUNTS.map((c) => ({ value: c, label: `last ${c}` }))} label="How many stops" />
         {crash.reading ? <AddToStack item={{ kind: 'reading', envelope: crash.reading, title: `Unplanned stops, last ${shownStopCount}` }} label="Stack this reading" /> : null}
       </Head>
-      <OutcomeLine taken={crash} noun="stops" singular="stop" emptyText="No unplanned stop among the starts read" />
+      <OutcomeLine taken={crash} noun="stops" singular="stop" emptyText="No stop established from the returned records" />
       {observed(crash.reading) && stopId && selectedStop === null ? <p ref={missingStopRef} className={`${styles.selectionMissing} readout`} role="status" tabIndex={-1}>The previously selected stop is not in this returned reading.</p> : null}
 
       {observed(crash.reading) && stops.length > 0 ? (
@@ -435,6 +435,7 @@ function StopSequence({ stops, selected, envelope, onInspect, registerButton }: 
               <span className={styles.sequenceLabel}><span className="readout">{String(index + 1).padStart(2, '0')} / returned stop</span><span className="readout">{selected === index ? 'Hide exact stop' : 'Inspect exact stop'}</span></span>
               {!reportOnly ? <span className={styles.sequenceFinding}>
                 <strong>{[stop.bugcheck?.name, stop.bugcheck?.code].filter(Boolean).join(' · ') || (stop.no_bugcheck_recorded === null ? 'Bug check status unknown' : stop.no_bugcheck_recorded ? 'No bug check recorded' : 'No bug check named')}</strong>
+                {stop.records.eventlog_6008 != null && stop.records.power_41 == null ? <span className="readout">No Kernel-Power 41 returned</span> : null}
                 {stop.down_seconds == null ? null : <span className="readout">down {howLong(stop.down_seconds)}</span>}
                 {stop.dump?.name ? <span className="readout">{stop.dump.name}</span> : null}
               </span> : null}
