@@ -64,6 +64,7 @@ Every claim the page at mainthread.ai/work/system-sentinel/ could make about the
 | An unredacted view must say why: `unredacted` without a `reason` is refused, and the reason is carried into the answer's warnings | `sentinel/mcp_server.py`; `tests/test_mcp.py` |
 | The interface is documented for an agent to read without the source | `docs/API.md`; the live form at `/api/docs` and `/api/openapi.json` |
 | An agent reads the same composed handoff a person copies, and needs no clipboard | `sentinel/stack.py` (`compose`), `GET /api/stack/composed`, the `compose` tool |
+| A composed Signals handoff carries bounded saved input scope, outcome, time, warning counts and, for a whole reading, per-run class input reach; it marks missing or oversized provenance instead of inventing a class verdict | `sentinel/stack.py` (`_signal_method_handoff`), `tests/test_stack.py::test_one_signal_can_be_handed_on_with_its_basis_and_evidence`, `::test_signals_input_projection_keeps_unknown_and_oversized_held_method_explicit` |
 | A one-shot agent connected over HTTP MCP and read the machine through the tool | Observed 2026-09-20: `claude -p` with the server registered read `health` and `events` and reported their outcomes; reproduce with the command in `docs/API.md` |
 
 ## The stack and captures

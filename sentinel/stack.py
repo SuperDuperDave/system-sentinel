@@ -15,6 +15,7 @@ and selection are refused rather than stacked twice; a later reading is a new ob
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import threading
@@ -48,6 +49,8 @@ SUMMARY_FAULT_GROUPS = 10
 SUMMARY_FAULT_MODULES = 5
 SUMMARY_CRASH_ISSUES = 10
 SUMMARY_CRASH_STOPS = 20  # Today's crash.MAX_STOPS; excess saved stops get an explicit omitted count.
+SIGNAL_HANDOFF_INPUTS = 16
+SIGNAL_HANDOFF_FIELD_BYTES = 600
 LOG_READINGS = ("events", "record")
 STOP_REF_LOGS = {"start": "System", "power_41": "System", "eventlog_6008": "System", "wer_1001": "System"}
 
@@ -650,6 +653,8 @@ def _item_lines(position: int, item: dict[str, Any]) -> list[str]:
             return lines
 
     lines.append("")
+    if envelope.get("reading") == "signals":
+        lines += _signal_method_handoff(method, selected_signals if item.get("ids") is not None else None)
     if envelope.get("outcome") not in ("ok", "empty"):
         error = envelope.get("error") if isinstance(envelope.get("error"), dict) else {}
         detail = error.get("detail") or ""
@@ -1355,6 +1360,106 @@ def _signal_section(envelope: dict[str, Any]) -> dict[str, Any] | None:
         if section.get("name") == "signals" and isinstance(section.get("data"), list) and all(isinstance(s, dict) and isinstance(s.get("id"), str) for s in section["data"]):
             return section
     return None
+
+
+def _signal_method_handoff(method: dict[str, Any], selected: dict[str, Any] | None) -> list[str]:
+    """Carry bounded input scope and class reach into the text a person can send alone."""
+    raw = method.get("readings")
+    if method.get("kind") != "readings" or not isinstance(raw, list):
+        return ["Input provenance was not recorded in this stored Signals reading.", ""]
+
+    wanted: list[str] | None = None
+    if selected is not None:
+        wanted = list(dict.fromkeys(
+            name for lead in selected["data"] if isinstance(lead.get("readings"), list)
+            for name in lead["readings"] if isinstance(name, str) and len(name) <= 100 and _signal_text_fits(name)
+        ))
+    scoped_names = wanted[:SIGNAL_HANDOFF_INPUTS] if wanted is not None else None
+    entries = [entry for entry in raw if scoped_names is None or (isinstance(entry, dict) and entry.get("name") in scoped_names)]
+    shown: list[dict[str, Any]] = []
+    names: set[str] = set()
+    malformed = 0
+    for entry in entries[:SIGNAL_HANDOFF_INPUTS]:
+        if not isinstance(entry, dict) or not isinstance(entry.get("name"), str) or not (0 < len(entry["name"]) <= 100) or not _signal_text_fits(entry["name"]) or entry["name"] in names:
+            malformed += 1
+            continue
+        names.add(entry["name"])
+        projected: dict[str, Any] = {"name": entry["name"]}
+        for key in ("params", "outcome", "error_kind", "asked_at", "count", "warnings_total"):
+            if key not in entry:
+                continue
+            value = entry[key]
+            if key == "params":
+                projected[key] = _signal_handoff_field(value) if isinstance(value, dict) else {"not_shown": "scope was not recorded as an object"}
+            elif key in ("count", "warnings_total"):
+                if value is None or (isinstance(value, int) and not isinstance(value, bool) and value >= 0):
+                    projected[key] = value
+                else:
+                    projected[key] = "not recorded (invalid stored field)"
+            elif isinstance(value, str):
+                projected[key] = value if _signal_text_fits(value) else "not shown (field exceeds handoff limit)"
+            else:
+                projected[key] = "not recorded (invalid stored field)"
+        shown.append(projected)
+    if scoped_names is not None:
+        available = {entry.get("name") for entry in entries if isinstance(entry, dict) and isinstance(entry.get("name"), str)}
+        shown.extend(
+            {"name": name, "status": "not shown in bounded projection" if name in available else "not recorded in method.readings"}
+            for name in scoped_names if name not in names
+        )
+
+    projection: dict[str, Any] = {"inputs": shown, "omitted_inputs": max(0, len(entries) - SIGNAL_HANDOFF_INPUTS) + (max(0, len(wanted) - SIGNAL_HANDOFF_INPUTS) if wanted is not None else 0)}
+    if wanted == []:
+        projection["selection_inputs"] = "not recorded on selected leads"
+    if malformed:
+        projection["malformed_inputs"] = malformed
+    if wanted is None:
+        reach = method.get("class_content_inputs")
+        projection["class_content_inputs"] = _signal_handoff_field(reach) if _valid_signal_reach(reach) else {"not_recorded": "missing or malformed in this stored reading"}
+    return ["Signals input provenance (bounded projection of the saved method; the complete saved method is in the stored Stack item. This Signals envelope has no input sections; taking an input again is a new observation):", *_json_block(projection), ""]
+
+
+def _signal_handoff_field(value: Any) -> Any:
+    """Keep exact small scopes; mark oversized held values rather than silently clipping them."""
+    if not _small_signal_field(value):
+        return {"not_shown": "field exceeds handoff limit; inspect stored reading"}
+    try:
+        encoded = json.dumps(json_safe_integers(value), ensure_ascii=False, separators=(",", ":"))
+    except (TypeError, ValueError, RecursionError, UnicodeError):
+        return {"not_shown": "field could not be represented; inspect stored reading"}
+    return value if _signal_text_fits(encoded) else {"not_shown": "field exceeds handoff limit; inspect stored reading"}
+
+
+def _signal_text_fits(value: str) -> bool:
+    if len(value) > SIGNAL_HANDOFF_FIELD_BYTES:
+        return False
+    try:
+        return len(value.encode("utf-8")) <= SIGNAL_HANDOFF_FIELD_BYTES
+    except UnicodeError:
+        return False
+
+
+def _small_signal_field(value: Any, depth: int = 0) -> bool:
+    if depth > 3:
+        return False
+    if isinstance(value, str):
+        return _signal_text_fits(value)
+    if isinstance(value, list):
+        return len(value) <= SIGNAL_HANDOFF_INPUTS and all(_small_signal_field(item, depth + 1) for item in value)
+    if isinstance(value, dict):
+        return len(value) <= SIGNAL_HANDOFF_INPUTS and all(
+            isinstance(key, str) and len(key) <= 100 and _signal_text_fits(key) and _small_signal_field(item, depth + 1)
+            for key, item in value.items()
+        )
+    return value is None or isinstance(value, (int, bool)) or (isinstance(value, float) and math.isfinite(value))
+
+
+def _valid_signal_reach(value: Any) -> bool:
+    return isinstance(value, dict) and len(value) <= SIGNAL_HANDOFF_INPUTS and all(
+        isinstance(cls, str) and len(cls) <= 100 and _signal_text_fits(cls) and isinstance(inputs, list) and len(inputs) <= SIGNAL_HANDOFF_INPUTS
+        and all(isinstance(name, str) and len(name) <= 100 and _signal_text_fits(name) for name in inputs)
+        for cls, inputs in value.items()
+    )
 
 
 def _sections(envelope: dict[str, Any]) -> list[dict[str, Any]]:

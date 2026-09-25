@@ -104,6 +104,10 @@ def handoff(envelope: dict, *, ids: list[int | str] | None = None, verbosity: st
     return "\n".join(_item_lines(1, {"kind": "selection" if ids is not None else "reading", "reading": envelope, "ids": ids, "verbosity": verbosity}))
 
 
+def signal_input_projection(text: str) -> dict:
+    return json.loads(text.split("Signals input provenance", 1)[1].split("```json\n", 1)[1].split("\n```", 1)[0])
+
+
 def projected_sections(text: str) -> list[dict]:
     return json.loads(text.split("```json\n", 1)[1].split("\n```", 1)[0])
 
@@ -1033,7 +1037,7 @@ def test_windows_stack_json_has_no_doubled_carriage_returns(tmp_path):
 def test_one_signal_can_be_handed_on_with_its_basis_and_evidence(client: TestClient):
     envelope = {
         "reading": "signals", "params": {}, "asked_at": "2026-09-21T00:00:00Z", "outcome": "ok", "count": 2,
-        "method": {"kind": "readings", "readings": [{"name": "events", "outcome": "ok"}, {"name": "power", "outcome": "ok", "warnings": ["transition query returned only part of its window"], "warnings_total": 1}, {"name": "whea", "outcome": "denied"}]},
+        "method": {"kind": "readings", "readings": [{"name": "events", "outcome": "ok", "params": {"levels": [1, 2, 3, 4], "count": 200}, "asked_at": "2026-09-21T00:00:00Z", "count": 200, "warnings_total": 0}, {"name": "power", "outcome": "ok", "warnings": ["transition query returned only part of its window"], "warnings_total": 1}, {"name": "whea", "outcome": "denied"}], "class_content_inputs": {"pressure": ["events"], "transitions": ["power"]}},
         "warnings": ["power answered with 1 warning; first: transition query returned only part of its window"],
         "sections": [{"name": "signals", "class": "inferred", "basis": "WHEA was not observed.", "data": [
             {"id": "pressure:events", "class": "pressure", "title": "The event log is busy", "summary": "A lead to inspect.", "readings": ["events"], "evidence": {"count": 12}},
@@ -1048,6 +1052,9 @@ def test_one_signal_can_be_handed_on_with_its_basis_and_evidence(client: TestCli
     assert "- reading count: 2" in text and "2 records" not in text
     assert '"basis": "WHEA was not observed."' in text and '"count": 12' in text
     assert "gaps:whea" not in text and "denied" not in text.split("```json")[-1]
+    selected_input = signal_input_projection(text)
+    assert selected_input["inputs"] == [{"name": "events", "params": {"levels": [1, 2, 3, 4], "count": 200}, "outcome": "ok", "asked_at": "2026-09-21T00:00:00Z", "count": 200, "warnings_total": 0}]
+    assert "class_content_inputs" not in selected_input and "denied" not in json.dumps(selected_input)
     assert client.post("/api/stack/items", headers=AUTH, json={"kind": "selection", "ids": ["pressure:events"], "envelope": envelope}).status_code == 409
 
     summary = client.patch(f"/api/stack/items/{item['id']}", headers=AUTH, json={"verbosity": "summary"})
@@ -1055,11 +1062,52 @@ def test_one_signal_can_be_handed_on_with_its_basis_and_evidence(client: TestCli
     text = client.get("/api/stack/composed", headers=AUTH).json()["text"]
     assert "A lead to inspect." in text and '"count": 12' not in text
     assert '"basis": "WHEA was not observed."' in text
+    assert signal_input_projection(text)["inputs"] == selected_input["inputs"]
     later = {**envelope, "asked_at": "2026-09-21T00:05:00Z"}
     assert add(client, kind="selection", ids=["pressure:events"], envelope=later)["id"] != item["id"]
     whole = add(client, kind="reading", envelope=envelope)
+    for verbosity in ("full", "summary"):
+        projection = signal_input_projection(handoff(envelope, verbosity=verbosity))
+        assert projection["class_content_inputs"] == {"pressure": ["events"], "transitions": ["power"]}
+        assert [(source["name"], source["outcome"]) for source in projection["inputs"]] == [("events", "ok"), ("power", "ok"), ("whea", "denied")]
+        assert projection["inputs"][1]["warnings_total"] == 1
     assert add(client, kind="reading", envelope=later)["id"] != whole["id"]
     assert client.post("/api/stack/items", headers=AUTH, json={"kind": "reading", "envelope": later}).status_code == 409
+
+    gap = {**envelope, "sections": [{"name": "signals", "class": "inferred", "basis": "Each input status checked.", "data": [{"id": "gap:inputs", "class": "gaps", "title": "An input did not answer", "summary": "A hole.", "readings": ["events", "power", "whea"]}]}]}
+    assert [source["name"] for source in signal_input_projection(handoff(gap, ids=["gap:inputs"]))["inputs"]] == ["events", "power", "whea"]
+
+
+def test_signals_input_projection_keeps_unknown_and_oversized_held_method_explicit():
+    envelope = {
+        "reading": "signals", "params": {}, "asked_at": "2026-09-21T00:00:00Z", "outcome": "unavailable",
+        "error": {"detail": "no input answered"}, "method": {"kind": "readings"},
+        "sections": [{"name": "signals", "class": "inferred", "basis": "Nothing observed.", "data": []}],
+    }
+    old = handoff(envelope)
+    assert "Input provenance was not recorded" in old and "was not observed" in old
+    envelope["method"] = {"kind": "readings", "readings": [{"name": "events", "outcome": "failed", "params": {"count": 200}}]}
+    unavailable = handoff(envelope)
+    assert signal_input_projection(unavailable)["inputs"] == [{"name": "events", "params": {"count": 200}, "outcome": "failed"}]
+    assert unavailable.index("Signals input provenance") < unavailable.index("was not observed")
+    entries = [{"name": f"source-{n}", "outcome": "ok", "params": {"scope": "x" * 800}} for n in range(17)]
+    entries.insert(1, {"outcome": "failed"})
+    envelope["method"] = {"kind": "readings", "readings": entries, "class_content_inputs": "invalid"}
+    projected = signal_input_projection(handoff(envelope))
+    assert projected["omitted_inputs"] == 2 and projected["malformed_inputs"] == 1
+    assert projected["inputs"][0]["params"] == {"not_shown": "field exceeds handoff limit; inspect stored reading"}
+    assert projected["class_content_inputs"] == {"not_recorded": "missing or malformed in this stored reading"}
+
+
+def test_signals_input_scope_is_redacted_in_the_composed_handoff(client: TestClient):
+    envelope = {
+        "reading": "signals", "params": {}, "asked_at": "2026-09-21T00:00:00Z", "outcome": "empty",
+        "method": {"kind": "readings", "readings": [{"name": "events", "params": {"target": "TESTBOX"}, "outcome": "ok"}], "class_content_inputs": {"pressure": ["events"]}},
+        "sections": [{"name": "signals", "class": "inferred", "basis": "No pressure lead in this scope.", "data": []}],
+    }
+    add(client, kind="reading", envelope=envelope)
+    text = client.get("/api/stack/composed", headers=AUTH).json()["text"]
+    assert "TESTBOX" not in text and '"target": "<host>"' in text
 
 
 def test_a_selection_cannot_name_evidence_absent_from_its_reading(client: TestClient):

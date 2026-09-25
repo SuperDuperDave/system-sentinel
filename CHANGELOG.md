@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.9.29] - 2026-09-24
+
+### Improved
+- A composed Signals Stack handoff now carries a bounded projection of each input's recorded scope, outcome, time, count, refined error and warning count. Whole readings also carry the per-run class-to-input reach map. Selected leads show only their named inputs. This lets a person paste the handoff and lets an agent judge missing coverage and repeat a cited reading at its recorded scope, when present, without first fetching the stored item.
+- Old or malformed saved Signals methods say their input provenance was not recorded. Oversized held fields and omitted entries are labeled instead of being clipped into misleading exact scopes. The complete saved method remains available from the authenticated Stack item. Input sections are not in a Signals envelope; a separate read has a new time, and a capture holds its own input observations.
+
+### Limits
+- The handoff projects method metadata, not the input envelopes. Its top-level warnings carry only the first warning from each answered input; `warnings_total` can indicate more. A new input reading is a new observation, so compare its time with the saved input's `asked_at`. A held envelope is still labeled as supplied, not verified machine evidence.
+
 ## [1.9.28] - 2026-09-24
 
 ### Improved
