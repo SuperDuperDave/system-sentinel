@@ -3,6 +3,7 @@ import { Reading, Unauthorized, observed } from '../api';
 import { CaseSummary, openCase } from '../cases';
 import { Lead, StopLike, bugcheckWords, caseForStop, dayOf, lasted, leadExhibit, stopExhibit, stopMoment, stopTitle, timeOf, when } from '../exhibits';
 import { ago, duration, part } from '../Sections';
+import { WithCodes } from '../WithCodes';
 import { useApp } from '../store';
 import { useCaseList } from '../useCases';
 import { Taken, useReading } from '../useReading';
@@ -43,7 +44,8 @@ export function Home() {
           </div>
           <Review pending={pending} />
         </div>
-      ) : <StartingPoints crash={crash} signals={signals} cases={list} first />}
+      ) : cases.state === 'loading' ? <p className={styles.quiet} role="status">Opening your cases…</p>
+        : <StartingPoints crash={crash} signals={signals} cases={list} first />}
 
       {cases.state === 'unavailable' ? (
         <p className={styles.unavailable}>This server does not answer the case routes, so cases cannot be kept here. The readings still work; the case routes are a draft this prototype asks of the API.</p>
@@ -68,7 +70,7 @@ export function Home() {
 function MachineLine({ system, crash, signals }: { system: Taken<unknown>; crash: Taken<unknown>; signals: Taken<unknown> }) {
   const snapshot = part<Snapshot>(system.reading, 'snapshot');
   const stops = (part<StopLike[]>(crash.reading, 'stops') ?? []).filter((s) => stopMoment(s));
-  const latest = stops.map(stopMoment).filter((m): m is string => !!m).sort().pop();
+  const latest = stops.map(stopMoment).filter((m): m is string => !!m).sort((a, b) => Date.parse(a) - Date.parse(b)).pop();
   const inputs = (signals.reading?.method.readings as { name: string; outcome: string }[] | undefined) ?? [];
   const missing = inputs.filter((r) => r.outcome !== 'ok' && r.outcome !== 'empty');
   return (
@@ -129,10 +131,7 @@ function CaseRow({ c }: { c: CaseSummary }) {
 function Review({ pending }: { pending: (CaseSummary['pending'][number] & { caseId: string; caseTitle: string })[] }) {
   const openCaseView = useApp((s) => s.openCase);
   const sorted = [...pending].sort((a, b) => b.received_at.localeCompare(a.received_at));
-  function review(caseId: string, id: string) {
-    openCaseView(caseId);
-    history.replaceState(history.state, '', `${location.pathname}${location.search}#${id}`);
-  }
+  const review = (caseId: string, id: string) => openCaseView(caseId, id);
   return (
     <section className={styles.review} aria-labelledby="awaiting-review">
       <h2 id="awaiting-review" className={styles.sectionTitle}>Awaiting your review</h2>
@@ -140,8 +139,8 @@ function Review({ pending }: { pending: (CaseSummary['pending'][number] & { case
         <ul className={styles.proposals}>
           {sorted.map((p) => (
             <li key={p.id} className={styles.proposal}>
-              <p className={styles.proposalRoute}>Proposed through the API · {ago(p.received_at)} · for <span className={styles.proposalCase}>{p.caseTitle}</span></p>
-              <blockquote className={styles.claim}>{p.claim}</blockquote>
+              <p className={styles.proposalRoute}>Proposed {p.route === 'api' ? 'through the API' : 'in the dashboard'} · {ago(p.received_at)} · for <span className={styles.proposalCase}>{p.caseTitle}</span></p>
+              <blockquote className={styles.claim}><WithCodes text={p.claim} /></blockquote>
               <p className={styles.proposalBasis}>
                 Cites {p.cites} · read {p.read} {p.read === 1 ? 'reading' : 'readings'}
                 {p.not_observed ? <> · <span className={styles.warnWord}>{p.not_observed} not observed</span></> : null}
@@ -150,7 +149,7 @@ function Review({ pending }: { pending: (CaseSummary['pending'][number] & { case
             </li>
           ))}
         </ul>
-      ) : <p className={styles.quiet}>Nothing waiting. An agent with the token can propose evidence to an open case; it enters only when you accept it.</p>}
+      ) : <p className={styles.quiet}>Nothing waiting. Anything holding this machine’s token can propose to an open case; proposals wait here until someone decides in the dashboard.</p>}
     </section>
   );
 }
@@ -214,7 +213,7 @@ function LeadPoint({ lead, envelope }: { lead: Lead; envelope: Reading }) {
   return (
     <li className={styles.point}>
       <span className={styles.pointWhen}><span className={styles.leadMark} aria-hidden="true" />Lead</span>
-      <span className={styles.pointWhat}>{lead.title}.</span>
+      <span className={styles.pointWhat}><WithCodes text={lead.title} />.</span>
       <span className={styles.pointActions}>
         <StartCase title={lead.title} from={{ kind: 'lead', label: `the lead “${lead.title}”` }} exhibit={() => leadExhibit(lead, envelope)} />
         <button className={styles.quietButton} onClick={() => { setSignalId(lead.id); setView('signals'); }}>Its rule</button>

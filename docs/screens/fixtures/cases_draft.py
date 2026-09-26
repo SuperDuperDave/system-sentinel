@@ -58,6 +58,10 @@ def _exhibit(case: dict[str, Any], body: dict[str, Any], route: str, at: str, ac
 
 
 def _same(a: dict[str, Any], b: dict[str, Any]) -> bool:
+    """A selection names records, so the same records from the same reading are the same exhibit
+    whenever they were taken; a whole reading is a new observation each time it is taken."""
+    if a.get("ids") and b.get("ids"):
+        return a.get("reading") == b.get("reading") and sorted(map(str, a["ids"])) == sorted(map(str, b["ids"]))
     keys = ("kind", "reading", "params", "asked_at", "ids", "note")
     return all(a.get(k) == b.get(k) for k in keys)
 
@@ -85,6 +89,10 @@ def _missing(what: str) -> JSONResponse:
     return JSONResponse({"error": "not_found", "detail": f"no such {what}"}, status_code=404)
 
 
+def _closed() -> JSONResponse:
+    return JSONResponse({"error": "closed", "detail": "this case is closed; reopen it to change its evidence"}, status_code=409)
+
+
 ROUTE_WORDS = {"dashboard": "in the dashboard", "api": "through the API"}
 
 
@@ -92,16 +100,20 @@ def compose(case: dict[str, Any]) -> str:
     lines = [f"# Case: {case['title']}", "", f"State: {case['state']}. Opened {case['opened_at']} from {case['opened_from'].get('label', 'a question')}."]
     if case["notes"]:
         lines += ["", "## The person's notes", "", case["notes"]]
-    lines += ["", "## Evidence, in the order it happened", ""]
-    placed = sorted(case["evidence"], key=lambda e: (e.get("moment") is None, e.get("moment") or ""))
+    lines += ["", "## Evidence, in the order it happened, then the leads the person accepted", ""]
+    placed = sorted(case["evidence"], key=lambda e: (e["kind"] == "claim", e.get("moment") is None, _epoch(e.get("moment"))))
     for e in placed:
         tag = f"Exhibit {e['n']} · {e.get('reading') or e['kind']} · {', '.join(e['classes']) or 'no class'} · taken {e.get('asked_at') or 'unknown'}"
-        how = "proposed through the API, accepted in the dashboard" if e["accepted_from"] else f"added {ROUTE_WORDS[e['route']]}"
+        proposal = next((p for p in case["proposals"] if p["id"] == e["accepted_from"]), None)
+        how = f"proposed {ROUTE_WORDS[proposal['route']]}, accepted {ROUTE_WORDS[e['route']]}" if proposal else f"added {ROUTE_WORDS[e['route']]}"
         lines.append(f"- {e['title']} ({tag}; {how})")
         for key, value in e.get("facts") or []:
             lines.append(f"  - {key}: {value}")
         if e.get("ids"):
             lines.append(f"  - Records: {', '.join(str(i) for i in e['ids'])}")
+        for cite in e.get("citations") or []:
+            ids = f", records {', '.join(str(i) for i in cite['ids'])}" if cite.get("ids") else ""
+            lines.append(f"  - Cites: {cite.get('label')} ({cite.get('reading')}{ids}{', ' + cite['moment'] if cite.get('moment') else ''})")
     declined = [p for p in case["proposals"] if p["state"] == "declined"]
     if declined:
         lines += ["", "## Proposals the person declined", ""]
@@ -174,6 +186,8 @@ def build_router() -> APIRouter:
             case = _cases.get(case_id)
             if not case:
                 return _missing("case")
+            if case["state"] != "open":
+                return _closed()
             twin = next((e for e in case["evidence"] if _same(e, body)), None)
             if twin:
                 return JSONResponse({"error": "duplicate", "id": twin["id"], "n": twin["n"]}, status_code=409)
@@ -193,6 +207,8 @@ def build_router() -> APIRouter:
             case = _cases.get(case_id)
             if not case:
                 return _missing("case")
+            if case["state"] != "open":
+                return _closed()
             proposal = {"id": _id("pr"), "claim": claim[:2000], "cites": body["cites"], "read": body.get("read") or [],
                         "received_at": at, "route": route, "state": "pending", "decided_at": None, "decline_reason": None}
             case["proposals"].append(proposal)
@@ -210,15 +226,21 @@ def build_router() -> APIRouter:
             proposal = next((p for p in (case or {}).get("proposals", []) if p["id"] == proposal_id), None)
             if not case or not proposal:
                 return _missing("proposal")
+            if case["state"] != "open":
+                return _closed()
+            if route != "dashboard":
+                # A convention, not a boundary: the token can mint a session cookie. It keeps
+                # "accepted in the dashboard" true for every accepted item.
+                return JSONResponse({"error": "dashboard_only", "detail": "proposals are decided in the dashboard"}, status_code=403)
             if proposal["state"] != "pending":
                 return JSONResponse({"error": "decided", "detail": f"this proposal was already {proposal['state']}"}, status_code=409)
             proposal["state"], proposal["decided_at"] = ("accepted" if decision == "accept" else "declined"), at
             if decision == "accept":
                 exhibit = _exhibit(case, {"kind": "claim", "title": proposal["claim"], "classes": ["inferred"],
-                                          "citations": proposal["cites"], "moment": body.get("moment") or _first_moment(proposal)},
+                                          "citations": proposal["cites"], "moment": _latest_moment(proposal)},
                                    route, at, accepted_from=proposal["id"])
                 case["evidence"].append(exhibit)
-                _log(case, at, route, f"Accepted a proposal as exhibit {exhibit['n']}", exhibit["id"])
+                _log(case, at, route, f"Accepted a proposal as lead {exhibit['n']}", exhibit["id"])
             else:
                 proposal["decline_reason"] = str(body.get("reason") or "")[:2000] or None
                 _log(case, at, route, "Declined a proposal", proposal["id"])
@@ -239,9 +261,19 @@ def build_router() -> APIRouter:
     return router
 
 
-def _first_moment(proposal: dict[str, Any]) -> str | None:
-    moments = sorted(c["moment"] for c in proposal["cites"] if c.get("moment"))
-    return moments[-1] if moments else None
+def _epoch(stamp: str | None) -> float:
+    if not stamp:
+        return float("inf")
+    try:
+        return datetime.fromisoformat(stamp.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return float("inf")
+
+
+def _latest_moment(proposal: dict[str, Any]) -> str | None:
+    """The latest moment a proposal cites, compared as times, not as text."""
+    moments = [c["moment"] for c in proposal["cites"] if c.get("moment") and _epoch(c["moment"]) != float("inf")]
+    return max(moments, key=_epoch) if moments else None
 
 
 def install(app: FastAPI) -> None:
@@ -291,15 +323,15 @@ def seed() -> None:
     ]
     froze["proposals"] = [
         {"id": "pr_display_cause", "claim": "The display driver caused both freezes.",
-         "cites": [{"label": "Display 4101 before the Sep 12 stop", "reading": "crash", "params": {"count": 5}, "ids": [1295], "moment": "2026-09-12T06:10:45.000Z"}],
+         "cites": [{"label": "Display 4101 before the Sep 12 stop", "reading": "crash", "log": "System", "params": {"count": 5}, "ids": [1295], "moment": "2026-09-12T06:10:45.000Z"}],
          "read": [dict(CRASH_READ, asked_at="2026-09-24T22:05:10Z")],
          "received_at": "2026-09-24T22:05:31Z", "route": "api", "state": "declined", "decided_at": "2026-09-25T07:58:00Z",
          "decline_reason": "Not established. It cites one stop; the Sep 5 stop's last record is a storage reset, not the display."},
         {"id": "pr_same_bugcheck", "claim": "The stop on Sep 5 carries the same bug check, 0x133 DPC_WATCHDOG_VIOLATION. "
                                              "A shared code is a lead: whether the two stops share a cause is for their dumps and the record before each start to say.",
          "cites": [
-             {"label": "The stop on Sep 5 · Kernel-Power 41", "reading": "crash", "params": {"count": 5}, "ids": [1001], "moment": "2026-09-05T18:12:44.113Z", "stop": STOP_SEP05},
-             {"label": "The stop on Sep 12 · Kernel-Power 41", "reading": "crash", "params": {"count": 5}, "ids": [1301], "moment": "2026-09-12T06:11:02.000Z", "stop": STOP_SEP12},
+             {"label": "The stop on Sep 5 · Kernel-Power 41", "reading": "crash", "log": "System", "params": {"count": 5}, "ids": [1001], "moment": "2026-09-05T18:12:44.113Z", "stop": STOP_SEP05},
+             {"label": "The stop on Sep 12 · Kernel-Power 41", "reading": "crash", "log": "System", "params": {"count": 5}, "ids": [1301], "moment": "2026-09-12T06:11:02.000Z", "stop": STOP_SEP12},
              {"label": "Lead: 2 stops share bug check 0x133", "reading": "signals", "params": {}, "signal": "transition:repeated-stop:0x133"},
          ],
          "read": [dict(CRASH_READ, asked_at="2026-09-25T07:41:02Z"),
@@ -308,7 +340,7 @@ def seed() -> None:
          "received_at": "2026-09-25T07:41:20Z", "route": "api", "state": "pending", "decided_at": None, "decline_reason": None},
         {"id": "pr_storage_before", "claim": "The last System record before the Sep 5 restart is storahci 129, a reset issued to a storage device, "
                                               "4 s before Windows' stop estimate. It is a record near the stop, not a cause.",
-         "cites": [{"label": "storahci 129 · System 995", "reading": "crash", "params": {"count": 5}, "ids": [995], "moment": "2026-09-05T18:12:40.000Z"}],
+         "cites": [{"label": "storahci 129 · System 995", "reading": "crash", "log": "System", "params": {"count": 5}, "ids": [995], "moment": "2026-09-05T18:12:40.000Z"}],
          "read": [dict(CRASH_READ, asked_at="2026-09-25T07:41:02Z")],
          "received_at": "2026-09-25T08:02:00Z", "route": "api", "state": "pending", "decided_at": None, "decline_reason": None},
     ]

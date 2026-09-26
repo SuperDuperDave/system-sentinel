@@ -242,7 +242,7 @@ function CaseBar({ id }: { id: string }) {
       </span>
       <span className={styles.caseBarActions}>
         <button className={styles.caseBarBack} onClick={() => openCase(id)}>Back to the case</button>
-        <button className={styles.caseBarRelease} onClick={releaseCase}>Set it down</button>
+        <button className={styles.caseBarRelease} onClick={releaseCase} aria-label="Set the case down: stop adding to it"><span className={styles.caseBarReleaseWords}>Set it down</span><span className={styles.caseBarX} aria-hidden="true" /></button>
       </span>
     </div>
   );
@@ -288,7 +288,6 @@ function NavChoices({ view, onChoose, onDevices, onCase }: { view: ViewId; onCho
     <div className={styles.navGroup}>
       <span className={styles.navGroupLabel}>Agent</span>
       {item('agents')}
-      {item('stack')}
       <button className={styles.navItem} onClick={onDevices} aria-haspopup="dialog">
         <NavIcon name="device" />
         <span>Sign in another device</span>

@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { Cls, EventRecord, Reading, Unauthorized, take } from './api';
 import { AlreadyEvidence, CaseSummary, CasesUnavailable, NewExhibit, StopRef, addEvidence, classesOf, listCases, openCase, recordsIn } from './cases';
 import { firstLine } from './Outcome';
+import { Lead, leadExhibit } from './exhibits';
+import { part } from './Sections';
 import { useApp } from './store';
 import type { NewItem } from './stack';
 import styles from './AddEvidence.module.css';
@@ -122,6 +124,11 @@ async function exhibitOf(item: EvidenceItem): Promise<NewExhibit> {
   if (item.kind === 'note') return { ...empty, kind: 'note', title: item.title ?? 'Note', note: item.note };
   const envelope: Reading = 'envelope' in item ? item.envelope : await take(item.take.name, item.take.params as Record<string, string>);
   const ids = item.kind === 'selection' ? item.ids : null;
+  // A lead picked from Leads is the same exhibit as one opened from Home: one shape per kind.
+  if (envelope.reading === 'signals' && ids?.length === 1) {
+    const lead = (part<Lead[]>(envelope, 'signals') ?? []).find((l) => l.id === String(ids[0]));
+    if (lead) return leadExhibit(lead, envelope);
+  }
   const records = ids ? recordsIn(envelope, ids).sort((a, b) => Date.parse(a.TimeCreated) - Date.parse(b.TimeCreated)) : [];
   const params = envelope.params ?? {};
   const moment = item.moment ?? records[0]?.TimeCreated ?? (typeof params.before === 'string' ? params.before : null);

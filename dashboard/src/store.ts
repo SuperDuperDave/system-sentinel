@@ -110,7 +110,7 @@ function qualifiedMoment(value: string): string | null {
     ? value : new Date(parsed).toISOString();
 }
 
-function writeAddress(view: ViewId, moment: string | null, state: object | null = null) {
+function writeAddress(view: ViewId, moment: string | null, state: object | null = null, anchor: string | null = null) {
   const url = new URL(window.location.href);
   if (view === 'home') url.searchParams.delete('view');
   else url.searchParams.set('view', view);
@@ -119,7 +119,7 @@ function writeAddress(view: ViewId, moment: string | null, state: object | null 
   else url.searchParams.delete('case');
   if (moment) url.searchParams.set('moment', moment);
   else url.searchParams.delete('moment');
-  url.hash = '';
+  url.hash = anchor ?? '';
   history.pushState(state, '', url);
 }
 
@@ -138,8 +138,8 @@ interface AppState {
   caseTitle: string | null;
   /** Hold a case without leaving this view: adding to a case from a lens makes it the one in hand. */
   holdCase: (id: string, title: string) => void;
-  /** Open a case, or with null set the current one down and go home. */
-  openCase: (id: string | null) => void;
+  /** Open a case, or with null set the current one down and go home; `anchor` lands on one item in it. */
+  openCase: (id: string | null, anchor?: string) => void;
   /** Keep working in this view but stop adding to the case. */
   releaseCase: () => void;
   /** Bumped after any case changes, so the rail, home and the case read the server again. */
@@ -191,10 +191,10 @@ export const useApp = create<AppState>((set, get) => ({
     set({ caseId: id, caseTitle: title });
     if (changed) writeAddress(get().view, get().moment);
   },
-  openCase: (id) => {
+  openCase: (id, anchor) => {
     const view: ViewId = id ? 'case' : 'home';
     set((state) => ({ caseId: id, caseTitle: id === state.caseId ? state.caseTitle : null, view, viewScroll: { ...state.viewScroll, [state.view]: window.scrollY } }));
-    writeAddress(view, get().moment);
+    writeAddress(view, get().moment, null, anchor ?? null);
   },
   casesVersion: 0,
   bumpCases: () => set((state) => ({ casesVersion: state.casesVersion + 1 })),
@@ -233,5 +233,9 @@ export const useApp = create<AppState>((set, get) => ({
   spaceView: INITIAL_SPACE_VIEW,
   setSpaceView: (change) => set((state) => ({ spaceView: change(state.spaceView) })),
   clearViewContext: () => set({ viewScroll: {}, crashesView: { ...INITIAL_CRASHES_VIEW }, signalId: null, recordOrigin: null, recordReturnKey: null, spaceView: INITIAL_SPACE_VIEW }),
-  restoreAddress: () => set((state) => ({ ...navigationFromAddress(), viewScroll: { ...state.viewScroll, [state.view]: window.scrollY } })),
+  // A different case in the address must not keep the old case's title in the bar.
+  restoreAddress: () => set((state) => {
+    const next = navigationFromAddress();
+    return { ...next, caseTitle: next.caseId === state.caseId ? state.caseTitle : null, viewScroll: { ...state.viewScroll, [state.view]: window.scrollY } };
+  }),
 }));

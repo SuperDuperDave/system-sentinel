@@ -229,6 +229,8 @@ def test_draft_case_routes_keep_proposals_out_of_evidence_until_accepted(tmp_pat
     assert len(client.get("/api/cases/case_sep12freeze", headers=agent).json()["evidence"]) == before
     assert client.post("/api/cases/case_sep12freeze/proposals", headers=agent, json={"claim": "uncited", "cites": []}).status_code == 422
 
+    # Deciding is a dashboard convention (the token can mint a cookie, so not a boundary).
+    assert client.post(f"/api/cases/case_sep12freeze/proposals/{proposal.json()['id']}/accept", headers=agent).status_code == 403
     session = TestClient(app)
     assert session.post("/api/session", json={"token": state.token}).status_code == 200
     accepted = session.post(f"/api/cases/case_sep12freeze/proposals/{proposal.json()['id']}/accept").json()
@@ -244,8 +246,13 @@ def test_draft_case_routes_keep_proposals_out_of_evidence_until_accepted(tmp_pat
     assert len(declined["evidence"]) == before + 1
     assert declined["record"][-1] == {"at": declined["record"][-1]["at"], "route": "dashboard", "what": "Declined a proposal", "ref": pending["id"]}
 
-    item = {"kind": "selection", "title": "x", "reading": "crash", "params": {"count": 5}, "asked_at": "2026-09-26T00:00:00Z", "ids": [1295]}
+    item = {"kind": "selection", "title": "x", "reading": "crash", "params": {"count": 5}, "asked_at": "2026-09-26T00:00:00Z", "ids": [1195]}
     assert session.post("/api/cases/case_sep12freeze/evidence", json=item).status_code == 201
     assert session.post("/api/cases/case_sep12freeze/evidence", json=item).status_code == 409
+    # The same records taken again are the same exhibit, not a second one.
+    assert session.post("/api/cases/case_sep12freeze/evidence", json=dict(item, asked_at="2026-09-26T01:00:00Z")).status_code == 409
+    assert "Cites: stop (crash, records 1301" in session.get("/api/cases/case_sep12freeze/composed").json()["text"]
+    # A closed case takes nothing new until it is reopened.
+    assert client.post("/api/cases/case_slowupdate/proposals", headers=agent, json={"claim": "late", "cites": [{"label": "x", "reading": "crash", "params": {}}]}).status_code == 409
     assert "Declined" in session.get("/api/cases/case_sep12freeze/composed").json()["text"]
     cases_draft.seed()

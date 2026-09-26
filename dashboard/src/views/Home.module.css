@@ -42,7 +42,7 @@
 .caseReview { color: var(--attention); }
 
 /* The review queue: a change of surface, the margin where proposals wait. */
-.review { padding: 20px; border-radius: 14px; background: var(--margin); }
+.review { min-width: 0; }
 .proposals { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 12px; }
 .proposal {
   display: flex;
@@ -54,7 +54,7 @@
 }
 .proposalRoute { margin: 0; font-size: 13px; color: var(--muted); }
 .proposalCase { color: var(--body); font-family: var(--font-title); font-size: 14.5px; }
-.claim { margin: 0; font: italic 400 17px/1.45 var(--font-title); color: var(--ink); display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+.claim { margin: 0; font: italic 400 17px/1.45 var(--font-title); color: var(--ink); }
 .proposalBasis { margin: 0; font-size: 13.5px; color: var(--body); }
 .warnWord { color: var(--attention); }
 .reviewButton {

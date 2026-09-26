@@ -145,7 +145,7 @@ interface DumpStreams {
 
 const STOP_COUNTS = [5, 20];
 const FAULT_COUNTS = [30, 100];
-const STOP_STAMP = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+const STOP_STAMP = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
 
 const KIND_WORD: Record<string, string> = {
   'application crash': 'crash',

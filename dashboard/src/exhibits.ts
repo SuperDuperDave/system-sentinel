@@ -123,10 +123,10 @@ export function stopExhibit(stop: StopLike, envelope: Reading): NewExhibit {
 
 /** A lead as an exhibit: inferred, with its rule in the open. */
 export function leadExhibit(lead: Lead, envelope: Reading): NewExhibit {
-  const times = Object.values(lead.evidence).flat().filter((v): v is string => typeof v === 'string' && isIso(v)).sort();
+  const times = Object.values(lead.evidence).flat().filter((v): v is string => typeof v === 'string' && isIso(v));
   return {
     kind: 'selection', title: lead.title, reading: envelope.reading, params: envelope.params, asked_at: envelope.asked_at,
-    outcome: envelope.outcome, classes: ['inferred'], ids: null, moment: times[times.length - 1] ?? null,
+    outcome: envelope.outcome, classes: ['inferred'], ids: [lead.id], moment: times.sort((a, b) => Date.parse(a) - Date.parse(b))[times.length - 1] ?? null,
     facts: [['What the rule says', lead.summary], ['Drawn from', lead.readings.join(', ')]], note: null, citations: null,
   };
 }

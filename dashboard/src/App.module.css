@@ -184,3 +184,19 @@
 .signInButton:disabled { background: var(--rule); color: var(--muted); cursor: default; }
 .hint { margin: 8px 0 0; color: var(--muted); }
 .hint code { font: inherit; color: var(--body); }
+
+/* On a phone the bar is one line: the case's title and the way back; setting it down is an icon. */
+.caseBarX { display: none; }
+@media (max-width: 959px) {
+  .caseBar { flex-wrap: nowrap; gap: 8px; padding-top: 6px; padding-bottom: 6px; }
+  .caseBarWhat > :global(.label) { display: none; }
+  .caseBarTitle { font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .caseBarWhat { flex: 1; }
+  .caseBarActions { flex-wrap: nowrap; gap: 4px; }
+  .caseBarBack { padding: 0 12px; }
+  .caseBarRelease { width: 44px; padding: 0; display: inline-grid; place-items: center; }
+  .caseBarReleaseWords { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .caseBarX { display: block; position: relative; width: 14px; height: 14px; }
+  .caseBarX::before, .caseBarX::after { content: ''; position: absolute; left: 6px; top: -1px; width: 2px; height: 16px; border-radius: 1px; background: currentColor; transform: rotate(45deg); }
+  .caseBarX::after { transform: rotate(-45deg); }
+}

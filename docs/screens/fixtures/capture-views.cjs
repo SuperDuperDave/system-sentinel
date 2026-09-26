@@ -106,7 +106,7 @@ const SHOTS = {
     reach: async (page) => {
       await page.goto(`${base}/?view=case&case=case_sep12freeze`);
       await settled(page);
-      await click(page, 'main button', 'Check the citations against a fresh reading');
+      await click(page, 'main button', 'Compare the citations with a fresh reading');
       await page.waitForTimeout(600);
       const proposal = page.locator('#pr_same_bugcheck');
       if (await proposal.count()) { await proposal.scrollIntoViewIfNeeded(); await page.evaluate(() => window.scrollBy(0, -24)); }

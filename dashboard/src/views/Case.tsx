@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { Cls, Unauthorized, observed, take } from '../api';
-import { Case, Citation, Exhibit, Proposal, Route, composedCase, containsIds, decide, patchCase } from '../cases';
+import { Case, Citation, Exhibit, Proposal, Route, composedCase, decide, patchCase, recordsIn } from '../cases';
 import { CopyButton } from '../Copy';
 import { dayLong, gap, isIso, timeOf, when } from '../exhibits';
 import { ago } from '../Sections';
 import { useApp, ViewId } from '../store';
+import { WithCodes } from '../WithCodes';
 import { useCase } from '../useCases';
 import styles from './Case.module.css';
 
@@ -64,7 +65,7 @@ export function CaseView() {
         <Evidence c={current} settled={settled} />
         <aside className={styles.margin} aria-label="Proposals and the case record">
           <section id="proposals" aria-labelledby="proposals-title">
-            <h2 id="proposals-title" className={styles.h2}>Proposed, not yet evidence</h2>
+            <h2 id="proposals-title" className={styles.h2} tabIndex={-1}>Proposed, not yet evidence</h2>
             {pending.length ? pending.map((p) => <ProposalCard key={p.id} c={current} p={p} onDecided={updated} />)
               : <p className={styles.quiet}>Nothing waiting. Anything that holds this machine’s token can propose to this case through the API; it waits here until you decide.</p>}
           </section>
@@ -151,8 +152,16 @@ function Notes({ c, onChange }: { c: Case; onChange: (next: Case) => void }) {
   const [seen, setSeen] = useState(c.id);
   if (seen !== c.id) { setSeen(c.id); setDraft(c.notes); setState('saved'); }
 
+  useEffect(() => {
+    if (state !== 'unsaved') return;
+    const timer = window.setTimeout(() => { void save(); }, 1200);
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); };
+    window.addEventListener('beforeunload', warn);
+    return () => { window.clearTimeout(timer); window.removeEventListener('beforeunload', warn); };
+  });
+
   async function save() {
-    if (draft === c.notes) return;
+    if (draft === c.notes) { setState('saved'); return; }
     setState('saving');
     try { onChange(await patchCase(c.id, { notes: draft })); setState('saved'); } catch (error) {
       if (error instanceof Unauthorized) { setSession('closed'); return; }
@@ -189,10 +198,17 @@ function Handoff({ c }: { c: Case }) {
   );
 }
 
-/** The case's timeline: exhibits by the moment they are about, days marked, gaps named. */
+/**
+ * The case's timeline: observed exhibits by the moment they are about, days marked, gaps named.
+ * A gap is a gap in what was picked, not in the record, so it offers the log between. Accepted
+ * leads are interpretation and stay off the time axis, below it, pointing at what they cite.
+ */
 function Evidence({ c, settled }: { c: Case; settled: string | null }) {
-  const placed = c.evidence.filter((e) => e.moment).sort((a, b) => Date.parse(a.moment!) - Date.parse(b.moment!));
-  const unplaced = c.evidence.filter((e) => !e.moment);
+  const setMoment = useApp((s) => s.setMoment);
+  const observedExhibits = c.evidence.filter((e) => e.kind !== 'claim');
+  const placed = observedExhibits.filter((e) => e.moment).sort((a, b) => Date.parse(a.moment!) - Date.parse(b.moment!));
+  const unplaced = observedExhibits.filter((e) => !e.moment);
+  const leads = c.evidence.filter((e) => e.kind === 'claim');
   return (
     <section className={styles.evidence} aria-labelledby="evidence-title">
       <h2 id="evidence-title" className={styles.h2}>Evidence, in the order it happened</h2>
@@ -202,11 +218,13 @@ function Evidence({ c, settled }: { c: Case; settled: string | null }) {
           const day = dayLong(exhibit.moment!);
           const newDay = index === 0 || day !== dayLong(placed[index - 1].moment!);
           const between = index > 0 ? gap(placed[index - 1].moment!, exhibit.moment!) : null;
+          const readBetween = between && between !== 'at the same moment'
+            ? <button className={styles.between} onClick={() => setMoment(exhibit.moment!)}>Read the log before this</button> : null;
           return (
             <li key={exhibit.id} className={styles.entry}>
-              {newDay ? <p className={styles.day}>{day}{between && index > 0 ? <span> · {between}</span> : null}</p>
-                : between ? <p className={styles.gap}>{between}</p> : null}
-              <p className={`${styles.at} readout`}>{timeOf(exhibit.moment!)}<span className={styles.atWord}>{exhibit.kind === 'claim' ? 'latest cited moment' : 'when it happened'}</span></p>
+              {newDay ? <p className={styles.day}>{day}{between ? <span> · {between}</span> : null}{readBetween}</p>
+                : between ? <p className={styles.gap}>{between}{readBetween}</p> : null}
+              <p className={`${styles.at} readout`}>{timeOf(exhibit.moment!)}<span className={styles.atWord}>when it happened</span></p>
               <ExhibitCard exhibit={exhibit} c={c} settled={settled === exhibit.id} />
             </li>
           );
@@ -218,8 +236,22 @@ function Evidence({ c, settled }: { c: Case; settled: string | null }) {
           <ol className={styles.timeline}>{unplaced.map((exhibit) => <li key={exhibit.id} className={styles.entry}><ExhibitCard exhibit={exhibit} c={c} settled={settled === exhibit.id} /></li>)}</ol>
         </>
       ) : null}
+      {leads.length ? (
+        <section className={styles.leads} aria-labelledby="leads-title">
+          <h2 id="leads-title" className={styles.h2}>Leads you accepted</h2>
+          <p className={styles.quiet}>Interpretation, not records. Each is kept with what it cites and is not placed on the timeline.</p>
+          {leads.map((exhibit) => <ExhibitCard key={exhibit.id} exhibit={exhibit} c={c} settled={settled === exhibit.id} />)}
+        </section>
+      ) : null}
     </section>
   );
+}
+
+/** Accepted leads that cite this exhibit's records, so the timeline shows where interpretation points. */
+function citedBy(exhibit: Exhibit, c: Case): Exhibit[] {
+  if (!exhibit.ids?.length) return [];
+  const mine = new Set(exhibit.ids.map(String));
+  return c.evidence.filter((e) => e.kind === 'claim' && (e.citations ?? []).some((cite) => (cite.ids ?? []).some((id) => mine.has(String(id)))));
 }
 
 function ClassMarks({ classes }: { classes: Cls[] }) {
@@ -237,7 +269,7 @@ function ExhibitCard({ exhibit, c, settled }: { exhibit: Exhibit; c: Case; settl
     ref.current.scrollIntoView({ block: 'nearest', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
   }, [settled]);
   const claim = exhibit.kind === 'claim';
-  const moments = (exhibit.citations ?? []).map((cite) => cite.moment).filter((m): m is string => !!m).sort();
+  const moments = (exhibit.citations ?? []).map((cite) => cite.moment).filter((m): m is string => !!m).sort((a, b) => Date.parse(a) - Date.parse(b));
   return (
     <article ref={ref} id={exhibit.id} tabIndex={-1} className={`${styles.exhibit} ${claim ? styles.exhibitClaim : ''} ${settled ? styles.settled : ''}`} aria-labelledby={`${exhibit.id}-title`}>
       <p className={styles.tag}>
@@ -250,13 +282,14 @@ function ExhibitCard({ exhibit, c, settled }: { exhibit: Exhibit; c: Case; settl
         {exhibit.outcome === 'empty' ? <span>answered empty</span> : null}
       </p>
       {claim ? (
-        <blockquote id={`${exhibit.id}-title`} className={styles.exhibitClaimText}>{exhibit.title}</blockquote>
+        <blockquote id={`${exhibit.id}-title`} className={styles.exhibitClaimText}><WithCodes text={exhibit.title} /></blockquote>
       ) : (
         <h3 id={`${exhibit.id}-title`} className={styles.exhibitTitle}>
-          {exhibit.stop ? <span className={styles.stopMark} aria-hidden="true" /> : null}{exhibit.title}
+          {exhibit.stop ? <span className={styles.stopMark} aria-hidden="true" /> : null}<span><WithCodes text={exhibit.title} /></span>
         </h3>
       )}
       {claim ? <p className={styles.claimNote}>The proposer’s words, accepted as a lead. The cited records below are the evidence; the sentence is not.{moments.length > 1 ? ` It spans ${when(moments[0])} to ${when(moments[moments.length - 1])}.` : ''}</p> : null}
+      {!claim && citedBy(exhibit, c).length ? <p className={styles.claimNote}>Cited by {citedBy(exhibit, c).map((lead) => `lead ${lead.n}`).join(', ')}, below the timeline.</p> : null}
       {exhibit.facts?.length ? (
         <dl className={styles.facts}>
           {exhibit.facts.map(([key, value]) => (
@@ -287,9 +320,9 @@ function Citations({ cites }: { cites: Citation[] }) {
     <ul className={styles.cites} aria-label="Citations">
       {cites.map((cite, index) => (
         <li key={index} className={styles.cite}>
-          <span className={styles.citeLabel}>{cite.label}</span>
+          <span className={styles.citeLabel}><WithCodes text={cite.label} /></span>
           <span className={`${styles.citeRef} readout`}>
-            {cite.reading}{cite.ids?.length ? ` · record ${cite.ids.join(', ')}` : ''}{cite.signal ? ` · ${cite.signal}` : ''}{cite.moment ? ` · ${when(cite.moment, true)}` : ''}
+            {cite.reading}{cite.ids?.length ? ` · ${cite.log ? `${cite.log} ` : ''}record ${cite.ids.join(', ')}` : ''}{cite.signal ? ` · ${cite.signal}` : ''}{cite.moment ? ` · ${when(cite.moment, true)}` : ''}
           </span>
           <GoToEvidence stop={cite.stop} moment={cite.moment} signal={cite.signal} compact />
         </li>
@@ -331,18 +364,23 @@ function ProposalCard({ c, p, onDecided }: { c: Case; p: Proposal; onDecided: (n
       const next = await decide(c.id, p.id, decision, decision === 'decline' ? reason.current?.value : undefined);
       const added = next.evidence.find((e) => e.accepted_from === p.id);
       bumpCases();
-      onDecided(next, decision === 'accept' ? `Accepted as exhibit ${added?.n ?? ''}.` : 'Declined. The proposal and your reason stay in the case record.', added?.id);
+      onDecided(next, decision === 'accept' ? `Accepted as lead ${added?.n ?? ''}.` : 'Declined. The proposal and your reason stay in the case record.', added?.id);
+      if (decision === 'decline') {
+        // The card leaves; focus goes to the next proposal, or the section it was in.
+        requestAnimationFrame(() => (document.querySelector<HTMLElement>('#proposals article') ?? document.getElementById('proposals-title'))?.focus());
+      }
     } catch (error) {
       if (error instanceof Unauthorized) { setSession('closed'); return; }
       setProblem(error instanceof Error ? error.message : String(error));
       setBusy(false);
+      bumpCases(); // Another tab or client may have decided it: read the case again.
     }
   }
 
   return (
     <article id={p.id} className={styles.proposal} aria-labelledby={`${p.id}-claim`} tabIndex={-1}>
       <p className={styles.proposalRoute}><span className={styles.pendingMark} aria-hidden="true" />Proposed {ROUTE_WORDS[p.route]} · {when(p.received_at)} · {ago(p.received_at)}</p>
-      <blockquote id={`${p.id}-claim`} className={styles.proposalClaim}>{p.claim}</blockquote>
+      <blockquote id={`${p.id}-claim`} className={styles.proposalClaim}><WithCodes text={p.claim} /></blockquote>
       <h3 className={styles.h3}>What it cites</h3>
       <Citations cites={p.cites} />
       <h3 className={styles.h3}>What it says it read</h3>
@@ -362,7 +400,7 @@ function ProposalCard({ c, p, onDecided }: { c: Case; p: Proposal; onDecided: (n
       </ul>
       <p className={styles.provenance}>Reported by the proposer. One token opens every route today, so the server cannot yet confirm which client read what. Check the citations yourself:</p>
       <CheckCitations cites={p.cites} />
-      <p className={styles.consequence}>Accepting adds exhibit {c.evidence.length + 1}: these words as an inferred lead with its {p.cites.length} {p.cites.length === 1 ? 'citation' : 'citations'}, placed at {latestMoment(p.cites) ? when(latestMoment(p.cites)) : 'no moment'}. It changes no other exhibit and closes nothing.</p>
+      <p className={styles.consequence}>Accepting adds lead {c.evidence.length + 1}: these words, class inferred, with its {p.cites.length} {p.cites.length === 1 ? 'citation' : 'citations'}, kept below the timeline. It changes no exhibit and closes nothing.</p>
       {problem ? <p className={styles.problem} role="status">{problem}</p> : null}
       {declining ? (
         <form className={styles.declineForm} onSubmit={(event) => { event.preventDefault(); void choose('decline'); }}>
@@ -380,14 +418,13 @@ function ProposalCard({ c, p, onDecided }: { c: Case; p: Proposal; onDecided: (n
   );
 }
 
-function latestMoment(cites: Citation[]): string | null {
-  const moments = cites.map((cite) => cite.moment).filter((m): m is string => !!m).sort();
-  return moments[moments.length - 1] ?? null;
-}
+type Check = { label: string; state: 'checking' | 'present' | 'absent' | 'unobserved' | 'unchecked'; detail: string; differs?: string };
 
-type Check = { label: string; state: 'checking' | 'found' | 'missing' | 'unobserved' | 'unchecked'; detail: string };
-
-/** Take each cited reading again and look for what it cites. A check, not a verdict on the claim. */
+/**
+ * Take each cited reading again and show what it holds for the cited identity. A compare, not a
+ * verdict: it says the record is there and what it is, never that the proposer's label or claim
+ * is right, and a record missing from a bounded reading may have rolled out of its window.
+ */
 function CheckCitations({ cites }: { cites: Citation[] }) {
   const [checks, setChecks] = useState<Check[] | null>(null);
   async function run() {
@@ -398,10 +435,18 @@ function CheckCitations({ cites }: { cites: Citation[] }) {
         const reading = await take(cite.reading, cite.params as Record<string, string>);
         const at = when(reading.asked_at, true);
         if (!observed(reading)) return { label: cite.label, state: 'unobserved', detail: `${cite.reading} was not observed (${reading.outcome}) at ${at}` };
-        const found = cite.signal
-          ? reading.sections.some((s) => Array.isArray(s.data) && (s.data as { id?: string }[]).some((item) => item.id === cite.signal))
-          : containsIds(reading.sections.map((s) => s.data), cite.ids!);
-        return { label: cite.label, state: found ? 'found' : 'missing', detail: found ? `Present in ${cite.reading} taken ${at}` : `Not in ${cite.reading} taken ${at}. A bounded reading can roll a record out of its window; this does not make the citation false.` };
+        if (cite.signal) {
+          const present = reading.sections.some((s) => Array.isArray(s.data) && (s.data as { id?: string }[]).some((item) => item.id === cite.signal));
+          return { label: cite.label, state: present ? 'present' : 'absent', detail: present ? `A lead with this ID is in ${cite.reading} taken ${at}; its content was not compared.` : `No lead with this ID in ${cite.reading} taken ${at}.` };
+        }
+        const rows = recordsIn(reading, cite.ids!, cite.log);
+        if (rows.length < cite.ids!.length) {
+          return { label: cite.label, state: 'absent', detail: `Not in ${cite.reading} taken ${at}. A bounded reading can roll a record out of its window; this does not make the citation false.` };
+        }
+        const row = rows[0];
+        const differs = cite.moment && Math.abs(Date.parse(row.TimeCreated) - Date.parse(cite.moment)) > 60_000
+          ? `Its time, ${when(row.TimeCreated, true)}, is not the cited moment, ${when(cite.moment, true)}.` : undefined;
+        return { label: cite.label, state: 'present', detail: `${row.Log ?? cite.log ?? ''} ${row.RecordId} · ${row.ProviderName.replace(/^Microsoft-Windows-/, '')} ${row.Id} · written ${when(row.TimeCreated, true)}, in ${cite.reading} taken ${at}`.trim(), differs };
       } catch (error) {
         return { label: cite.label, state: 'unobserved', detail: error instanceof Error ? error.message : String(error) };
       }
@@ -410,14 +455,15 @@ function CheckCitations({ cites }: { cites: Citation[] }) {
   }
   return (
     <div className={styles.check}>
-      <button className={styles.quietButton} onClick={run} disabled={checks?.some((c) => c.state === 'checking')}>{checks ? 'Check again' : 'Check the citations against a fresh reading'}</button>
+      <button className={styles.quietButton} onClick={run} disabled={checks?.some((c) => c.state === 'checking')}>{checks ? 'Compare again' : 'Compare the citations with a fresh reading'}</button>
       {checks ? (
         <ul className={styles.checks} aria-live="polite">
           {checks.map((check, index) => (
             <li key={index} className={styles[`check_${check.state}`]}>
-              <span className={styles.checkWord}>{check.state === 'checking' ? 'Checking' : check.state === 'found' ? 'Found' : check.state === 'missing' ? 'Not found' : check.state === 'unobserved' ? 'Not observed' : 'Not checkable'}</span>
-              <span>{check.label}</span>
-              {check.detail ? <span className={styles.checkDetail}>{check.detail}</span> : null}
+              <span className={styles.checkWord}>{check.state === 'checking' ? 'Reading' : check.state === 'present' ? 'Record present' : check.state === 'absent' ? 'Not in this reading' : check.state === 'unobserved' ? 'Not observed' : 'Nothing to compare'}</span>
+              <span><WithCodes text={check.label} /></span>
+              {check.detail ? <span className={`${styles.checkDetail} ${check.state === 'present' ? 'readout' : ''}`}>{check.detail}</span> : null}
+              {check.differs ? <span className={styles.checkDiffers}>{check.differs}</span> : null}
             </li>
           ))}
         </ul>

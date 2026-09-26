@@ -191,3 +191,6 @@ select:focus-visible, summary:focus-visible, [tabindex]:focus-visible {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* An exact identifier inside a sentence. */
+code.code { font-size: 0.86em; font-style: normal; letter-spacing: 0; overflow-wrap: anywhere; }

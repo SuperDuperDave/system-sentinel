@@ -15,6 +15,8 @@ export type Route = 'dashboard' | 'api';
 export interface Citation {
   label: string;
   reading: string;
+  /** The Windows log the cited records belong to, when the reading combines logs. */
+  log?: string;
   params: Record<string, unknown>;
   ids?: (number | string)[];
   moment?: string | null;
@@ -121,8 +123,9 @@ async function send<T>(path: string, init?: RequestInit): Promise<T> {
     headers: init?.body ? { 'Content-Type': 'application/json' } : undefined,
   });
   if (res.status === 401) throw new Unauthorized();
-  if (res.status === 404 && path === '/api/cases') throw new CasesUnavailable();
   const body = await res.json().catch(() => ({}));
+  // The draft routes answer a missing case with their own error; any other 404 means no routes.
+  if (res.status === 404 && body.error !== 'not_found') throw new CasesUnavailable();
   if (res.status === 409 && body.error === 'duplicate') throw new AlreadyEvidence(Number(body.n));
   if (!res.ok) throw new Error(body.detail ?? `${res.status}: ${res.statusText}`);
   return body as T;
@@ -151,35 +154,42 @@ export function classesOf(reading: Reading, ids?: (number | string)[] | null): C
   return [...new Set(reading.sections.map((s) => s.class))];
 }
 
-/** Whether every cited identity appears as a RecordId somewhere in a payload. */
-export function containsIds(value: unknown, ids: (number | string)[]): boolean {
-  const found = new Set<string>();
-  const walk = (node: unknown) => {
-    if (Array.isArray(node)) { node.forEach(walk); return; }
-    if (node && typeof node === 'object') {
-      const record = node as Record<string, unknown>;
-      if ('RecordId' in record) found.add(String(record.RecordId));
-      Object.values(record).forEach(walk);
-    }
-  };
-  walk(value);
-  return ids.every((id) => found.has(String(id)));
+/** Whether every cited identity appears as a record somewhere in a payload. */
+export function containsIds(value: unknown, ids: (number | string)[], log?: string): boolean {
+  return recordsFrom(value, ids, log).length === new Set(ids.map((id) => qualified(id, log))).size;
 }
 
-/** Records with these identities, wherever the envelope holds them. */
-export function recordsIn(reading: Reading, ids: (number | string)[]): EventRecord[] {
-  const wanted = new Set(ids.map(String));
+/**
+ * Records with these identities, wherever the envelope holds them. An ID is a bare RecordId or
+ * the API's `Log:RecordId`; a bare one with a known log matches only that log, so System 995 is
+ * never Application 995.
+ */
+export function recordsIn(reading: Reading, ids: (number | string)[], log?: string): EventRecord[] {
+  return recordsFrom(reading.sections.map((s) => s.data), ids, log);
+}
+
+function qualified(id: number | string, log?: string): string {
+  const text = String(id);
+  return text.includes(':') || !log ? text : `${log}:${text}`;
+}
+
+function recordsFrom(value: unknown, ids: (number | string)[], log?: string): EventRecord[] {
+  const wanted = new Set(ids.map((id) => qualified(id, log)));
   const out = new Map<string, EventRecord>();
   const walk = (node: unknown) => {
     if (Array.isArray(node)) { node.forEach(walk); return; }
     if (node && typeof node === 'object') {
       const record = node as Record<string, unknown>;
-      if ('RecordId' in record && wanted.has(String(record.RecordId)) && typeof record.TimeCreated === 'string' && !out.has(String(record.RecordId))) {
-        out.set(String(record.RecordId), record as unknown as EventRecord);
+      if ('RecordId' in record && typeof record.TimeCreated === 'string') {
+        const bare = String(record.RecordId);
+        const full = typeof record.Log === 'string' ? `${record.Log}:${bare}` : null;
+        // A row that does not name its log (a crash reading's projected last record) matches by number.
+        const key = full && wanted.has(full) ? full : wanted.has(bare) ? bare : !full ? [...wanted].find((w) => w.endsWith(`:${bare}`)) ?? null : null;
+        if (key && !out.has(key)) out.set(key, record as unknown as EventRecord);
       }
       Object.values(record).forEach(walk);
     }
   };
-  walk(reading.sections.map((s) => s.data));
+  walk(value);
   return [...out.values()];
 }
