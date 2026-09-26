@@ -1,0 +1,111 @@
+/* One raised sheet: the only surface above the paper. It holds the pick and the ledger. */
+
+.inspector {
+  background: var(--sheet);
+  box-shadow: var(--sheet-shadow);
+  border-radius: 10px;
+  padding: 20px 20px 24px;
+  min-width: 0;
+}
+
+.top { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: -6px 0 6px; }
+.kicker { font-size: 12px; font-weight: 600; color: var(--muted); }
+.close {
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 4px;
+  color: var(--body);
+  font-size: 13px;
+  text-decoration: underline;
+  text-decoration-color: var(--rule);
+  text-underline-offset: 3px;
+}
+.close:hover { color: var(--ink); text-decoration-color: var(--muted); }
+
+.title { margin: 0; font: 600 20px/1.25 var(--font-text); color: var(--ink); letter-spacing: -0.01em; }
+.title.readout { font-family: var(--font-readout); font-weight: 500; font-size: 18px; }
+.tone_stop { color: var(--exhibit); }
+.tone_hardware { color: var(--ochre); }
+.lede { margin: 8px 0 16px; color: var(--body); font-size: 14px; }
+.markLine { margin: 4px 0 0; color: var(--body); font-size: 14px; overflow-wrap: anywhere; }
+.note { margin: 8px 0 0; color: var(--muted); font-size: 12.5px; line-height: 1.45; }
+.hint { margin: 18px 0 0; color: var(--muted); font-size: 13px; }
+
+.times { list-style: none; margin: 14px 0 0; padding: 0; display: grid; gap: 6px; }
+.times li { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; align-items: baseline; }
+.timeValue { color: var(--ink); font-size: 12.5px; }
+.timeLabel { color: var(--body); font-size: 13px; }
+.timeDelta { color: var(--muted); }
+
+.actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0 4px; }
+.action, .actionQuiet {
+  min-height: 44px;
+  padding: 0 14px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.action { background: var(--ink); color: var(--paper); }
+.actionQuiet { color: var(--ink); box-shadow: inset 0 0 0 1px var(--rule); }
+.action:hover { opacity: 0.9; }
+.actionQuiet:hover { box-shadow: inset 0 0 0 1px var(--muted); }
+
+.detail { margin-top: 18px; padding-top: 16px; box-shadow: 0 -1px 0 var(--rule-soft); }
+
+.ledger, .nearList { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px; }
+.ledgerRow, .nearRow { display: grid; gap: 2px; min-width: 0; }
+.ledgerName, .nearName { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; font-weight: 600; font-size: 13.5px; color: var(--ink); }
+.ledgerSource { font-weight: 400; font-size: 12px; color: var(--muted); }
+.ledgerReach, .nearValue { font-size: 13px; color: var(--body); line-height: 1.45; overflow-wrap: anywhere; }
+.unread .ledgerReach, .unread .nearValue {
+  color: var(--muted);
+  padding-left: 24px;
+  background: repeating-linear-gradient(135deg, var(--hatch-strong) 0 1px, transparent 1px 4px) 0 4px / 16px 10px no-repeat;
+}
+.partial { color: var(--muted); }
+.link {
+  font: inherit;
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--rule);
+  text-underline-offset: 3px;
+  min-height: 24px;
+}
+.link:hover { text-decoration-color: var(--muted); }
+
+.near { margin-top: 22px; }
+.nearTitle { margin: 0; font: 600 14px/1.3 var(--font-text); color: var(--ink); }
+.near > .note { margin-bottom: 14px; }
+.nearMarks { list-style: none; margin: 4px 0 0; padding: 0; display: grid; }
+.nearMark {
+  display: grid;
+  grid-template-columns: 3.4em 1fr;
+  gap: 8px;
+  align-items: baseline;
+  width: 100%;
+  min-height: 36px;
+  padding: 6px 8px;
+  margin: 0 -8px;
+  border-radius: 6px;
+  text-align: left;
+  font-size: 13px;
+  color: var(--ink);
+}
+.nearMark:hover { background: var(--paper); }
+.nearMarkTime { color: var(--muted); font-size: 12px; }
+.nearMarkTitle { overflow-wrap: anywhere; }
+.more { font-size: 12.5px; color: var(--muted); padding: 4px 0 0; }
+
+/* On a phone the sheet rises over the list from the bottom, in thumb reach. */
+.sheet {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 20;
+  max-height: 72dvh;
+  overflow: auto;
+  border-radius: 14px 14px 0 0;
+  padding: 14px var(--gutter) calc(24px + env(safe-area-inset-bottom));
+  box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.18);
+}

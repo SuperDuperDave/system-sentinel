@@ -1,0 +1,64 @@
+/* The day list: a column of days, newest first. Days are separated by space and a day's name,
+   never by boxes; an item is a full-width row with a 44 px target. */
+
+.days { min-width: 0; }
+.heading { margin: 0 0 10px; font: 600 16px/1.3 var(--font-text); color: var(--ink); }
+
+.always, .coverage {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+.always { margin-bottom: 14px; font-size: 13px; }
+.hatch {
+  flex: none;
+  width: 16px;
+  height: 10px;
+  border-radius: 2px;
+  background: repeating-linear-gradient(135deg, var(--hatch-strong) 0 1px, transparent 1px 4px);
+  transform: translateY(1px);
+}
+
+.list { list-style: none; margin: 0; padding: 0; }
+.day { padding: 14px 0 12px; }
+.day + .day { box-shadow: 0 -1px 0 var(--rule-soft); }
+.dayHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 12px;
+  margin: 0 0 4px;
+  font: 600 14px/1.35 var(--font-text);
+  color: var(--ink);
+}
+.quiet { font-weight: 400; font-size: 13px; color: var(--muted); }
+
+.items { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 1px; }
+.item {
+  display: grid;
+  grid-template-columns: 3.2em 10px minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 10px;
+  margin: 0 -10px;
+  border-radius: 8px;
+  text-align: left;
+  color: var(--ink);
+}
+.item:hover { background: var(--paper-deep); }
+.itemChosen, .itemChosen:hover { background: var(--sheet); box-shadow: inset 0 0 0 1.5px var(--ink); }
+.time { font-size: 12px; color: var(--muted); }
+.glyph { width: 10px; height: 10px; border-radius: 2px; transform: translateY(1px); background: var(--trace-soft); }
+.tone_stop { background: var(--exhibit); clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); border-radius: 0; }
+.tone_hardware { background: var(--ochre-mark); border-radius: 50%; }
+.tone_ink { background: var(--trace); width: 3px; justify-self: center; border-radius: 1px; height: 12px; }
+.text { display: grid; gap: 1px; min-width: 0; }
+.title { font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
+.line { font-size: 13px; color: var(--body); overflow-wrap: anywhere; }
+.times { font-size: 11.5px; color: var(--muted); overflow-wrap: anywhere; }

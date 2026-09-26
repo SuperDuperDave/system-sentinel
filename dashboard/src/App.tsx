@@ -5,10 +5,11 @@ import { Lockup, Mark } from './Mark';
 import { NavIcon } from './NavIcon';
 import { Live } from './Live';
 import { canRestoreCrashView, clearHeldReadings, hasHeldReading } from './useReading';
-import { useApp, VIEWS, ViewGroup, ViewId } from './store';
-import { Record } from './views/Record';
+import { ON_THE_AXIS, useApp, VIEWS, ViewGroup, ViewId } from './store';
+import { Timeline } from './views/Timeline';
+import { SystemLog } from './views/SystemLog';
+import { Stops } from './views/Stops';
 import { Errors } from './views/Errors';
-import { Crashes } from './views/Crashes';
 import { Machine } from './views/Machine';
 import { Performance } from './views/Performance';
 import { Space } from './views/Space';
@@ -19,9 +20,10 @@ import { Agents } from './views/Agents';
 import styles from './App.module.css';
 
 const VIEW_COMPONENTS: { [K in ViewId]: () => ReactElement } = {
-  record: Record,
+  timeline: Timeline,
+  record: SystemLog,
   errors: Errors,
-  crashes: Crashes,
+  crashes: Stops,
   machine: Machine,
   performance: Performance,
   space: Space,
@@ -30,7 +32,7 @@ const VIEW_COMPONENTS: { [K in ViewId]: () => ReactElement } = {
   stack: Stack,
   agents: Agents,
 };
-const NAV_GROUPS: ViewGroup[] = ['Evidence', 'Interpret', 'Carry'];
+const NAV_GROUPS: ViewGroup[] = ['Along time', 'The machine', 'Handing on'];
 
 export function App() {
   const session = useApp((s) => s.session);
@@ -180,7 +182,6 @@ function Shell() {
         <Lockup />
         <Live />
       </header>
-      <div className={styles.trace} aria-hidden="true" />
       <nav className={styles.nav} aria-label="Views">
         <NavChoices view={view} onChoose={setView} onDevices={() => setDevices(true)} />
       </nav>
@@ -198,7 +199,7 @@ function Shell() {
           </div>
         </details>
       </nav>
-      <main id="content" className={styles.main} tabIndex={-1}><View /></main>
+      <main id="content" className={`${styles.main} ${ON_THE_AXIS.includes(view) ? styles.mainWide : ''}`} tabIndex={-1}><View /></main>
       <Devices open={devices} onClose={() => setDevices(false)} />
     </div>
   );
@@ -221,7 +222,35 @@ function NavChoices({ view, onChoose, onDevices }: { view: ViewId; onChoose: (ne
       <NavIcon name="device" />
       <span>Sign in another device</span>
     </button>
+    <Appearance />
   </>;
+}
+
+type Theme = 'system' | 'light' | 'dark';
+const THEMES: { id: Theme; label: string }[] = [{ id: 'system', label: 'System' }, { id: 'light', label: 'Paper' }, { id: 'dark', label: 'Instrument' }];
+
+function applyTheme(next: Theme) {
+  const root = document.documentElement;
+  if (next === 'system') delete root.dataset.theme;
+  else root.dataset.theme = next;
+  try {
+    if (next === 'system') localStorage.removeItem('sentinel.theme');
+    else localStorage.setItem('sentinel.theme', next);
+  } catch { /* a private window keeps the choice for this page only */ }
+}
+
+/** Paper or the instrument field. The system's preference decides unless a person chooses; the choice stays in this browser. */
+function Appearance() {
+  const [theme, setTheme] = useState<Theme>(() => (document.documentElement.dataset.theme as Theme | undefined) ?? 'system');
+  const choose = (next: Theme) => { setTheme(next); applyTheme(next); };
+  return (
+    <div className={styles.appearance} role="group" aria-label="Appearance">
+      <span className={`${styles.navGroupLabel} label`}>Appearance</span>
+      <div className={styles.appearanceChoices}>
+        {THEMES.map((t) => <button key={t.id} className={styles.appearanceChoice} aria-pressed={theme === t.id} onClick={() => choose(t.id)}>{t.label}</button>)}
+      </div>
+    </div>
+  );
 }
 
 function SignIn() {

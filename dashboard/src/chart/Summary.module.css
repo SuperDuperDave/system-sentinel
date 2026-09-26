@@ -1,0 +1,21 @@
+/* The sentences above the chart: the answer for someone who does not read charts. One line per
+   source, each led by the same mark the chart and the day list use for it. */
+.summary { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; max-width: 72ch; }
+.line {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr);
+  gap: 12px;
+  align-items: baseline;
+  font-size: 16.5px;
+  line-height: 1.45;
+  color: var(--ink);
+  text-wrap: pretty;
+}
+.glyph { width: 10px; height: 10px; border-radius: 2px; transform: translateY(1px); }
+.tone_stop { background: var(--exhibit); clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); border-radius: 0; }
+.tone_hardware { background: var(--ochre-mark); border-radius: 50%; }
+.tone_ink { background: var(--trace); width: 3px; height: 13px; justify-self: center; border-radius: 1px; transform: translateY(2px); }
+.tone_unread { width: 12px; background: repeating-linear-gradient(135deg, var(--hatch-strong) 0 1px, transparent 1px 3px); }
+.tone_unread + span { color: var(--body); }
+.single { margin: 0; font-size: 16.5px; line-height: 1.5; color: var(--ink); max-width: 72ch; }
+@media (max-width: 719px) { .line, .single { font-size: 15.5px; } }

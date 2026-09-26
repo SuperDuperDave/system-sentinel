@@ -39,7 +39,7 @@ interface LastRecord {
   Message: string | null;
 }
 
-interface Stop {
+export interface Stop {
   started_at: string | null;
   announced_at: string | null;
   stopped_at: string | null;
@@ -341,13 +341,13 @@ export function Crashes() {
 }
 
 /** Prefer the System start's record identity; report-only stops retain their report identity. */
-function stopIdentity(stop: Stop): string {
+export function stopIdentity(stop: Stop): string {
   if (stop.records.start != null) return `start:${stop.records.start}:${stop.started_at}`;
   if (stop.records.power_41 != null) return `power:${stop.records.power_41}:${stop.announced_at}`;
   return JSON.stringify([stop.started_at, stop.announced_at, stop.reported_at, stop.records.report]);
 }
 
-function faultIdentity(fault: Fault): string {
+export function faultIdentity(fault: Fault): string {
   return `${fault.Log ?? 'Application'}:${fault.RecordId}`;
 }
 
@@ -505,7 +505,7 @@ function lastRecordStatus(stop: Stop): string {
   return 'No record returned';
 }
 
-function StopDetail({ stop, envelope }: { stop: Stop; envelope: Reading | null }) {
+export function StopDetail({ stop, envelope }: { stop: Stop; envelope: Reading | null }) {
   const moment = stop.started_at ?? stop.announced_at ?? stop.reported_at;
   const ids = recordIds(stop);
   const rows: [string, ReactNode][] = [
@@ -868,17 +868,17 @@ function recordIds(stop: Stop): RecordId[] {
   return [...new Set([...system, ...application])];
 }
 
-function appOf(fault: Fault): string {
+export function appOf(fault: Fault): string {
   if (fault.report) return fault.report.name ?? fault.report.code ?? 'live kernel report';
   return text(fault.fields.AppName) ?? text(fault.fields.ExeFileName) ?? 'unnamed';
 }
 
-function moduleOf(fault: Fault): string {
+export function moduleOf(fault: Fault): string {
   if (fault.report) return fault.report.bucket ?? '';
   return text(fault.fields.ModuleName) ?? '';
 }
 
-function exceptionOf(fault: Fault): string {
+export function exceptionOf(fault: Fault): string {
   if (fault.report) return '';
   return fault.exception?.name ?? fault.exception?.code ?? text(fault.fields.ExceptionCode) ?? '';
 }

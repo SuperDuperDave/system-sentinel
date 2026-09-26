@@ -5,13 +5,6 @@
  */
 
 @font-face {
-  font-family: 'Azeret Mono';
-  font-style: normal;
-  font-weight: 200 500;
-  font-display: swap;
-  src: url(/fonts/azeret-mono-latin.woff2) format('woff2');
-}
-@font-face {
   font-family: 'JetBrains Mono';
   font-style: normal;
   font-weight: 400 500;
@@ -27,22 +20,48 @@
 }
 
 :root {
-  --field: #0b1a16;
-  --lit: #163429;
-  --deep: #06100d;
-  --surface-raised: #142720;
-  --inspection-well: #07130f;
-  --ink: #eaf3ee;
-  --body: #c3d6cd;
-  --muted: #a7c0b4;
-  --rule: rgba(234, 243, 238, 0.14);
-  --rule-soft: rgba(234, 243, 238, 0.08);
-  --phosphor-core: #c9ffe1;
-  --phosphor: #6ff0a8;
-  --phosphor-deep: #1e8f5e;
-  --graticule: #9cffc4;
+  /*
+   * Direction B, recording paper. The light appearance is a chart recorder's paper: a warm
+   * field, a ruled grid, the record in ink. Two semantic inks and no others: exhibit red for an
+   * unplanned stop, ochre for hardware error traffic. Coverage is drawn with the hatch.
+   * The dark appearance keeps the instrument field (direction A of 2026-09-20) with the same roles.
+   */
+  --paper: #f5f1e8;
+  --sheet: #fffdf8;
+  --paper-deep: #ebe5d8;
+  --ink: #1c1a15;
+  --body: #37342c;
+  --muted: #5f594d;
+  --rule: rgba(28, 26, 21, 0.18);
+  --rule-soft: rgba(28, 26, 21, 0.09);
+  --grid: rgba(28, 26, 21, 0.07);
+  --grid-strong: rgba(28, 26, 21, 0.16);
+  --hatch: rgba(28, 26, 21, 0.14);
+  --hatch-strong: rgba(28, 26, 21, 0.26);
+  --trace: rgba(28, 26, 21, 0.78);
+  --trace-soft: rgba(28, 26, 21, 0.34);
+  --trace-faint: rgba(28, 26, 21, 0.16);
+  --exhibit: #b42318;
+  --exhibit-wash: rgba(180, 35, 24, 0.1);
+  --ochre: #8f5b00;
+  --ochre-mark: #b87800;
+  --ochre-wash: rgba(184, 120, 0, 0.12);
+  --focus: #1c1a15;
+  --sheet-shadow: 0 1px 2px rgba(28, 26, 21, 0.06), 0 10px 30px rgba(28, 26, 21, 0.08);
 
-  --font-display: 'Azeret Mono', Menlo, Consolas, monospace;
+  /* The instrument tokens the other views still read, mapped onto the paper. */
+  --field: var(--paper);
+  --lit: #efe9dc;
+  --deep: var(--paper-deep);
+  --surface-raised: var(--sheet);
+  --inspection-well: #efe9dd;
+  --phosphor-core: #145c38;
+  --phosphor: #1f7a4d;
+  --phosphor-deep: #1f7a4d;
+  --graticule: #2d7a52;
+  --glow: none;
+
+  --font-display: 'DM Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --font-readout: 'JetBrains Mono', Menlo, Consolas, monospace;
   --font-text: 'DM Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
 
@@ -50,6 +69,80 @@
   --rail: 208px;
   --measure: 1120px;
 
+  color-scheme: light;
+}
+
+/* The instrument field: the dark appearance, by the system's preference or by choice. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --paper: #0b1a16;
+    --sheet: #132820;
+    --paper-deep: #06100d;
+    --ink: #eaf3ee;
+    --body: #c3d6cd;
+    --muted: #a7c0b4;
+    --rule: rgba(234, 243, 238, 0.16);
+    --rule-soft: rgba(234, 243, 238, 0.08);
+    --grid: rgba(234, 243, 238, 0.05);
+    --grid-strong: rgba(234, 243, 238, 0.13);
+    --hatch: rgba(234, 243, 238, 0.1);
+    --hatch-strong: rgba(234, 243, 238, 0.2);
+    --trace: rgba(201, 255, 225, 0.82);
+    --trace-soft: rgba(201, 255, 225, 0.4);
+    --trace-faint: rgba(201, 255, 225, 0.18);
+    --exhibit: #ff8f80;
+    --exhibit-wash: rgba(255, 143, 128, 0.12);
+    --ochre: #ffc266;
+    --ochre-mark: #ffb454;
+    --ochre-wash: rgba(255, 180, 84, 0.12);
+    --focus: #6ff0a8;
+    --sheet-shadow: 0 1px 0 rgba(234, 243, 238, 0.06) inset, 0 12px 32px rgba(0, 0, 0, 0.35);
+    --field: #0b1a16;
+    --lit: #163429;
+    --deep: #06100d;
+    --surface-raised: #142720;
+    --inspection-well: #07130f;
+    --phosphor-core: #c9ffe1;
+    --phosphor: #6ff0a8;
+    --phosphor-deep: #1e8f5e;
+    --graticule: #9cffc4;
+    --glow: 0 0 6px #6ff0a8, 0 0 16px rgba(111, 240, 168, 0.45);
+    color-scheme: dark;
+  }
+}
+:root[data-theme='dark'] {
+  --paper: #0b1a16;
+  --sheet: #132820;
+  --paper-deep: #06100d;
+  --ink: #eaf3ee;
+  --body: #c3d6cd;
+  --muted: #a7c0b4;
+  --rule: rgba(234, 243, 238, 0.16);
+  --rule-soft: rgba(234, 243, 238, 0.08);
+  --grid: rgba(234, 243, 238, 0.05);
+  --grid-strong: rgba(234, 243, 238, 0.13);
+  --hatch: rgba(234, 243, 238, 0.1);
+  --hatch-strong: rgba(234, 243, 238, 0.2);
+  --trace: rgba(201, 255, 225, 0.82);
+  --trace-soft: rgba(201, 255, 225, 0.4);
+  --trace-faint: rgba(201, 255, 225, 0.18);
+  --exhibit: #ff8f80;
+  --exhibit-wash: rgba(255, 143, 128, 0.12);
+  --ochre: #ffc266;
+  --ochre-mark: #ffb454;
+  --ochre-wash: rgba(255, 180, 84, 0.12);
+  --focus: #6ff0a8;
+  --sheet-shadow: 0 1px 0 rgba(234, 243, 238, 0.06) inset, 0 12px 32px rgba(0, 0, 0, 0.35);
+  --field: #0b1a16;
+  --lit: #163429;
+  --deep: #06100d;
+  --surface-raised: #142720;
+  --inspection-well: #07130f;
+  --phosphor-core: #c9ffe1;
+  --phosphor: #6ff0a8;
+  --phosphor-deep: #1e8f5e;
+  --graticule: #9cffc4;
+  --glow: 0 0 6px #6ff0a8, 0 0 16px rgba(111, 240, 168, 0.45);
   color-scheme: dark;
 }
 
@@ -66,7 +159,7 @@ body {
   overflow-x: hidden;
 }
 
-::selection { background: var(--phosphor); color: var(--deep); }
+::selection { background: var(--ink); color: var(--paper); }
 
 a { color: var(--ink); text-decoration-color: var(--rule); text-underline-offset: 0.15em; }
 a:hover { text-decoration-color: var(--muted); }
@@ -81,7 +174,7 @@ button {
 }
 button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible,
 select:focus-visible, summary:focus-visible, [tabindex]:focus-visible {
-  outline: 2px solid var(--phosphor);
+  outline: 2px solid var(--focus);
   outline-offset: 2px;
 }
 
@@ -95,18 +188,18 @@ select:focus-visible, summary:focus-visible, [tabindex]:focus-visible {
 
 /* A label above a group: muted, small, tracked. */
 .label {
-  font-family: var(--font-readout);
+  font-family: var(--font-text);
   font-size: 12px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  font-weight: 600;
+  letter-spacing: 0.02em;
   color: var(--muted);
 }
 
-/* The display face for titles. */
+/* The display face for titles: the text face, set heavier, never mono. */
 .display {
   font-family: var(--font-display);
-  font-weight: 300;
-  letter-spacing: -0.02em;
+  font-weight: 600;
+  letter-spacing: -0.015em;
   color: var(--ink);
 }
 

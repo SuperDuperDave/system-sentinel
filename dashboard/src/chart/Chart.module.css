@@ -1,0 +1,204 @@
+/* The chart recorder. One grid: a label column and a plot column; every row shares the plot
+   column's x, so a moment is the same vertical line in every source. Nothing moves at rest. */
+
+.chart { margin: 0; min-width: 0; }
+.chart .grid { overflow: clip; overflow-clip-margin: 4px; }
+
+.grid {
+  display: grid;
+  grid-template-columns: 176px minmax(0, 1fr);
+  position: relative;
+}
+
+.axisLabel { grid-column: 1; grid-row: 1; }
+.axis {
+  grid-column: 2;
+  grid-row: 1;
+  position: relative;
+  border-bottom: 1px solid var(--grid-strong);
+}
+.tick {
+  position: absolute;
+  bottom: 7px;
+  transform: translateX(4px);
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.tickMajor { color: var(--body); }
+
+.rules {
+  grid-column: 2;
+  grid-row: 2 / -1;
+  position: relative;
+  pointer-events: none;
+}
+.rule { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--grid); }
+.ruleMajor { background: var(--grid-strong); }
+
+.label {
+  grid-column: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 1px;
+  padding: 4px 14px 4px 0;
+  min-width: 0;
+}
+.labelName {
+  align-self: flex-start;
+  font: 600 13.5px/1.25 var(--font-text);
+  color: var(--ink);
+  text-align: left;
+  min-height: 24px;
+}
+button.labelName { text-decoration: underline; text-decoration-color: transparent; text-underline-offset: 3px; }
+button.labelName:hover { text-decoration-color: var(--rule); }
+.labelCaption {
+  font-size: 11.5px;
+  line-height: 1.3;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plot {
+  grid-column: 2;
+  position: relative;
+  border-bottom: 1px solid var(--grid);
+  overflow: hidden;
+  --tone: var(--trace);
+}
+.tone_stop { --tone: var(--exhibit); }
+.tone_hardware { --tone: var(--ochre-mark); }
+
+.baseline { position: absolute; left: 0; right: 0; bottom: 6px; height: 1px; background: var(--trace-faint); }
+
+/* Not read: the hatch. Drawn above the baseline so an unread stretch never looks like a quiet one. */
+.notRead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: var(--paper) repeating-linear-gradient(135deg, var(--hatch) 0 1px, transparent 1px 6px);
+}
+.failed, .waiting {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  padding-left: 10px;
+}
+.failed { background: repeating-linear-gradient(135deg, var(--hatch-strong) 0 1px, transparent 1px 5px), repeating-linear-gradient(45deg, var(--hatch) 0 1px, transparent 1px 5px); }
+.waiting { background: repeating-linear-gradient(135deg, var(--hatch) 0 1px, transparent 1px 6px); }
+.failedText {
+  font-size: 12px;
+  color: var(--body);
+  background: var(--paper);
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+
+.bar {
+  position: absolute;
+  bottom: 6px;
+  max-height: calc(100% - 14px);
+  background: var(--tone);
+  display: flex;
+  flex-direction: column-reverse;
+  border-radius: 1px 1px 0 0;
+}
+.bar:has(> span) { background: none; }
+.level0, .level1 { background: var(--trace); }
+.level0 { background: var(--ink); }
+.level2 { background: var(--trace-soft); }
+.level3 { background: var(--trace-faint); }
+
+.scale {
+  position: absolute;
+  right: 4px;
+  top: 3px;
+  font-size: 10px;
+  color: var(--muted);
+  background: var(--paper);
+  padding: 0 3px;
+}
+
+.samples { position: absolute; inset: 6px 0 6px; width: 100%; height: calc(100% - 12px); }
+.samples polyline { fill: none; stroke: var(--trace); stroke-width: 1.25; vector-effect: non-scaling-stroke; }
+
+/* Marks. A stop keeps every evidence time: a wash from the first to the last, a tick for each. */
+.stop { position: absolute; inset: 0; }
+.stopSpan { position: absolute; top: 5px; bottom: 5px; background: var(--exhibit-wash); border-radius: 2px; transform: translateX(-1px); }
+.stopTime { position: absolute; top: 7px; bottom: 7px; width: 2px; transform: translateX(-1px); background: var(--exhibit); }
+.stopTime_last { width: 0; border-left: 2px dotted var(--exhibit); background: none; }
+.stopTime_estimate { top: 10px; bottom: 10px; width: 6px; transform: translateX(-3px) ; clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); }
+.stopTime_start { width: 3px; }
+.tickMark { position: absolute; top: 12px; bottom: 7px; width: 2px; transform: translateX(-1px); background: var(--tone); border-radius: 1px; }
+.markChosen { outline: 2px solid var(--ink); outline-offset: 1px; border-radius: 2px; }
+.stop.markChosen { outline: none; }
+.stop.markChosen .stopSpan { box-shadow: 0 0 0 2px var(--ink); }
+
+/* The one interactive layer, over every row. */
+.overlay {
+  grid-column: 2;
+  grid-row: 1 / -1;
+  position: relative;
+  cursor: crosshair;
+  touch-action: pan-y;
+  z-index: 2;
+  border-radius: 2px;
+}
+.overlay:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+
+.cursor, .chosen {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  pointer-events: none;
+}
+.cursor { border-left: 1px dashed var(--trace-soft); }
+.cursorKeyboard { border-left: 1px solid var(--ink); }
+.chosen { border-left: 1.5px solid var(--ink); }
+.cursorLabel, .chosenLabel, .dragLabel {
+  position: absolute;
+  top: 5px;
+  left: 4px;
+  font-size: 11px;
+  white-space: nowrap;
+  padding: 1px 5px;
+  border-radius: 3px;
+  pointer-events: none;
+}
+.flip { left: auto; right: 4px; }
+.cursorLabel { background: var(--paper); color: var(--body); }
+.chosenLabel { background: var(--ink); color: var(--paper); }
+.dragLabel { position: absolute; background: var(--ink); color: var(--paper); }
+.stretch {
+  position: absolute;
+  top: 32px;
+  bottom: 0;
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
+  border-left: 1px solid var(--ink);
+  border-right: 1px solid var(--ink);
+  pointer-events: none;
+}
+
+.caption {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px 24px;
+  margin: 12px 0 0 176px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; }
+.legendItem { display: inline-flex; align-items: center; gap: 6px; }
+.keys { max-width: 44ch; }
+.swatchRead, .swatchNotRead, .swatchStop, .swatchLevels { display: inline-block; width: 18px; height: 10px; border-radius: 2px; }
+.swatchRead { border-bottom: 1px solid var(--trace-faint); background: var(--paper); box-shadow: inset 0 0 0 1px var(--rule-soft); }
+.swatchNotRead { background: repeating-linear-gradient(135deg, var(--hatch-strong) 0 1px, transparent 1px 4px); }
+.swatchStop { background: var(--exhibit-wash); box-shadow: inset 3px 0 0 var(--exhibit), inset -2px 0 0 var(--exhibit); }
+.swatchLevels { background: linear-gradient(90deg, var(--ink) 0 33%, var(--trace-soft) 33% 66%, var(--trace-faint) 66%); }

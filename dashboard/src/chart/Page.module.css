@@ -1,0 +1,73 @@
+/* A view on the time axis: the question and the range, a few sentences, the chart, the list.
+   The inspector is the one raised sheet, beside the chart on a desk and over the list on a phone. */
+
+.page {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: 'head' 'summary' 'chart' 'side' 'list';
+  gap: 20px;
+  min-width: 0;
+}
+.head { grid-area: head; display: grid; gap: 14px; min-width: 0; }
+.summary { grid-area: summary; min-width: 0; }
+.chart { grid-area: chart; min-width: 0; }
+.side { grid-area: side; min-width: 0; }
+.list { grid-area: list; min-width: 0; }
+
+.titles { min-width: 0; }
+.title { margin: 0; font: 600 28px/1.15 var(--font-text); letter-spacing: -0.02em; color: var(--ink); }
+.question { margin: 6px 0 0; font-size: 15px; color: var(--body); max-width: 60ch; }
+
+.rangeBar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.presets {
+  display: inline-flex;
+  padding: 3px;
+  border-radius: 10px;
+  background: var(--paper-deep);
+}
+.preset {
+  min-width: 52px;
+  min-height: 40px;
+  padding: 0 10px;
+  border-radius: 8px;
+  font: 600 13.5px/1 var(--font-text);
+  color: var(--body);
+}
+.preset:hover { color: var(--ink); }
+.preset[aria-pressed='true'] { background: var(--sheet); color: var(--ink); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12); }
+.steps { display: inline-flex; gap: 4px; }
+.step {
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: 8px;
+  font-size: 13.5px;
+  color: var(--ink);
+}
+.step:hover:not(:disabled) { background: var(--paper-deep); }
+.step:disabled { color: var(--muted); opacity: 0.55; cursor: default; }
+.rangeWords { margin: 0; font-size: 13px; color: var(--muted); flex-basis: 100%; }
+.rangeWords :global(.readout) { font-size: 12.5px; color: var(--body); }
+
+@media (min-width: 720px) {
+  .page { gap: 24px; }
+  .head { grid-template-columns: minmax(0, 1fr) auto; align-items: end; }
+  .rangeBar { justify-content: flex-end; }
+  .rangeWords { text-align: right; }
+}
+
+@media (min-width: 1180px) {
+  .page {
+    grid-template-columns: minmax(0, 1fr) 340px;
+    grid-template-areas: 'head head' 'summary side' 'chart side' 'list side';
+    column-gap: 32px;
+    grid-template-rows: auto auto auto 1fr;
+  }
+  .side { position: sticky; top: 16px; align-self: start; max-height: calc(100dvh - 32px); overflow: auto; border-radius: 10px; }
+}
+
+@media (max-width: 719px) {
+  .title { font-size: 24px; }
+  .presets { width: 100%; }
+  .preset { flex: 1; min-width: 0; min-height: 44px; }
+  .steps { width: 100%; justify-content: space-between; }
+}

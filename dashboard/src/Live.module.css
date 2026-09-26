@@ -5,7 +5,7 @@
 .word { font-size: 12.5px; letter-spacing: 0.04em; }
 .lit {
   color: var(--phosphor-core);
-  text-shadow: 0 0 6px var(--phosphor), 0 0 16px rgba(111, 240, 168, 0.45);
+  text-shadow: var(--glow);
 }
 .dark { color: var(--muted); }
 

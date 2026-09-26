@@ -1,10 +1,26 @@
 import { create } from 'zustand';
 import type { Reading } from './api';
+import { Range, presetRange, rangeFromAddress, rangeToAddress } from './time';
 
-export type ViewId = 'record' | 'errors' | 'crashes' | 'machine' | 'performance' | 'space' | 'diagnostics' | 'signals' | 'stack' | 'agents';
+export type ViewId = 'timeline' | 'record' | 'errors' | 'crashes' | 'machine' | 'performance' | 'space' | 'diagnostics' | 'signals' | 'stack' | 'agents';
 
-/** The views, in the order the nav shows them. The studio page copies these names; change them there too. */
-export type ViewGroup = 'Evidence' | 'Interpret' | 'Carry';
+/**
+ * The views, in the order the nav shows them. The studio page copies these names; change them there too.
+ * Grouped by how a person reaches them: along the time axis, the machine as a place, and handing on.
+ */
+export type ViewGroup = 'Along time' | 'The machine' | 'Handing on';
+
+/** The views that read the shared range. The others keep their own windows until they are carried across. */
+export const ON_THE_AXIS: ViewId[] = ['timeline', 'record', 'crashes'];
+
+/**
+ * What the reader has picked out on the time axis. A moment and a mark also live in the address as
+ * `moment`; a stretch is held in this tab. Picking never moves the chart or changes the view.
+ */
+export type Selection =
+  | { kind: 'moment'; at: string }
+  | { kind: 'mark'; id: string; at: string }
+  | { kind: 'stretch'; from: number; to: number };
 
 interface PerformanceViewState {
   hours: number;
@@ -69,26 +85,27 @@ export interface SpaceViewState { levels: SpaceLevel[]; mode: SpaceMode }
 const INITIAL_SPACE_VIEW: SpaceViewState = { levels: [], mode: 'tiles' };
 
 export const VIEWS: { id: ViewId; label: string; group: ViewGroup }[] = [
-  { id: 'record', label: 'Record', group: 'Evidence' },
-  { id: 'errors', label: 'Hardware errors', group: 'Evidence' },
-  { id: 'crashes', label: 'Crashes', group: 'Evidence' },
-  { id: 'machine', label: 'Machine', group: 'Evidence' },
-  { id: 'performance', label: 'Performance', group: 'Evidence' },
-  { id: 'space', label: 'Space', group: 'Evidence' },
-  { id: 'diagnostics', label: 'Diagnostics', group: 'Interpret' },
-  { id: 'signals', label: 'Signals', group: 'Interpret' },
-  { id: 'stack', label: 'Stack', group: 'Carry' },
-  { id: 'agents', label: 'Agents', group: 'Carry' },
+  { id: 'timeline', label: 'Timeline', group: 'Along time' },
+  { id: 'record', label: 'System log', group: 'Along time' },
+  { id: 'crashes', label: 'Crashes', group: 'Along time' },
+  { id: 'errors', label: 'Hardware errors', group: 'Along time' },
+  { id: 'performance', label: 'Performance', group: 'Along time' },
+  { id: 'signals', label: 'Signals', group: 'Along time' },
+  { id: 'machine', label: 'Machine', group: 'The machine' },
+  { id: 'space', label: 'Space', group: 'The machine' },
+  { id: 'diagnostics', label: 'Diagnostics', group: 'The machine' },
+  { id: 'stack', label: 'Stack', group: 'Handing on' },
+  { id: 'agents', label: 'Agents', group: 'Handing on' },
 ];
 
-/** The address carries the visible view and a held investigation moment, never a credential. */
-function navigationFromAddress(): { view: ViewId; moment: string | null } {
+/** The address carries the visible view, the shared range and a held moment, never a credential. */
+function navigationFromAddress(): { view: ViewId; moment: string | null; range: Range; selection: Selection | null } {
   const query = new URLSearchParams(window.location.search);
   const requested = query.get('view');
-  const view = VIEWS.find((item) => item.id === requested)?.id ?? 'record';
+  const view = VIEWS.find((item) => item.id === requested)?.id ?? 'timeline';
   const candidate = query.get('moment');
   const moment = candidate && candidate.length <= 64 && /^\d{4}-\d{2}-\d{2}T/.test(candidate) ? qualifiedMoment(candidate) : null;
-  return { view, moment };
+  return { view, moment, range: rangeFromAddress(query.get('range')), selection: moment ? { kind: 'moment', at: moment } : null };
 }
 
 function qualifiedMoment(value: string): string | null {
@@ -100,14 +117,17 @@ function qualifiedMoment(value: string): string | null {
     ? value : new Date(parsed).toISOString();
 }
 
-function writeAddress(view: ViewId, moment: string | null, state: object | null = null) {
+function writeAddress(view: ViewId, moment: string | null, state: object | null = null, replace = false) {
   const url = new URL(window.location.href);
-  if (view === 'record') url.searchParams.delete('view');
+  if (view === 'timeline') url.searchParams.delete('view');
   else url.searchParams.set('view', view);
   if (moment) url.searchParams.set('moment', moment);
   else url.searchParams.delete('moment');
+  const range = useApp.getState().range;
+  url.searchParams.set('range', rangeToAddress(range));
   url.hash = '';
-  history.pushState(state, '', url);
+  if (replace) history.replaceState(state, '', url);
+  else history.pushState(state, '', url);
 }
 
 interface AppState {
@@ -147,6 +167,14 @@ interface AppState {
   clearViewContext: () => void;
   /** Restore a browser history entry without writing another entry. */
   restoreAddress: () => void;
+  /** The one time range the views on the axis share. */
+  range: Range;
+  setRange: (range: Range) => void;
+  /** Re-anchor a live range to now: the same question, asked again. */
+  refreshRange: () => void;
+  selection: Selection | null;
+  /** Pick out a moment, mark or stretch without moving the chart or changing the view. */
+  select: (selection: Selection | null) => void;
 }
 
 const initial = navigationFromAddress();
@@ -170,10 +198,10 @@ export const useApp = create<AppState>((set, get) => ({
     at = at ? qualifiedMoment(at) : null;
     if (at === get().moment && (!at || get().view === 'record')) return;
     const from = get().view;
-    set((state) => ({ ...(at ? { moment: at, view: 'record' as const,
+    set((state) => ({ ...(at ? { moment: at, view: 'record' as const, selection: { kind: 'moment' as const, at },
       recordOrigin: state.view === 'record' ? state.recordOrigin : state.view,
       recordReturnKey: state.view === 'record' ? state.recordReturnKey : returnKey ?? null }
-      : { moment: null, recordOrigin: null, recordReturnKey: null }),
+      : { moment: null, selection: null, recordOrigin: null, recordReturnKey: null }),
       viewScroll: state.view === 'record' ? state.viewScroll : { ...state.viewScroll, [state.view]: window.scrollY } }));
     writeAddress(get().view, at, at && from !== 'record' ? { sentinelReturnTo: from } : null);
   },
@@ -187,4 +215,19 @@ export const useApp = create<AppState>((set, get) => ({
   setSpaceView: (change) => set((state) => ({ spaceView: change(state.spaceView) })),
   clearViewContext: () => set({ viewScroll: {}, crashesView: { ...INITIAL_CRASHES_VIEW }, signalId: null, recordOrigin: null, recordReturnKey: null, spaceView: INITIAL_SPACE_VIEW }),
   restoreAddress: () => set((state) => ({ ...navigationFromAddress(), viewScroll: { ...state.viewScroll, [state.view]: window.scrollY } })),
+  range: initial.range,
+  setRange: (range) => {
+    set({ range });
+    writeAddress(get().view, get().moment);
+  },
+  refreshRange: () => {
+    const { range } = get();
+    if (range.preset) set({ range: presetRange(range.preset) });
+  },
+  selection: initial.selection,
+  select: (selection) => {
+    const at = selection && selection.kind !== 'stretch' ? qualifiedMoment(selection.at) : null;
+    set({ selection, moment: at, recordOrigin: null, recordReturnKey: null });
+    writeAddress(get().view, at, null, true);
+  },
 }));

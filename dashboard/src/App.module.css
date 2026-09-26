@@ -1,11 +1,11 @@
-/* The shell: a header on the lit field with the graticule in one zone, the trace as its horizon,
-   the views as a disclosed list on a phone and a rail on a desk. */
+/* The shell: the lockup and the bridge status on the paper, the views as a disclosed list on a phone
+   and a rail on a desk. Surfaces separate by a change of ground, not by rules. */
 
 .shell {
   min-height: 100dvh;
   display: grid;
-  grid-template-rows: auto auto auto 1fr;
-  grid-template-areas: 'header' 'trace' 'nav' 'main';
+  grid-template-rows: auto auto 1fr;
+  grid-template-areas: 'header' 'nav' 'main';
 }
 
 .skipLink {
@@ -14,7 +14,7 @@
   top: 10px;
   left: var(--gutter);
   padding: 10px 14px;
-  border: 2px solid var(--phosphor);
+  border: 2px solid var(--focus);
   border-radius: 6px;
   background: var(--deep);
   color: var(--ink);
@@ -25,51 +25,12 @@
 .header {
   grid-area: header;
   min-width: 0;
-  position: relative;
-  isolation: isolate;
-  overflow: clip;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 10px 16px;
-  padding: 18px var(--gutter) 14px;
-  background: linear-gradient(180deg, var(--lit) 0%, var(--field) 100%);
-}
-.header::before {
-  /* The lit region, upper left. */
-  content: '';
-  position: absolute;
-  inset: -40% auto auto -10%;
-  width: 70%;
-  height: 220%;
-  z-index: -1;
-  pointer-events: none;
-  background: radial-gradient(50% 45% at 30% 35%, rgba(120, 200, 160, 0.22) 0%, rgba(120, 200, 160, 0.06) 45%, rgba(120, 200, 160, 0) 75%);
-}
-.header::after {
-  /* The graticule, one zone: upper right, masked. */
-  content: '';
-  position: absolute;
-  top: 0;
-  right: 0;
-  width: min(520px, 70%);
-  height: 100%;
-  z-index: -1;
-  pointer-events: none;
-  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40' viewBox='0 0 40 40'%3E%3Cpath d='M0 .5H40M.5 0V40' stroke='%239CFFC4' stroke-opacity='.13' stroke-width='1'/%3E%3C/svg%3E") 0 0 / 40px 40px;
-  -webkit-mask-image: radial-gradient(70% 120% at 85% 40%, #000 0%, rgba(0, 0, 0, 0.5) 45%, transparent 100%);
-  mask-image: radial-gradient(70% 120% at 85% 40%, #000 0%, rgba(0, 0, 0, 0.5) 45%, transparent 100%);
-}
-
-.bridge { color: var(--muted); white-space: nowrap; font-size: 11.5px; }
-
-.trace {
-  grid-area: trace;
-  height: 1px;
-  background: var(--phosphor);
-  opacity: 0.55;
-  box-shadow: 0 0 6px var(--phosphor), 0 0 18px rgba(111, 240, 168, 0.35);
+  padding: 14px var(--gutter) 12px;
 }
 
 .nav {
@@ -83,25 +44,26 @@
 .navItem {
   display: inline-flex;
   align-items: center;
-  gap: 9px;
+  gap: 10px;
   text-align: left;
-  font-family: var(--font-readout);
-  font-size: 13px;
-  color: var(--muted);
+  font-family: var(--font-text);
+  font-size: 14px;
+  color: var(--body);
   padding: 8px 10px;
-  border-radius: 6px;
+  border-radius: 8px;
   white-space: nowrap;
-  min-height: 40px;
+  min-height: 44px;
 }
-.navItem svg { flex: none; opacity: 0.8; }
-.navItem:hover { color: var(--ink); }
-.navActive { color: var(--ink); background: rgba(234, 243, 238, 0.06); }
+.navItem svg { flex: none; opacity: 0.75; }
+.navItem:hover { color: var(--ink); background: var(--paper-deep); }
+.navActive, .navActive:hover { color: var(--ink); font-weight: 600; background: var(--sheet); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08); }
+.navActive svg { opacity: 1; }
 /* Not a view: the same control, set apart by the gap rather than by a rule. */
 .navAside { margin-left: 10px; white-space: normal; }
 
 .mobileNav {
   grid-area: nav;
-  border-bottom: 1px solid var(--rule-soft);
+  box-shadow: 0 1px 0 var(--rule-soft);
 }
 .mobileSummary {
   display: flex;
@@ -118,8 +80,8 @@
 .mobileCurrent { display: inline-flex; align-items: center; gap: 12px; min-width: 0; }
 .mobileCurrent > svg { flex: none; }
 .mobileCurrent > span { min-width: 0; }
-.mobileEyebrow { display: block; color: var(--muted); font-size: 10px; }
-.mobileTitle { display: block; color: var(--ink); font-size: 15px; line-height: 1.3; }
+.mobileEyebrow { display: block; color: var(--muted); font-size: 11px; }
+.mobileTitle { display: block; color: var(--ink); font-size: 16px; font-weight: 600; line-height: 1.3; }
 .mobileToggle { display: inline-flex; align-items: center; gap: 9px; flex: none; color: var(--body); font-size: 12px; }
 .mobileChevron { width: 7px; height: 7px; border: solid currentColor; border-width: 0 1.5px 1.5px 0; transform: translateY(-2px) rotate(45deg); }
 .mobileNav details[open] .mobileChevron { transform: translateY(2px) rotate(225deg); }
@@ -141,8 +103,8 @@
 @media (min-width: 900px) {
   .shell {
     grid-template-columns: var(--rail) 1fr;
-    grid-template-rows: auto auto 1fr;
-    grid-template-areas: 'header header' 'trace trace' 'nav main';
+    grid-template-rows: auto 1fr;
+    grid-template-areas: 'header header' 'nav main';
   }
   .header { padding: 22px 28px 20px; }
   .mobileNav { display: none; }
@@ -150,17 +112,33 @@
     display: flex;
     flex-direction: column;
     gap: 4px;
-    padding: 20px 12px 32px;
+    padding: 12px 12px 32px;
     overflow: visible;
-    border-right: 1px solid var(--rule-soft);
   }
   .navGroup { flex-direction: column; gap: 2px; }
   .navGroup + .navGroup { margin: 22px 0 0; }
   .navGroupLabel { display: block; padding: 0 12px 7px; }
   .navItem { width: 100%; padding: 8px 12px; }
   .navAside { margin: 24px 0 0; }
-  .main { padding: 28px 32px 64px; }
+  .main { padding: 18px 32px 64px; }
+  .header { padding: 16px 28px 10px 24px; }
 }
+
+/* The views on the time axis use the width: the chart gains resolution, the inspector a column. */
+.mainWide { max-width: none; }
+
+.appearance { margin-top: 24px; display: grid; gap: 6px; }
+.appearance .navGroupLabel { display: block; padding: 0 12px; }
+.appearanceChoices { display: flex; flex-wrap: wrap; gap: 2px; padding: 0 6px; }
+.appearanceChoice {
+  min-height: 44px;
+  padding: 0 8px;
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.appearanceChoice:hover { color: var(--ink); }
+.appearanceChoice[aria-pressed='true'] { color: var(--ink); font-weight: 600; text-decoration: underline; text-underline-offset: 4px; text-decoration-thickness: 1.5px; }
 
 /* Sign in */
 .signIn {

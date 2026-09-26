@@ -10,6 +10,7 @@
 // Either `playwright` or `playwright-core` on the module path works; CHROMIUM names a browser
 // executable when the package's own download is missing (a cached one under ~/.cache/ms-playwright).
 // Env: WIDTHS=1440,390  SCALE=1  FULL=1  MAX_FULL=6000 (px cap on a full-page shot's height).
+//      COLOR_SCHEME=light|dark (the system appearance the page sees; light by default).
 const fs = require('fs');
 const path = require('path');
 
@@ -25,6 +26,7 @@ const scale = Number(process.env.SCALE || 1);
 const full = process.env.FULL === '1';
 const maxFull = Number(process.env.MAX_FULL || 6000);
 const HEIGHT = { 1440: 900, 390: 844 };
+const colorScheme = process.env.COLOR_SCHEME || 'light';
 
 async function settled(page, timeout = 60000) {
   await page.waitForLoadState('networkidle', { timeout }).catch(() => {});
@@ -41,11 +43,31 @@ async function click(page, selector, text) {
   return true;
 }
 
-const view = (id) => async (page) => { await page.goto(`${base}/?view=${id}`); await settled(page); };
+const view = (id, query = '') => async (page) => { await page.goto(`${base}/?view=${id}${query}`); await settled(page); };
 
 // A shot is a name and how to reach its state from a signed-in tab. Views come first, in nav order;
 // states that need a click follow. Add a shot here rather than writing another capture script.
 const SHOTS = {
+  timeline: { reach: view('timeline') },
+  'timeline-30d': { reach: view('timeline', '&range=30d') },
+  'timeline-stop': {
+    reach: async (page) => {
+      await view('timeline', '&range=30d')(page);
+      await click(page, 'main li button[aria-pressed]:visible', 'Unplanned stop');
+      await page.evaluate(() => window.scrollTo(0, 0));
+    },
+  },
+  'timeline-moment': {
+    reach: async (page) => {
+      await view('timeline', '&range=24h')(page);
+      const plot = page.locator('[role=slider]').first();
+      if (await plot.isVisible()) {
+        const box = await plot.boundingBox();
+        await page.mouse.click(box.x + box.width * 0.93, box.y + box.height * 0.5);
+        await settled(page, 10000);
+      }
+    },
+  },
   'sign-in': { signedOut: true, reach: async (page) => { await page.goto(base); await page.waitForSelector('#token'); } },
   record: { reach: view('record') },
   errors: { reach: view('errors') },
@@ -60,16 +82,23 @@ const SHOTS = {
   'record-open': {
     reach: async (page) => {
       await view('record')(page);
-      await click(page, 'button', 'The system has rebooted without cleanly shutting down first');
-      await click(page, 'button', 'The record before this');
-      const open = page.locator('li').filter({ has: page.locator('button[aria-expanded="true"]') }).first();
-      if (await open.count()) { await open.scrollIntoViewIfNeeded(); await page.evaluate(() => window.scrollBy(0, -80)); }
+      await click(page, 'main button:visible', 'The system has rebooted without cleanly shutting down first');
     },
   },
+  'record-moment': {
+    reach: async (page) => {
+      await view('record')(page);
+      await click(page, 'main button:visible', 'The system has rebooted without cleanly shutting down first');
+      await click(page, 'button:visible', 'The records around this one');
+      const rule = page.getByText('the picked moment').first();
+      if (await rule.count()) { await rule.scrollIntoViewIfNeeded(); await page.evaluate(() => window.scrollBy(0, -200)); }
+    },
+  },
+  'crashes-30d': { reach: view('crashes', '&range=30d') },
   'crashes-open': {
     reach: async (page) => {
-      await view('crashes')(page);
-      if (await click(page, 'main button', 'Inspect exact stop')) await page.evaluate(() => window.scrollBy(0, 240));
+      await view('crashes', '&range=30d')(page);
+      await click(page, 'main button:visible', 'DPC_WATCHDOG_VIOLATION');
     },
   },
   'diagnostics-memory': {
@@ -122,8 +151,8 @@ async function signIn(context) {
   try {
     for (const width of widths) {
       const viewport = { width, height: HEIGHT[width] || 900 };
-      const signedOut = await browser.newContext({ viewport, deviceScaleFactor: scale, reducedMotion: 'reduce' });
-      const signedIn = await browser.newContext({ viewport, deviceScaleFactor: scale, reducedMotion: 'reduce' });
+      const signedOut = await browser.newContext({ viewport, deviceScaleFactor: scale, reducedMotion: 'reduce', colorScheme });
+      const signedIn = await browser.newContext({ viewport, deviceScaleFactor: scale, reducedMotion: 'reduce', colorScheme });
       let page = null;
       for (const name of names) {
         const shot = SHOTS[name];
