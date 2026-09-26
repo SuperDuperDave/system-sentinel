@@ -68,20 +68,24 @@ def test_update_urls_must_stay_on_github_over_https():
         update._SafeRedirect().redirect_request(None, None, 302, "Found", {}, "http://example.com/payload")
 
 
-def test_the_check_reads_metadata_and_staging_keeps_one_verified_copy(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+def test_the_check_reads_metadata_and_staging_keeps_a_versioned_verified_copy(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     exe = b"new executable"
     sums = f"{sha(exe)}  SystemSentinel.exe\n".encode()
     body = payload(exe, sums)
     fake_open(monkeypatch, body, exe, sums)
     release = update.latest_release()
+    old_cache = tmp_path / "updates" / "SystemSentinel-8.0.0.exe"
+    old_cache.parent.mkdir()
+    old_cache.write_bytes(b"previous release")
     staged = update.stage(release, tmp_path)
     assert staged.read_bytes() == exe
-    assert staged == tmp_path / "updates" / update.ASSET_NAME
-    assert not (staged.parent / ".SystemSentinel.download").exists()
+    assert staged == tmp_path / "updates" / "SystemSentinel-9.1.0.exe"
+    assert not old_cache.exists()
+    assert not list(staged.parent.glob(".SystemSentinel.*.download"))
 
 
 def test_disagreement_or_short_download_never_overwrites_a_cached_copy(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
-    cache = tmp_path / "updates" / update.ASSET_NAME
+    cache = tmp_path / "updates" / "SystemSentinel-9.1.0.exe"
     cache.parent.mkdir()
     cache.write_bytes(b"previous verified copy")
     exe = b"new executable"
@@ -98,7 +102,25 @@ def test_disagreement_or_short_download_never_overwrites_a_cached_copy(monkeypat
     with pytest.raises(update.UpdateError, match="did not match"):
         update.stage(update.parse_release(body), tmp_path)
     assert cache.read_bytes() == b"previous verified copy"
-    assert not (cache.parent / ".SystemSentinel.download").exists()
+    assert not list(cache.parent.glob(".SystemSentinel.*.download"))
+
+
+def test_a_verified_candidate_is_reused_when_an_earlier_launch_still_has_it_open(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    exe = b"published executable"
+    sums = f"{sha(exe)}  SystemSentinel.exe\n".encode()
+    body = payload(exe, sums)
+    fake_open(monkeypatch, body, exe, sums)
+    release = update.latest_release()
+    first = update.stage(release, tmp_path)
+    original_open = update._open
+
+    def no_second_executable_download(url: str, timeout: float = 30):
+        if url == release.exe.url:
+            raise AssertionError("the cached verified executable should be reused")
+        return original_open(url, timeout)
+
+    monkeypatch.setattr(update, "_open", no_second_executable_download)
+    assert update.stage(release, tmp_path) == first
 
 
 def test_the_tray_confirms_before_staging_and_leaves_current_copy_on_refusal(monkeypatch: pytest.MonkeyPatch):
@@ -173,3 +195,56 @@ def test_a_locked_destination_keeps_the_previous_executable(monkeypatch: pytest.
     assert error and "file in use" in error
     assert home.read_bytes() == b"old executable"
     assert list(home.parent.iterdir()) == [home]
+
+
+def test_takeover_waits_for_the_exact_old_process_after_the_port_closes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    events: list[str] = []
+
+    class OldInstance:
+        identities = (object(),)
+
+        def stop(self, grace_seconds: float) -> bool:
+            assert grace_seconds == launcher.QUIT_TIMEOUT
+            events.append("old process exited")
+            return True
+
+    monkeypatch.setattr(launcher, "capture_installed_listener", lambda _home, _port: events.append("captured listener") or OldInstance())
+    monkeypatch.setattr(launcher, "ask_to_quit", lambda _base, _token: events.append("quit accepted") or True)
+    monkeypatch.setattr(launcher, "wait_until_free", lambda _port: events.append("port free") or True)
+    monkeypatch.setattr(launcher, "_hand_over", lambda *_args, **_kwargs: events.append("replacement began") or 0)
+
+    assert launcher._take_over("http://127.0.0.1:8030", "token", 8030, tmp_path / "new.exe", tmp_path / "old.exe", "1.0.1") == 0
+    assert events == ["captured listener", "quit accepted", "old process exited", "port free", "replacement began"]
+
+
+def test_denied_replace_restarts_and_verifies_the_intact_previous_copy(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    home = tmp_path / "SystemSentinel.exe"
+    home.write_bytes(b"old executable")
+    started: list[Path] = []
+    shown: list[str] = []
+    monkeypatch.setattr(launcher, "install", lambda _here, _home: "[WinError 5] Access is denied")
+    monkeypatch.setattr(launcher, "serving_version", lambda _base, _token: None)
+    monkeypatch.setattr(launcher, "port_free", lambda _port: True)
+    monkeypatch.setattr(launcher, "start_installed", lambda path: started.append(path) or None)
+    monkeypatch.setattr(launcher, "wait_until_version", lambda _base, _token, version: version == "1.0.1")
+    monkeypatch.setattr(launcher, "message_box", lambda message: shown.append(message))
+
+    assert launcher._hand_over("http://127.0.0.1:8030", "token", 8030, tmp_path / "new.exe", home, copy=True, expected_version="1.10.1", previous_version="1.0.1") == 1
+    assert home.read_bytes() == b"old executable"
+    assert started == [home]
+    assert "Version 1.0.1 was running again at that time" in shown[0]
+    assert "The tray shows the version running now" in shown[0]
+    assert "WinError" not in shown[0]
+
+
+def test_handover_does_not_count_an_old_server_as_the_new_version(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    home = tmp_path / "SystemSentinel.exe"
+    shown: list[str] = []
+    monkeypatch.setattr(launcher, "install", lambda _here, _home: None)
+    monkeypatch.setattr(launcher, "start_installed", lambda _home: None)
+    monkeypatch.setattr(launcher, "wait_until_version", lambda _base, _token, _version: False)
+    monkeypatch.setattr(launcher, "serving_version", lambda _base, _token: "1.0.1")
+    monkeypatch.setattr(launcher, "message_box", lambda message: shown.append(message))
+
+    assert launcher._hand_over("http://127.0.0.1:8030", "token", 8030, tmp_path / "new.exe", home, copy=True, expected_version="1.10.1") == 1
+    assert "1.10.1 was installed but did not start answering" in shown[0]

@@ -42,11 +42,13 @@ import urllib.request
 import webbrowser
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 from . import __version__
 from .auth import load_or_create_token, mint_code
 from .bridge import shutdown_sessions
+from .instance import capture_installed_listener
 from .paths import data_dir
 
 try:  # the tray and the mark are the optional extra
@@ -67,8 +69,9 @@ DEFAULT_PORT = 8000
 #: front of a windowed program learns something went wrong while they are still watching.
 READY_TIMEOUT = 15.0
 BROWSER_TIMEOUT = 30.0
-#: How long a copy being replaced is given to answer, stop and let go of the port.
-QUIT_TIMEOUT = 20.0
+#: Let the old process finish its server lifespan and release its executable. Its performance
+#: collector can take up to 25 seconds to stop before bridge sessions are closed.
+QUIT_TIMEOUT = 45.0
 STARTUP_LINK = "System Sentinel.lnk"
 INSTALLED_NAME = "SystemSentinel.exe"
 LOG_NAME = "launcher.log"
@@ -148,6 +151,16 @@ def wait_until_serving(base: str, token: str, timeout: float = READY_TIMEOUT) ->
             return True
         time.sleep(0.2)
     return False
+
+
+def wait_until_version(base: str, token: str, version: str, timeout: float = READY_TIMEOUT) -> bool:
+    """A started copy is ready only when it answers with the version we started."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if serving_version(base, token) == version:
+            return True
+        time.sleep(0.2)
+    return serving_version(base, token) == version
 
 
 def ask_to_quit(base: str, token: str, ask: Fetch = _ask) -> bool:
@@ -238,10 +251,16 @@ class Server:
         self._server.should_exit = True
 
     def stop(self) -> None:
-        """Ask it to stop and wait for the thread it was started on."""
+        """Wait for the server's cleanup before Python begins interpreter shutdown."""
         self.quit()
         if self._thread is not None:
-            self._thread.join(timeout=10)
+            self._thread.join(timeout=QUIT_TIMEOUT - 5)
+            if self._thread.is_alive():
+                LOG.warning("the server thread is still stopping; closing bridge sessions before a final wait")
+                shutdown_sessions()
+                self._thread.join(timeout=5)
+                if self._thread.is_alive():
+                    LOG.error("the server thread did not finish its shutdown before the launcher returned")
 
     @property
     def alive(self) -> bool:
@@ -888,39 +907,75 @@ def _say(message: str) -> None:
         sys.stdout.flush()
 
 
-def _hand_over(base: str, token: str, listen_port: int, here: Path, home: Path, copy: bool) -> int:
-    """A download's whole job: put the program where it lives, start that copy, and step aside."""
-    trouble = install(here, home) if copy else None
-    trouble = trouble or start_installed(home)
-    if trouble:
-        message_box(f"System Sentinel could not be installed on this computer.\n\n{trouble}\n\nWhat happened is in {log_path()}.")
-        return 1
-    if not wait_until_serving(base, token):
+def _resume_previous(base: str, token: str, listen_port: int, home: Path, version: str, reason: str) -> int:
+    """After a failed takeover, make the intact previous copy useful again when possible."""
+    LOG.error("update failed after the previous copy was asked to quit: %s", reason)
+    recovered = serving_version(base, token) == version
+    if not recovered and port_free(listen_port):
+        trouble = start_installed(home)
+        if trouble:
+            LOG.error("the previous copy could not be restarted: %s", trouble)
+        else:
+            recovered = wait_until_version(base, token, version)
+    attempted_at = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M %Z")
+    if recovered:
         message_box(
-            f"System Sentinel is in {home.parent}, but it did not start answering at {base}/.\n\n"
-            f"Something else may be holding port {listen_port}, or a previous copy is still stopping.\n\n"
-            f"What happened is in {log_path()}."
+            f"The update attempt at {attempted_at} did not finish. Version {version} was running again at that time.\n\n"
+            "The tray shows the version running now. Try Check for updates there again. Technical details are in the local launcher.log."
+        )
+    else:
+        message_box(
+            f"The update attempt at {attempted_at} did not finish. The previous copy was not answering at that time, "
+            "but its installed file was kept.\n\n"
+            "Start System Sentinel again, or retry the downloaded update. Technical details are in the local launcher.log."
+        )
+    return 1
+
+
+def _hand_over(base: str, token: str, listen_port: int, here: Path, home: Path, copy: bool, expected_version: str, previous_version: str | None = None) -> int:
+    """Put the program in place, start it, and verify the exact version answering."""
+    trouble = install(here, home) if copy else None
+    if trouble:
+        if previous_version is not None:
+            return _resume_previous(base, token, listen_port, home, previous_version, trouble)
+        LOG.error("install failed: %s", trouble)
+        message_box("System Sentinel could not be installed. The installed file was left intact.\n\nTechnical details are in the local launcher.log.")
+        return 1
+    trouble = start_installed(home)
+    if trouble:
+        LOG.error("installed copy could not start: %s", trouble)
+        message_box("System Sentinel was installed but could not start.\n\nTechnical details are in the local launcher.log.")
+        return 1
+    if not wait_until_version(base, token, expected_version):
+        observed = serving_version(base, token)
+        LOG.error("installed copy did not serve the expected version %s; observed %s", expected_version, observed)
+        message_box(
+            f"System Sentinel {expected_version} was installed but did not start answering.\n\n"
+            "Start System Sentinel again. Technical details are in the local launcher.log."
         )
         return 1
     _say(f"System Sentinel is running at {base}/.")
     return 0
 
 
-def _take_over(base: str, token: str, listen_port: int, here: Path, home: Path) -> int:
-    """Replace an older copy that is serving: ask it to stop, wait for the port, then hand over."""
+def _take_over(base: str, token: str, listen_port: int, here: Path, home: Path, previous_version: str) -> int:
+    """Ask the exact old instance to exit before replacing its executable."""
+    instance = capture_installed_listener(home, listen_port)
+    if instance is None:
+        LOG.warning("the installed listener process could not be identified; shutdown will not force-stop any process")
+    else:
+        LOG.info("identified %d installed process identities before requesting shutdown", len(instance.identities))
     if not ask_to_quit(base, token):
         message_box(
             f"A copy of System Sentinel is already running at {base}/ and would not stop, so it was not updated.\n\n"
             f"Quit it from the tray and start this one again.\n\nWhat happened is in {log_path()}."
         )
         return 1
+    if instance is not None and not instance.stop(grace_seconds=QUIT_TIMEOUT):
+        return _resume_previous(base, token, listen_port, home, previous_version, "the previous executable did not exit after its quit request")
     if not wait_until_free(listen_port):
-        message_box(
-            f"The copy of System Sentinel at {base}/ was asked to stop but port {listen_port} is still held, so it was not updated.\n\n"
-            f"What happened is in {log_path()}."
-        )
-        return 1
-    return _hand_over(base, token, listen_port, here, home, copy=True)
+        return _resume_previous(base, token, listen_port, home, previous_version, f"port {listen_port} remained occupied after the quit request")
+    return _hand_over(base, token, listen_port, here, home, copy=True, expected_version=__version__, previous_version=previous_version)
 
 
 def _serve_here(base: str, token: str, listen_port: int) -> int:
@@ -971,11 +1026,13 @@ def main() -> int:
     at_home = here is not None and os.path.normcase(str(here)) == os.path.normcase(str(home.resolve()))
     away = here is not None and not at_home
 
+    running_version = serving_version(base, token)
+    installed_version = file_version(home) if away else None
     step = plan(
         frozen=here is not None,
         at_home=at_home,
-        serving=serving_version(base, token),
-        installed_version=file_version(home) if away else None,
+        serving=running_version,
+        installed_version=installed_version,
         same=same_bytes(here, home) if away else False,
     )
     LOG.info("%s: %s", step.do, step.why)
@@ -986,9 +1043,10 @@ def main() -> int:
     if step.do == NEWER:
         return show_dashboard(base, token, step.why)
     if step.do == REPLACE:
-        return _take_over(base, token, listen_port, here, home)  # type: ignore[arg-type]
+        return _take_over(base, token, listen_port, here, home, running_version or "unknown")  # type: ignore[arg-type]
     if step.do in (INSTALL, START):
-        return _hand_over(base, token, listen_port, here, home, copy=step.do == INSTALL)  # type: ignore[arg-type]
+        expected_version = (installed_version or __version__) if step.do == START else __version__
+        return _hand_over(base, token, listen_port, here, home, copy=step.do == INSTALL, expected_version=expected_version)  # type: ignore[arg-type]
     return _serve_here(base, token, listen_port)
 
 

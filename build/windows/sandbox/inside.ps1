@@ -490,6 +490,9 @@ if ($Release -and (Test-Path $staged) -and $token -and (Test-Budget 'update-star
         # The same version cannot update itself; say so rather than report a failure to change.
         Add-Result -step 'update-start' -ok $true -note "not attempted: the staged executable carries the same version as the copy already serving ($before), so there is nothing to update; stage a newer build to observe one"
     } else {
+        $installed = Join-Path $dataDir 'SystemSentinel.exe'
+        $oldProcesses = @()
+        try { $oldProcesses = @(Get-CimInstance Win32_Process -Filter "Name='SystemSentinel.exe'" | Where-Object { $_.ExecutablePath -eq $installed }) } catch {}
         $launched = $true
         try { Start-Process -FilePath $staged } catch { $launched = $false }
         Add-Result -step 'update-start' -ok $launched -seconds (((Get-Date) - $t0).TotalSeconds) `
@@ -517,13 +520,18 @@ if ($Release -and (Test-Path $staged) -and $token -and (Test-Budget 'update-star
             $why = "; asked afterwards, POST /api/quit against the copy that was serving answers $code (404 or 405 means that version has no quit route at all, so a newer copy cannot ask it to stop and the person has to quit it themselves)"
         }
 
-        $installed = Join-Path $dataDir 'SystemSentinel.exe'
         $sameFile = $false
         try { $sameFile = ((Get-FileHash -Algorithm SHA256 $installed).Hash -ieq (Get-FileHash -Algorithm SHA256 $staged).Hash) } catch {}
+        $afterProcesses = @()
+        try { $afterProcesses = @(Get-CimInstance Win32_Process -Filter "Name='SystemSentinel.exe'" | Where-Object { $_.ExecutablePath -eq $installed }) } catch {}
+        $oldRemaining = @($afterProcesses | Where-Object {
+            $current = $_
+            @($oldProcesses | Where-Object { $_.ProcessId -eq $current.ProcessId -and $_.CreationDate -eq $current.CreationDate }).Count -gt 0
+        })
         $windows = Get-TopLevelWindows
         $shot = Save-Screenshot '1b-update.png'
-        Add-Result -step 'update-took-over' -ok (($after -ne $before) -and $stagedVersion -and ($after -eq $stagedVersion)) -seconds (((Get-Date) - $t0).TotalSeconds) `
-            -note ("the server now reports $(if ($after) { $after } else { '(nothing answered)' }), where it reported $(if ($before) { $before } else { '(unreadable)' }); the installed copy is the staged executable byte for byte: $sameFile$why; $shot") `
+        Add-Result -step 'update-took-over' -ok (($after -ne $before) -and $stagedVersion -and ($after -eq $stagedVersion) -and $sameFile -and ($oldProcesses.Count -gt 0) -and ($oldRemaining.Count -eq 0)) -seconds (((Get-Date) - $t0).TotalSeconds) `
+            -note ("the server now reports $(if ($after) { $after } else { '(nothing answered)' }), where it reported $(if ($before) { $before } else { '(unreadable)' }); the installed copy is the staged executable byte for byte: $sameFile; previous installed processes still alive: $($oldRemaining.Count)$why; $shot") `
             -tail (Get-Tail $windows 24)
 
         $closed = Close-WindowByTitle '*System Sentinel*'

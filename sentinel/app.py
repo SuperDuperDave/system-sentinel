@@ -414,8 +414,8 @@ def create_app(state: State | None = None, mcp: bool = True) -> FastAPI:
         something holding the token, which is to say this machine's launcher or an agent running
         on it, may do it.
 
-        This is how a downloaded newer copy replaces a running older one: ask, wait for the port,
-        then take its place.
+        This is how a downloaded newer copy replaces a running older one: ask, wait for the
+        verified old process tree and the port, then take its place.
         """
         if not matches(state.token, bearer(request)):
             return JSONResponse(

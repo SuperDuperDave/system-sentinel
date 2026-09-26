@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.10.1] - 2026-09-26
+
+### Improved
+- Windows updates now identify the installed process that owns the local API listener and wait for its one-file process tree to exit, as well as for the port to close, before replacing the executable. After a bounded graceful wait, only those verified prior processes may be stopped. An unrelated process is never stopped by name.
+- If replacement is denied after the old copy quits, the intact previous executable is started again and its serving version is checked. A time-stamped dialog reports what was true for that attempt, so a message left open after a later retry is recognizable as old; technical error detail stays in the local log. A handoff is successful only when the expected version answers.
+- The server waits for its cleanup before interpreter shutdown, with a final bridge-session close if that wait runs long. Verified update downloads are cached by version, so a dialog holding an earlier candidate cannot pin the next release's file; an unchanged verified candidate can be reused.
+
+### Limits
+- A port owner whose executable identity cannot be proved is never forcibly stopped. If Windows still denies replacement after the verified old processes exit, the previous file is retained and recovery is attempted; the local log has the underlying error. The updater does not yet roll back a completed replacement whose new executable then fails to serve.
+
 ## [1.10.0] - 2026-09-25
 
 ### Added

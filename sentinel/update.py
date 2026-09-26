@@ -2,8 +2,8 @@
 
 Nothing here runs on a timer. The tray or CLI asks GitHub only when a person asks for an update.
 The published asset digest and the release's checksum list must agree with the bytes received
-before the existing executable handoff is allowed to run them. One cached executable is kept in
-the data directory so an interrupted attempt has a useful recovery file, not a trail of copies.
+before the existing executable handoff is allowed to run them. A verified candidate is cached by
+version so a dialog from an earlier attempt cannot pin the next release's destination file.
 """
 
 from __future__ import annotations
@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import re
+import tempfile
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -172,19 +173,22 @@ def _listed_digest(sums: bytes) -> str:
 
 
 def stage(release: Release, home: Path) -> Path:
-    """Keep one verified candidate; the installed copy is untouched until its own handoff runs."""
+    """Keep a verified candidate; the installed copy is untouched until its own handoff runs."""
     expected = _listed_digest(_read_asset(release.sums, MAX_SUMS))
     if expected != release.exe.sha256:
         raise UpdateError("the executable digest disagrees with the checksum list")
     directory = home / "updates"
     directory.mkdir(parents=True, exist_ok=True)
-    partial = directory / ".SystemSentinel.download"
-    ready = directory / ASSET_NAME
-    partial.unlink(missing_ok=True)
+    ready = directory / f"SystemSentinel-{release.version}.exe"
+    if _cached_matches(ready, release.exe.size, expected):
+        _prune_old_candidates(directory, ready)
+        return ready
+    handle, name = tempfile.mkstemp(prefix=".SystemSentinel.", suffix=".download", dir=directory)
+    partial = Path(name)
     try:
         digest = hashlib.sha256()
         total = 0
-        with _open(release.exe.url, timeout=60) as response, partial.open("wb") as target:
+        with os.fdopen(handle, "wb") as target, _open(release.exe.url, timeout=60) as response:
             while chunk := response.read(CHUNK):
                 total += len(chunk)
                 if total > release.exe.size or total > MAX_EXE:
@@ -195,7 +199,33 @@ def stage(release: Release, home: Path) -> Path:
             os.fsync(target.fileno())
         if total != release.exe.size or digest.hexdigest() != expected:
             raise UpdateError("the downloaded executable did not match its published SHA-256 and size")
-        os.replace(partial, ready)
+        try:
+            os.replace(partial, ready)
+        except OSError:
+            # Another update attempt may have published the same verified bytes and launched
+            # them while this download was in flight. Use those bytes instead of claiming a
+            # failed update because Windows now holds the candidate open.
+            if not _cached_matches(ready, release.exe.size, expected):
+                raise
+        _prune_old_candidates(directory, ready)
         return ready
     finally:
         partial.unlink(missing_ok=True)
+
+
+def _cached_matches(path: Path, size: int, digest: str) -> bool:
+    if not path.exists() or path.stat().st_size != size:
+        return False
+    with path.open("rb") as cached:
+        return hashlib.file_digest(cached, "sha256").hexdigest() == digest
+
+
+def _prune_old_candidates(directory: Path, ready: Path) -> None:
+    """Keep old cached downloads only while Windows has them open."""
+    for previous in directory.glob("SystemSentinel-*.exe"):
+        if previous == ready:
+            continue
+        try:
+            previous.unlink()
+        except OSError:
+            pass
