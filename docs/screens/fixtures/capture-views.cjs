@@ -47,9 +47,35 @@ const view = (id) => async (page) => { await page.goto(`${base}/?view=${id}`); a
 // states that need a click follow. Add a shot here rather than writing another capture script.
 const SHOTS = {
   'sign-in': { signedOut: true, reach: async (page) => { await page.goto(base); await page.waitForSelector('#token'); } },
+  home: { reach: view('home') },
+  // Home after the person has opened the stop door: its mark is acknowledged, the others remain.
+  'home-after': { reach: async (page) => { await view('stopped')(page); await view('home')(page); } },
+  // Needs a fixture server started with SENTINEL_FIXTURE_HOME_GAPS=1.
+  'home-gaps': { reach: view('home') },
+  stopped: { reach: view('stopped') },
+  'stopped-changes': {
+    reach: async (page) => {
+      await view('stopped')(page);
+      await click(page, 'main button', 'Read what changed before');
+      await page.locator('#step-changes-title').scrollIntoViewIfNeeded();
+      await page.evaluate(() => window.scrollBy(0, -60));
+    },
+  },
+  'stopped-older': {
+    reach: async (page) => {
+      await view('stopped')(page);
+      await click(page, 'main nav button', 'MEMORY_MANAGEMENT');
+    },
+  },
+  programs: { reach: view('programs') },
+  'programs-open': {
+    reach: async (page) => {
+      await view('programs')(page);
+      if (await click(page, 'main li > button[aria-expanded]', 'example.exe')) await page.evaluate(() => window.scrollBy(0, 200));
+    },
+  },
   record: { reach: view('record') },
   errors: { reach: view('errors') },
-  crashes: { reach: view('crashes') },
   machine: { reach: view('machine') },
   performance: { reach: view('performance') },
   space: { reach: view('space') },
@@ -66,12 +92,6 @@ const SHOTS = {
       if (await open.count()) { await open.scrollIntoViewIfNeeded(); await page.evaluate(() => window.scrollBy(0, -80)); }
     },
   },
-  'crashes-open': {
-    reach: async (page) => {
-      await view('crashes')(page);
-      if (await click(page, 'main button', 'Inspect exact stop')) await page.evaluate(() => window.scrollBy(0, 240));
-    },
-  },
   'diagnostics-memory': {
     reach: async (page) => {
       await view('diagnostics')(page);
@@ -84,14 +104,14 @@ const SHOTS = {
   'nav-open': {
     reach: async (page) => {
       await view('record')(page);
-      const summary = page.locator('nav[aria-label="Views"] summary:visible');
+      const summary = page.locator('nav[aria-label="Doors and places"] summary:visible');
       if (await summary.count()) { await summary.click(); await page.waitForTimeout(300); }
     },
   },
   devices: {
     reach: async (page) => {
       await view('record')(page);
-      const summary = page.locator('nav[aria-label="Views"] summary:visible');
+      const summary = page.locator('nav[aria-label="Doors and places"] summary:visible');
       if (await summary.count()) await summary.click();
       await click(page, 'button:visible', 'Sign in another device');
     },
@@ -105,7 +125,7 @@ async function signIn(context) {
   await page.waitForSelector('#token', { timeout: 15000 });
   await page.fill('#token', token);
   await page.click('button[type=submit]');
-  await page.waitForSelector('nav[aria-label="Views"]:visible', { timeout: 20000 });
+  await page.waitForSelector('nav[aria-label="Doors and places"]:visible', { timeout: 20000 });
   return page;
 }
 

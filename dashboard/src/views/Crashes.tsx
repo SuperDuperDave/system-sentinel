@@ -1,13 +1,11 @@
-import { ReactNode, useLayoutEffect, useRef, useState } from 'react';
+import { ReactNode, useState } from 'react';
 import { AddToStack } from '../AddToStack';
 import { CitedRecord, eventRef } from '../CitedRecord';
 import { EventRecord, Reading, type RecordId, observed } from '../api';
 import { OutcomeLine, clock } from '../Outcome';
-import { Basis, Facts, Head, MomentLink, RowList, Section, Segmented, Value, ago, basisOf, byDay, duration, part, size, useKeepButtonInPlace } from '../Sections';
-import { canRestoreCrashView, useReading } from '../useReading';
+import { Basis, Facts, MomentLink, RowList, Section, Value, ago, byDay, duration, part, size } from '../Sections';
+import { useReading } from '../useReading';
 import { useApp } from '../store';
-import { ChangesNearStop } from './ChangesNearStop';
-import { ReliabilityHistory } from './ReliabilityHistory';
 import styles from './Crashes.module.css';
 
 /** What a bug check is, wherever the code was found: the record that named it says so. */
@@ -39,7 +37,7 @@ interface LastRecord {
   Message: string | null;
 }
 
-interface Stop {
+export interface Stop {
   started_at: string | null;
   announced_at: string | null;
   stopped_at: string | null;
@@ -91,14 +89,14 @@ interface FaultProcess {
   };
 }
 
-interface FaultSummary {
+export interface FaultSummary {
   by_kind: Record<string, number>;
   applications: { name: string; count: number; first: string | null; last: string | null; modules: string[] }[];
   live_kernel: { code: string | null; name: string | null; bucket: string | null; count: number; last: string | null }[];
 }
 
 /** One file from an observed dump location, paired with its private-path-safe selector. */
-interface DumpFile {
+export interface DumpFile {
   name: string;
   path: string;
   bytes: number;
@@ -141,8 +139,6 @@ interface DumpStreams {
   entries: DumpStreamEntry[];
 }
 
-const STOP_COUNTS = [5, 20];
-const FAULT_COUNTS = [30, 100];
 const STOP_STAMP = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
 const KIND_WORD: Record<string, string> = {
@@ -152,207 +148,27 @@ const KIND_WORD: Record<string, string> = {
 };
 
 /**
- * Crashes: the stops the machine did not plan, what went wrong while it kept running, and the
- * dumps on disk.
- *
- * Three readings, three outcome lines, because they answer three questions and fail apart: a
- * machine that has not stopped still has faults, and an empty dump inventory says something about
- * the configuration rather than about the stops. The order is the order of the founding question
- * — it froze at 02:14 — so the stops come first and every one of them offers the System record
- * before its restart and the evidence handed to the stack.
+ * The evidence the two situations "It stopped or restarted" and "A program crashed or froze" are
+ * composed from: a stop's fields, a fault's fields, a dump's bounded header and the dump files on
+ * disk. The views that arrange them are Stopped.tsx and Programs.tsx.
  *
  * Nothing here is styled as a verdict. A stop with no bug check reads as a stop with no bug check,
  * which is itself the finding; the bucket WER named is shown as WER's words, not as a cause.
  */
-export function Crashes() {
-  const { stopCount, faultCount, faultKind, stopId, faultId, dumpId, focus, changesBefore } = useApp((s) => s.crashesView);
-  const setCrashesView = useApp((s) => s.setCrashesView);
-  const returnTo = useRef(canRestoreCrashView(stopCount, faultCount, focus, changesBefore) ? focus : null);
-  const stopButtons = useRef(new Map<number, HTMLButtonElement>());
-  const faultRowsRef = useRef<HTMLDivElement>(null);
-  const dumpRowsRef = useRef<HTMLDivElement>(null);
-  const missingStopRef = useRef<HTMLParagraphElement>(null);
-  const missingFaultRef = useRef<HTMLParagraphElement>(null);
-  const missingDumpRef = useRef<HTMLParagraphElement>(null);
-
-  const crash = useReading('crash', { count: stopCount }, true, { hold: 'same-reading' });
-  const faults = useReading('faults', { count: faultCount }, true, { hold: 'same-reading' });
-  const dumps = useReading('dumps', {}, true, { hold: 'same-params' });
-
-  const stops = part<Stop[]>(crash.reading, 'stops') ?? [];
-  const selectedStopIndex = stops.findIndex((stop) => stopIdentity(stop) === stopId);
-  const selectedStop = selectedStopIndex < 0 ? null : selectedStopIndex;
-  const faultRecords = part<EventRecord[]>(faults.reading, 'records') ?? [];
-  const decoded = part<Fault[]>(faults.reading, 'decoded') ?? [];
-  const faultSummary = observed(faults.reading) ? part<FaultSummary>(faults.reading, 'summary') : null;
-  const selectedFaultKind = faultKind && faultSummary?.by_kind[faultKind] ? faultKind : null;
-  const shownFaults = selectedFaultKind ? decoded.filter((fault) => fault.kind === selectedFaultKind) : decoded;
-  const targets = part<{ file_index: number; ref: string }[]>(dumps.reading, 'inspection_targets') ?? [];
-  const references = new Map(targets.map((target) => [target.file_index, target.ref]));
-  const files = (part<DumpFile[]>(dumps.reading, 'files') ?? []).map((file, index) => ({ ...file, fileRef: references.get(index) }));
-  const times = new Map(faultRecords.map((r) => [r.RecordId, r.TimeCreated]));
-  const shownStopCount = typeof crash.heldParams?.count === 'number' && crash.held ? crash.heldParams.count : stopCount;
-  const shownFaultCount = typeof faults.heldParams?.count === 'number' && faults.held ? faults.heldParams.count : faultCount;
-
-  // A held reading puts the original row back before paint. Restore keyboard focus without
-  // moving the viewport a second time; Shell restores its saved position.
-  useLayoutEffect(() => {
-    const destination = returnTo.current;
-    if (!destination) return;
-    const taken = destination === 'stop' ? crash : destination === 'fault' ? faults : dumps;
-    if (taken.state === 'idle' || taken.state === 'taking') return;
-    returnTo.current = null;
-    if (!observed(taken.reading)) return;
-    const root = destination === 'fault' ? faultRowsRef.current : dumpRowsRef.current;
-    const id = destination === 'fault' ? faultId : dumpId;
-    const row = destination === 'stop'
-      ? selectedStop === null ? null : stopButtons.current.get(selectedStop)
-      : [...(root?.querySelectorAll<HTMLButtonElement>('button[data-row-id]') ?? [])].find((button) => button.dataset.rowId === id);
-    const missing = destination === 'stop' ? missingStopRef.current : destination === 'fault' ? missingFaultRef.current : missingDumpRef.current;
-    const target = row ?? missing;
-    target?.focus({ preventScroll: true });
-  }, [crash, faults, dumps, selectedStop, faultId, dumpId]);
-
-  function chooseStop(index: number | null) {
-    setCrashesView({ stopId: index === null ? null : stopIdentity(stops[index]), focus: index === null ? null : 'stop', changesStopId: null, changesBefore: null });
-  }
-
-  function chooseFaultKind(kind: string | null) {
-    if (!faults.reading) return;
-    setCrashesView({ faultKind: kind, faultId: null, focus: null });
-  }
-
-  return (
-    <section>
-      <Head title="Crashes">
-        <Segmented value={stopCount} onChange={(count) => setCrashesView({ stopCount: count })} options={STOP_COUNTS.map((c) => ({ value: c, label: `last ${c}` }))} label="How many stops" />
-        {crash.reading ? <AddToStack item={{ kind: 'reading', envelope: crash.reading, title: `Unplanned stops, last ${shownStopCount}` }} label="Stack this reading" /> : null}
-      </Head>
-      <OutcomeLine taken={crash} noun="stops" singular="stop" emptyText="No stop established from the returned records" />
-      {observed(crash.reading) && stopId && selectedStop === null ? <p ref={missingStopRef} className={`${styles.selectionMissing} readout`} role="status" tabIndex={-1}>The previously selected stop is not in this returned reading.</p> : null}
-
-      {observed(crash.reading) && stops.length > 0 ? (
-        <Section title="Stops" cls="derived" basis={basisOf(crash.reading, 'stops')} note="newest first">
-          <StopSequence
-            stops={stops}
-            selected={selectedStop}
-            envelope={crash.reading}
-            onInspect={(index) => chooseStop(selectedStop === index ? null : index)}
-            registerButton={(index, node) => { if (node) stopButtons.current.set(index, node); else stopButtons.current.delete(index); }}
-          />
-        </Section>
-      ) : null}
-
-      <ReliabilityHistory />
-
-      <Section
-        title="Programs and the kernel's live reports"
-        cls="derived"
-        basis={basisOf(faults.reading, 'decoded')}
-        controls={
-          <>
-            <Segmented value={faultCount} onChange={(count) => setCrashesView({ faultCount: count })} options={FAULT_COUNTS.map((c) => ({ value: c, label: `last ${c}` }))} label="How many records" />
-            {faults.reading ? <AddToStack item={{ kind: 'reading', envelope: faults.reading, title: `Faults, last ${shownFaultCount}` }} /> : null}
-          </>
-        }
-      >
-        <OutcomeLine taken={faults} noun="records" singular="record" emptyText="No application crash, hang or live kernel report in the Application log" />
-        {observed(faults.reading) && faultId && !shownFaults.some((fault) => faultIdentity(fault) === faultId) ? <p ref={missingFaultRef} className={`${styles.selectionMissing} readout`} role="status" tabIndex={-1}>The previously selected fault is not in this returned reading.</p> : null}
-        {observed(faults.reading) && decoded.length > 0 ? faultSummary ? (
-          <FaultOverview summary={faultSummary} rawCount={faultRecords.length} decodedCount={decoded.length} basis={basisOf(faults.reading, 'summary')} selected={selectedFaultKind} onChoose={chooseFaultKind} />
-        ) : <p className={`${styles.faultSummaryMissing} readout`}>The derived fault summary was not returned; the decoded entries remain below.</p> : null}
-        {observed(faults.reading) && decoded.length > 0 ? (
-          <div className={styles.faultRows} ref={faultRowsRef} tabIndex={-1} aria-label="Decoded fault instances in this returned sample">
-          <p className={`${styles.faultRowsCount} readout`} role="status">{shownFaults.length} of {decoded.length} decoded fault {decoded.length === 1 ? 'instance' : 'instances'} shown{selectedFaultKind ? ` · ${faultKindLabel(selectedFaultKind)}` : ' · all kinds'}</p>
-          <RowList
-            items={shownFaults}
-            idOf={faultIdentity}
-            openId={faultId}
-            onOpenChange={(id) => setCrashesView({ faultId: id === null ? null : String(id), focus: id === null ? null : 'fault' })}
-            layout={styles.faultRow}
-            cells={(f) => (
-              <>
-                <span className={`${styles.time} readout`}>{at(times.get(f.RecordId))}</span>
-                <span className={`${styles.kind} readout`}>{KIND_WORD[f.kind] ?? f.kind}</span>
-                <span className={styles.app}>{appOf(f)}</span>
-                <span className={`${styles.module} readout`}>{moduleOf(f)}</span>
-                <span className={`${styles.exception} readout`}>{exceptionOf(f)}</span>
-              </>
-            )}
-            inspect={(f) => <FaultDetail fault={f} at={times.get(f.RecordId)} envelope={faults.reading} rawRecords={faultRecords} />}
-          />
-          </div>
-        ) : null}
-      </Section>
-
-      <Section
-        title="Dump files"
-        cls="raw"
-        note={files.length ? `newest first · ${size(files.reduce((n, f) => n + f.bytes, 0))} on disk` : undefined}
-        controls={dumps.reading ? <AddToStack item={{ kind: 'reading', envelope: dumps.reading, title: 'Crash dump inventory' }} /> : null}
-      >
-        <OutcomeLine taken={dumps} noun="dump files" singular="dump file" emptyText="No dump files found in the checked locations" />
-        <DumpCoverage reading={dumps.reading} />
-        {observed(dumps.reading) && dumpId && !files.some((file) => (file.fileRef ?? file.path) === dumpId) ? <p ref={missingDumpRef} className={`${styles.selectionMissing} readout`} role="status" tabIndex={-1}>The previous selection is no longer available. Select a file from this inventory.</p> : null}
-        <div ref={dumpRowsRef}>
-        {observed(dumps.reading) && files.length > 0
-          ? byDay(files, (f) => f.modified).map(([label, rows]) => (
-              <div key={label}>
-                <p className={`${styles.day} label`}>{label}</p>
-                <RowList
-                  items={rows}
-                  idOf={(file) => file.fileRef ?? file.path}
-                  openId={dumpId}
-                  onOpenChange={(id) => setCrashesView({ dumpId: id === null ? null : String(id), focus: id === null ? null : 'dump' })}
-                  layout={styles.fileRow}
-                  cells={(f) => (
-                    <>
-                      <span className={`${styles.fileName} readout`}>{f.name}</span>
-                      <span className={`${styles.fileSize} readout`}>{size(f.bytes)}</span>
-                      <span className={`${styles.fileWhen} readout`}>
-                        {at(f.modified)} · {ago(f.modified)}
-                      </span>
-                    </>
-                  )}
-                  inspect={(f) => (
-                    <>
-                      <Facts
-                        rows={[
-                          ['Path', <span className={styles.path}>{f.path}</span>],
-                          ['Location', dumpLocationName(f.source)],
-                          ['Size', `${f.bytes.toLocaleString()} bytes`],
-                          ['Written', f.modified],
-                        ]}
-                      />
-                      <DumpHeaderDetail path={f.path} fileRef={f.fileRef} refreshInventory={dumps.retake} />
-                      <div className={styles.actions}>
-                        <MomentLink at={f.modified} sourceKey={`dump:${f.fileRef ?? f.path}:${f.modified}`} />
-                      </div>
-                    </>
-                  )}
-                />
-              </div>
-            ))
-          : null}
-        </div>
-      </Section>
-    </section>
-  );
-}
 
 /** Prefer the System start's record identity; report-only stops retain their report identity. */
-function stopIdentity(stop: Stop): string {
+export function stopIdentity(stop: Stop): string {
   if (stop.records.start != null) return `start:${stop.records.start}:${stop.started_at}`;
   if (stop.records.power_41 != null) return `power:${stop.records.power_41}:${stop.announced_at}`;
   return JSON.stringify([stop.started_at, stop.announced_at, stop.reported_at, stop.records.report]);
 }
 
-function faultIdentity(fault: Fault): string {
+export function faultIdentity(fault: Fault): string {
   return `${fault.Log ?? 'Application'}:${fault.RecordId}`;
 }
 
 /** A map of the returned decoded instances, not a count of all faults on the machine. */
-function FaultOverview({ summary, rawCount, decodedCount, basis, selected, onChoose }: {
+export function FaultOverview({ summary, rawCount, decodedCount, basis, selected, onChoose }: {
   summary: FaultSummary;
   rawCount: number;
   decodedCount: number;
@@ -399,90 +215,17 @@ function FaultOverview({ summary, rawCount, decodedCount, basis, selected, onCho
   );
 }
 
-function faultKindLabel(kind: string): string {
+export function faultKindLabel(kind: string): string {
   return kind === 'application crash' ? 'Program crashes' : kind === 'application hang' ? 'Program hangs' : kind === 'live kernel event' ? 'Live-kernel reports' : kind;
 }
 
-/** Three labeled points from each returned stop, with no claim that they form a timed line. */
-function StopSequence({ stops, selected, envelope, onInspect, registerButton }: {
-  stops: Stop[];
-  selected: number | null;
-  envelope: Reading | null;
-  onInspect: (index: number) => void;
-  registerButton: (index: number, node: HTMLButtonElement | null) => void;
-}) {
-  const keepButtonInPlace = useKeepButtonInPlace();
-  return (
-    <section className={styles.sequence} aria-labelledby="stop-sequence-title">
-      <div className={styles.sequenceHead}>
-        <div><p className="label">Returned stops · crash reading</p><h3 id="stop-sequence-title" className="display">Evidence around each stop</h3></div>
-        <p>Separate evidence points in your browser’s local time. The last System record before restart can be later than Windows’ stop estimate; these times do not establish a cause. A report without a returned session shows its report evidence.</p>
-      </div>
-      <ol className={styles.sequenceList}>
-        {stops.map((stop, index) => {
-          const last = stop.last_record_before;
-          const relation = recordToEstimate(last?.TimeCreated, stop.stopped_at);
-          const reportOnly = Boolean(stop.reported_at && !last && !stop.stopped_at && !stop.started_at && !stop.announced_at);
-          return <li key={stopIdentity(stop)}>
-            <button
-              ref={(node) => registerButton(index, node)}
-              type="button"
-              className={`${styles.sequenceButton} ${selected === index ? styles.sequenceSelected : ''}`}
-              onClick={(event) => { keepButtonInPlace(event.currentTarget); onInspect(index); }}
-              aria-expanded={selected === index}
-              aria-controls={`stop-detail-${index}`}
-            >
-              <span className={styles.sequenceLabel}><span className="readout">{String(index + 1).padStart(2, '0')} / returned stop</span><span className="readout">{selected === index ? 'Hide exact stop' : 'Inspect exact stop'}</span></span>
-              {!reportOnly ? <span className={styles.sequenceFinding}>
-                <strong>{[stop.bugcheck?.name, stop.bugcheck?.code].filter(Boolean).join(' · ') || (stop.no_bugcheck_recorded === null ? 'Bug check status unknown' : stop.no_bugcheck_recorded ? 'No bug check recorded' : 'No bug check named')}</strong>
-                {stop.records.eventlog_6008 != null && stop.records.power_41 == null ? <span className="readout">No Kernel-Power 41 returned</span> : null}
-                {stop.down_seconds == null ? null : <span className="readout">down {howLong(stop.down_seconds)}</span>}
-                {stop.dump?.name ? <span className="readout">{stop.dump.name}</span> : null}
-              </span> : null}
-              {reportOnly ? <span className={styles.reportOnly}>
-                <span className={styles.reportMain}><span className="label">Windows error report filed</span><strong className="readout">{stamp(stop.reported_at)}</strong></span>
-                <span className={styles.reportFacts}>
-                  <span><span className="label">Bug check</span><strong className="readout">{[stop.bugcheck?.name, stop.bugcheck?.code].filter(Boolean).join(' · ') || 'Not named'}</strong></span>
-                  <span><span className="label">Matched dump</span><strong className="readout">{stop.dump?.name ?? 'None matched'}</strong></span>
-                </span>
-                <span className={`${styles.reportLimits} readout`}>No last System record before restart, Windows stop estimate, or next start was returned for this report.</span>
-              </span> : <><span className={styles.sequencePhases}>
-                <span className={styles.phase}>
-                  <span className={`${styles.phaseLabel} label`}>Last System record before restart</span>
-                  <strong className="readout">{last ? stamp(last.TimeCreated, 'Time not recorded') : lastRecordStatus(stop)}</strong>
-                  {last ? <span className={styles.phaseNote}>{[last.ProviderName, last.Id == null ? null : `event ${last.Id}`].filter(Boolean).join(' · ') || 'Source not recorded'}</span> : null}
-                  {relation ? <span className={styles.phaseRelation}>{relation}</span> : null}
-                </span>
-                <span className={styles.phase}>
-                  <span className={`${styles.phaseLabel} label`}>Windows stop estimate</span>
-                  <strong className="readout">{stamp(stop.stopped_at)}</strong>
-                  <span className={styles.phaseNote}>{stop.stopped_at ? 'Read from EventLog 6008' : 'No estimate in the returned records'}</span>
-                </span>
-                <span className={styles.phase}>
-                  <span className={`${styles.phaseLabel} label`}>Next start</span>
-                  <strong className="readout">{stamp(stop.started_at)}</strong>
-                  <span className={styles.phaseNote}>{stop.started_at ? 'Kernel-General start record' : 'No start in the returned records'}</span>
-                </span>
-              </span>
-              {stop.reported_at ? <span className={`${styles.reported} readout`}>Report filed {stamp(stop.reported_at)}{!stop.started_at && !stop.stopped_at ? ' · only report timing is available' : ''}</span> : null}</>}
-            </button>
-            <div id={`stop-detail-${index}`} className={selected === index ? styles.sequenceDetail : undefined}>
-              {selected === index ? <StopDetail stop={stop} envelope={envelope} /> : null}
-            </div>
-          </li>;
-        })}
-      </ol>
-    </section>
-  );
-}
-
-function stamp(value: string | null | undefined, missing = 'Not recorded'): string {
+export function stamp(value: string | null | undefined, missing = 'Not recorded'): string {
   if (!value) return missing;
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? missing : STOP_STAMP.format(date);
 }
 
-function recordToEstimate(recordAt: string | null | undefined, estimateAt: string | null): string | null {
+export function recordToEstimate(recordAt: string | null | undefined, estimateAt: string | null): string | null {
   if (!recordAt || !estimateAt) return null;
   const record = Date.parse(recordAt);
   const estimate = Date.parse(estimateAt);
@@ -496,7 +239,7 @@ function recordToEstimate(recordAt: string | null | undefined, estimateAt: strin
  * System record before restart. Then the two moves that follow — the record before the next
  * start and the stop itself onto the stack.
  */
-function lastRecordStatus(stop: Stop): string {
+export function lastRecordStatus(stop: Stop): string {
   const outcome = stop.last_record_collection?.outcome;
   if (outcome === 'denied') return 'Access denied';
   if (outcome === 'failed') return 'Lookup failed';
@@ -505,9 +248,8 @@ function lastRecordStatus(stop: Stop): string {
   return 'No record returned';
 }
 
-function StopDetail({ stop, envelope }: { stop: Stop; envelope: Reading | null }) {
-  const moment = stop.started_at ?? stop.announced_at ?? stop.reported_at;
-  const ids = recordIds(stop);
+/** Every field a stop carries, in the tool's words: the exact level under a situation's summary. */
+export function StopFacts({ stop }: { stop: Stop }) {
   const rows: [string, ReactNode][] = [
     ['Stopped at', stop.stopped_at ? <Value value={`${stop.stopped_at} · ${ago(stop.stopped_at)}`} /> : <Value value={null} />],
     ['Started at', stop.started_at ? <Value value={`${stop.started_at} · ${ago(stop.started_at)}`} /> : <Value value={null} />],
@@ -547,29 +289,13 @@ function StopDetail({ stop, envelope }: { stop: Stop; envelope: Reading | null }
   return (
     <>
       <Facts rows={rows} />
-      {stop.stopped_at ? <ChangesNearStop stopId={stopIdentity(stop)} before={stop.stopped_at} />
-        : <p className={styles.quiet}>Windows did not return a stop estimate, so a change window cannot be placed before this stop. The next start and report filing are later boundaries.</p>}
-      {stop.dump?.path && stop.dump.bytes != null ? <DumpHeaderDetail path={stop.dump.path} /> : null}
       {stop.last_record_before?.Message ? <p className={styles.lastRecordMessage}>{stop.last_record_before.Message}</p> : null}
-      <StopRawRows stop={stop} envelope={envelope} />
-      {stop.last_record_before ? <CitedRecord key={`last:${stop.last_record_before.RecordId}:${stop.last_record_before.TimeCreated}`}
-        citation={eventRef({ role: 'last_before_restart', reading: 'event_record', params: { log: 'System', record_id: stop.last_record_before.RecordId, time_created: stop.last_record_before.TimeCreated } })}
-        held={stop.last_record_before}
-        heldAt={envelope?.asked_at}
-        heldKind="projection"
-      /> : null}
-      <div className={styles.actions}>
-        <MomentLink at={moment} sourceKey={`stop:${stopIdentity(stop)}:${moment}`} />
-        {envelope && ids.length ? (
-          <AddToStack item={{ kind: 'selection', envelope, ids, title: `Stop at ${moment ?? stop.stopped_at ?? 'an unknown time'}` }} label="Stack this stop" />
-        ) : null}
-      </div>
     </>
   );
 }
 
 /** The raw rows already gathered for this stop; no machine question is needed to read them. */
-function StopRawRows({ stop, envelope }: { stop: Stop; envelope: Reading | null }) {
+export function StopRawRows({ stop, envelope }: { stop: Stop; envelope: Reading | null }) {
   const raw = part<EventRecord[]>(envelope, 'records') ?? [];
   const named: { role: string; log: 'System' | 'Application'; id: RecordId }[] = [];
   for (const [role, id] of Object.entries({ start: stop.records.start, power_41: stop.records.power_41, eventlog_6008: stop.records.eventlog_6008, wer_1001: stop.records.wer_1001 })) {
@@ -592,12 +318,69 @@ function StopRawRows({ stop, envelope }: { stop: Stop; envelope: Reading | null 
   </section>;
 }
 
+/** The dump files on disk: a further reading that a stop or a program crash can point to. */
+export function DumpFiles({ applicationOnly = false }: { applicationOnly?: boolean }) {
+  const dumpId = useApp((s) => s.crashesView.dumpId);
+  const setCrashesView = useApp((s) => s.setCrashesView);
+  const dumps = useReading('dumps', {}, true, { hold: 'same-params' });
+  const targets = part<{ file_index: number; ref: string }[]>(dumps.reading, 'inspection_targets') ?? [];
+  const references = new Map(targets.map((target) => [target.file_index, target.ref]));
+  const every = (part<DumpFile[]>(dumps.reading, 'files') ?? []).map((file, index) => ({ ...file, fileRef: references.get(index) }));
+  const files = applicationOnly ? every.filter((file) => file.source === 'application') : every;
+  return (
+    <Section
+      title={applicationOnly ? 'Program dump files on disk' : 'Dump files on disk'}
+      cls="raw"
+      note={files.length ? `newest first · ${size(files.reduce((n, f) => n + f.bytes, 0))} on disk` : undefined}
+      controls={dumps.reading ? <AddToStack item={{ kind: 'reading', envelope: dumps.reading, title: 'Crash dump inventory' }} /> : null}
+    >
+      <OutcomeLine taken={dumps} noun="dump files" singular="dump file" emptyText="No dump files found in the checked locations" />
+      <DumpCoverage reading={dumps.reading} />
+      {observed(dumps.reading) && files.length > 0
+        ? byDay(files, (f) => f.modified).map(([label, rows]) => (
+            <div key={label}>
+              <p className={`${styles.day} label`}>{label}</p>
+              <RowList
+                items={rows}
+                idOf={(file) => file.fileRef ?? file.path}
+                openId={dumpId}
+                onOpenChange={(id) => setCrashesView({ dumpId: id === null ? null : String(id), focus: id === null ? null : 'dump' })}
+                layout={styles.fileRow}
+                cells={(f) => (
+                  <>
+                    <span className={`${styles.fileName} readout`}>{f.name}</span>
+                    <span className={`${styles.fileSize} readout`}>{size(f.bytes)}</span>
+                    <span className={`${styles.fileWhen} readout`}>{at(f.modified)} · {ago(f.modified)}</span>
+                  </>
+                )}
+                inspect={(f) => (
+                  <>
+                    <Facts rows={[
+                      ['Path', <span className={styles.path}>{f.path}</span>],
+                      ['Location', dumpLocationName(f.source)],
+                      ['Size', `${f.bytes.toLocaleString()} bytes`],
+                      ['Written', f.modified],
+                    ]} />
+                    <DumpHeaderDetail path={f.path} fileRef={f.fileRef} refreshInventory={dumps.retake} />
+                    <div className={styles.actions}>
+                      <MomentLink at={f.modified} sourceKey={`dump:${f.fileRef ?? f.path}:${f.modified}`} />
+                    </div>
+                  </>
+                )}
+              />
+            </div>
+          ))
+        : null}
+    </Section>
+  );
+}
+
 /** Keep each location's observation available beside the files or inspection it supports. */
-function dumpLocationName(source: string): string {
+export function dumpLocationName(source: string): string {
   return ({ minidump: 'Minidump', memory: 'Memory dump', live_kernel: 'Live kernel', application: 'Application dumps' } as Record<string, string>)[source] ?? source;
 }
 
-function DumpCoverage({ reading }: { reading: Reading | null }) {
+export function DumpCoverage({ reading }: { reading: Reading | null }) {
   const collection = part<{ complete: boolean; locations: { id: string; path: string | null; outcome: string; present: boolean | null; returned: number }[] }>(reading, 'collection');
   if (!collection?.locations) return null;
   return <details className={styles.rawDisclosure}>
@@ -614,7 +397,7 @@ function DumpCoverage({ reading }: { reading: Reading | null }) {
 }
 
 /** Read just the selected file's header when the person opens its detail. */
-function DumpHeaderDetail({ path, fileRef, refreshInventory }: { path: string; fileRef?: string; refreshInventory?: () => void }) {
+export function DumpHeaderDetail({ path, fileRef, refreshInventory }: { path: string; fileRef?: string; refreshInventory?: () => void }) {
   // Hold only this exact file selector; another file must never inherit its header.
   const taken = useReading('dump_header', fileRef ? { ref: fileRef } : { path }, true, { hold: 'same-params' });
   const [rawOpen, setRawOpen] = useState(false);
@@ -859,7 +642,7 @@ function fieldSource(field: string | undefined, index: number | undefined): stri
 }
 
 /** Every record the stop was composed from, so stacking it hands over the evidence and not the conclusion. */
-function recordIds(stop: Stop): RecordId[] {
+export function recordIds(stop: Stop): RecordId[] {
   const { start, power_41, eventlog_6008, wer_1001, report } = stop.records;
   const system = [start, power_41, eventlog_6008, wer_1001]
     .filter((id): id is RecordId => typeof id === 'number' || typeof id === 'string')
@@ -868,17 +651,17 @@ function recordIds(stop: Stop): RecordId[] {
   return [...new Set([...system, ...application])];
 }
 
-function appOf(fault: Fault): string {
+export function appOf(fault: Fault): string {
   if (fault.report) return fault.report.name ?? fault.report.code ?? 'live kernel report';
   return text(fault.fields.AppName) ?? text(fault.fields.ExeFileName) ?? 'unnamed';
 }
 
-function moduleOf(fault: Fault): string {
+export function moduleOf(fault: Fault): string {
   if (fault.report) return fault.report.bucket ?? '';
   return text(fault.fields.ModuleName) ?? '';
 }
 
-function exceptionOf(fault: Fault): string {
+export function exceptionOf(fault: Fault): string {
   if (fault.report) return '';
   return fault.exception?.name ?? fault.exception?.code ?? text(fault.fields.ExceptionCode) ?? '';
 }
@@ -889,13 +672,13 @@ function text(value: unknown): string | null {
 }
 
 /** A local time, or a dash where the record carries no moment. */
-function at(moment: string | null | undefined): string {
+export function at(moment: string | null | undefined): string {
   const t = moment ? new Date(moment) : null;
   return t && !Number.isNaN(t.getTime()) ? clock.format(t) : '—';
 }
 
 /** How long something lasted. Under a minute and a half the seconds are the point: a machine down
  *  40 seconds restarted, and "0 min" would lose that. */
-function howLong(seconds: number): string {
+export function howLong(seconds: number): string {
   return seconds < 90 ? `${seconds} s` : duration(seconds);
 }

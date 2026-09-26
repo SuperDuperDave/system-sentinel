@@ -1,0 +1,62 @@
+/* Outcome by shape and word; attention by hue, glyph and word. The two never borrow each other's channel. */
+
+.glyph { width: 12px; height: 12px; flex: none; fill: currentColor; stroke: currentColor; }
+
+.outcome { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; color: var(--body); font-size: 13px; }
+.outcomeWord { color: var(--ink); font-weight: 500; }
+.outcomeDetail { color: var(--body); min-width: 0; overflow-wrap: anywhere; }
+.observed { color: var(--ink); }
+.zero { color: var(--body); }
+.hole { color: var(--body); }
+.taking { color: var(--muted); }
+.outcome.taking .outcomeWord { color: var(--muted); }
+
+.turning { transform-origin: 6px 6px; animation: turn 1.6s linear infinite; }
+@keyframes turn { to { transform: rotate(360deg); } }
+
+.attention {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1.2;
+  padding: 5px 10px 5px 8px;
+  border-radius: 999px;
+}
+.attention.stop { color: var(--attention-stop); background: var(--attention-stop-ground); }
+.attention.report { color: var(--attention-report); background: var(--attention-report-ground); }
+.glyph.stop { color: var(--attention-stop); }
+.glyph.report { color: var(--attention-report); }
+
+/* Windows' event levels: shape and word only. Hue is attention, and a level is Windows' label,
+   not a record this person has yet to see. */
+.glyph.critical { color: var(--ink); }
+.glyph.error { color: var(--ink); }
+.glyph.warning { color: var(--body); }
+.glyph.info { color: var(--muted); }
+
+.provenance {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 10px;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+.readingName { font-family: var(--font-readout); font-size: 12px; color: var(--body); }
+.classWord { color: var(--muted); }
+.basis { flex-basis: 100%; }
+.basis summary {
+  width: fit-content;
+  min-height: 32px;
+  padding: 6px 0;
+  cursor: pointer;
+  color: var(--body);
+  list-style: none;
+}
+.basis summary::-webkit-details-marker { display: none; }
+.basis summary::after { content: ' ›'; }
+.basis[open] summary::after { content: ' ⌄'; }
+.basis summary:hover { color: var(--ink); }
+.basis p { margin: 0 0 8px; max-width: 78ch; padding: 10px 12px; border-radius: 8px; background: var(--inspection-well); color: var(--body); line-height: 1.5; }

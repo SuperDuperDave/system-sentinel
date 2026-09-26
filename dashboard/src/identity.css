@@ -41,14 +41,23 @@
   --phosphor: #6ff0a8;
   --phosphor-deep: #1e8f5e;
   --graticule: #9cffc4;
+  --surface-raised-hover: #19302a;
+
+  /* Attention: a record to look at, recorded recently. Never an outcome, never a verdict.
+     Each hue always travels with its glyph and its word. */
+  --attention-stop: #ff8a78;
+  --attention-stop-ground: rgba(255, 138, 120, 0.11);
+  --attention-report: #ffb454;
+  --attention-report-ground: rgba(255, 180, 84, 0.10);
 
   --font-display: 'Azeret Mono', Menlo, Consolas, monospace;
   --font-readout: 'JetBrains Mono', Menlo, Consolas, monospace;
   --font-text: 'DM Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
 
   --gutter: 16px;
-  --rail: 208px;
-  --measure: 1120px;
+  --rail: 256px;
+  --measure: 1180px;
+  --radius: 10px;
 
   color-scheme: dark;
 }
@@ -93,22 +102,56 @@ select:focus-visible, summary:focus-visible, [tabindex]:focus-visible {
   font-variant-numeric: tabular-nums;
 }
 
-/* A label above a group: muted, small, tracked. */
+/* A label above a group: the reading voice, muted and small. Monospace is kept for exact values. */
 .label {
-  font-family: var(--font-readout);
-  font-size: 12px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  font-family: var(--font-text);
+  font-size: 12.5px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
   color: var(--muted);
 }
 
-/* The display face for titles. */
+/* Titles speak in the text face: they are questions and places, not readouts. */
 .display {
-  font-family: var(--font-display);
-  font-weight: 300;
-  letter-spacing: -0.02em;
+  font-family: var(--font-text);
+  font-weight: 500;
+  letter-spacing: -0.012em;
   color: var(--ink);
 }
+
+/* The door's one number: the display face's tabular figures, and nowhere else. */
+.figure {
+  font-family: var(--font-display);
+  font-weight: 300;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.03em;
+  color: var(--ink);
+}
+
+/* Controls look like controls. A button is a surface you can press, in the text face. */
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: 8px;
+  background: var(--surface-raised);
+  color: var(--ink);
+  font: 500 14px/1.2 var(--font-text);
+  text-align: center;
+  text-decoration: none;
+  transition: background-color 0.12s ease-out;
+}
+.button:hover { background: var(--surface-raised-hover); }
+.button[aria-disabled='true'], .button:disabled { color: var(--muted); cursor: default; background: var(--surface-raised); }
+.button.primary { background: var(--ink); color: var(--deep); }
+.button.primary:hover { background: #ffffff; }
+.button.quiet { background: transparent; padding: 0 10px; color: var(--body); }
+.button.quiet:hover { background: var(--surface-raised); color: var(--ink); }
+
+.srOnly { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }

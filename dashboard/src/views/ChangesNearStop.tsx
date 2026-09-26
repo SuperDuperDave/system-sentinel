@@ -2,9 +2,8 @@ import { useState } from 'react';
 import { AddToStack } from '../AddToStack';
 import { Reading, observed } from '../api';
 import { OutcomeLine } from '../Outcome';
-import { duration, part, useKeepButtonInPlace } from '../Sections';
-import { useApp } from '../store';
-import { useReading } from '../useReading';
+import { duration, part } from '../Sections';
+import { Taken, useReading } from '../useReading';
 import styles from './ChangesNearStop.module.css';
 
 interface Change {
@@ -37,25 +36,11 @@ const KINDS: Record<string, string> = {
   unmapped_event: 'Result not decoded',
 };
 
-/** Looking at nearby changes stays inside the stop; no request occurs until this is opened. */
-export function ChangesNearStop({ stopId, before }: { stopId: string; before: string }) {
-  const open = useApp((state) => state.crashesView.changesStopId === stopId && state.crashesView.changesBefore === before);
-  const setCrashesView = useApp((state) => state.setCrashesView);
-  const keepButtonInPlace = useKeepButtonInPlace();
-  return <section className={styles.region} aria-label="Changes before the estimated stop">
-    <button type="button" className={styles.trigger} aria-expanded={open} onClick={(event) => {
-      keepButtonInPlace(event.currentTarget);
-      setCrashesView({ changesStopId: open ? null : stopId, changesBefore: open ? null : before });
-    }}>
-      <span>What changed before Windows’ stop estimate?</span>
-      <span className={styles.action}>{open ? 'Hide change history' : 'Read change history'}</span>
-    </button>
-    {open ? <ChangeEvidence before={before} /> : null}
-  </section>;
-}
-
-function ChangeEvidence({ before }: { before: string }) {
-  const taken = useReading('changes', { before, hours: 168, count: 100 }, true, { hold: 'same-params' });
+/** What changed before a stop estimate: update, device and installation results, each a lead with its source row. */
+export function ChangeEvidence({ before, taken: given }: { before: string; taken?: Taken<unknown> }) {
+  // A step that already states this reading's outcome passes its taken reading; the line is not repeated.
+  const own = useReading('changes', { before, hours: 168, count: 100 }, !given, { hold: 'same-params' });
+  const taken = given ?? own;
   const reading = taken.reading;
   const changes = part<Change[]>(reading, 'changes') ?? [];
   const raw = part<RawChange[]>(reading, 'records') ?? [];
@@ -72,7 +57,7 @@ function ChangeEvidence({ before }: { before: string }) {
   return <div className={styles.body}>
     <p className={styles.scope}>Windows Update, device configuration and MSI results in the seven days before Windows’ estimated stop time. A nearby change is a lead to inspect, not proof of a cause.</p>
     <p className={styles.boundary}>Window ends before <time dateTime={before}>{before}</time></p>
-    <OutcomeLine taken={taken} noun="change results" singular="change result" emptyText="No matching change result returned in this requested window" />
+    {given ? null : <OutcomeLine taken={taken} noun="change results" singular="change result" emptyText="No matching change result returned in this requested window" />}
     {collection ? <ul className={styles.sources} aria-label="Change source coverage">
       {SOURCES.map(([key, label]) => {
         const source = collection[key];

@@ -11,14 +11,21 @@
 .detail { color: var(--body); min-width: 0; overflow-wrap: anywhere; }
 .taking { color: var(--muted); }
 .sep { flex: 1 0 8px; }
-.actions { display: inline-flex; gap: 0.9em; white-space: nowrap; margin-left: auto; }
+.actions { display: inline-flex; gap: 2px; white-space: nowrap; margin-left: auto; }
+.found { color: var(--ink); font-family: var(--font-text); font-size: 14px; }
+.meta { color: var(--muted); }
 .action {
-  color: var(--ink);
-  border-bottom: 1px solid var(--rule);
-  padding: 0 0 1px;
+  color: var(--body);
+  font-family: var(--font-text);
+  font-size: 13px;
+  font-weight: 500;
+  min-height: 36px;
+  padding: 0 10px;
+  border-radius: 8px;
   white-space: nowrap;
 }
-.action:hover { border-color: var(--muted); }
+.action:hover { color: var(--ink); background: var(--surface-raised); }
+@media (pointer: coarse) { .action { min-height: 44px; } }
 .action:disabled, .action[aria-disabled='true'] { color: var(--muted); cursor: default; }
 .warnings { list-style: none; margin: 4px 0 0; padding: 0; }
 .warning {

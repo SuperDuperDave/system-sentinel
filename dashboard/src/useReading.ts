@@ -34,15 +34,6 @@ export function hasHeldReading(name: string, params: Params = {}): boolean {
   return heldReadings.has(JSON.stringify([name, params]));
 }
 
-/** A return is stable only when the selected row and every panel above it can draw immediately. */
-export function canRestoreCrashView(stopCount: number, faultCount: number, focus: 'stop' | 'fault' | 'dump' | null, changesBefore: string | null = null): boolean {
-  return hasHeldReading('crash', { count: stopCount }) &&
-    (!changesBefore || hasHeldReading('changes', { before: changesBefore, hours: 168, count: 100 })) &&
-    (focus === 'stop' || hasHeldReading('reliability', { days: 30 })) &&
-    (focus === 'stop' || hasHeldReading('faults', { count: faultCount })) &&
-    ((focus !== 'dump' && focus !== null) || hasHeldReading('dumps'));
-}
-
 function sameParamNames(left: Params, right: Params): boolean {
   const a = Object.keys(left).sort();
   const b = Object.keys(right).sort();

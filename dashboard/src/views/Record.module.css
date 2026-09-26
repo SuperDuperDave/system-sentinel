@@ -6,24 +6,26 @@
   gap: 12px 24px;
   margin: 0 0 10px;
 }
-.title { font-size: 28px; margin: 0; line-height: 1.1; }
-.intro { max-width: 75ch; margin: 8px 0 18px; color: var(--body); line-height: 1.6; }
+.title { font-size: clamp(26px, 3.6vw, 36px); margin: 0; line-height: 1.12; }
+.intro { max-width: 70ch; margin: 10px 0 18px; color: var(--body); font-size: 15.5px; line-height: 1.55; }
+.controlRow { margin: 0 0 18px; }
 .srOnly { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 
 .controls { display: flex; flex-wrap: wrap; gap: 8px; }
 .filterToggle { display: none; }
 
-.overview { margin: 22px 0 12px; border: 1px solid var(--rule); background: var(--surface-raised); }
-.overviewHead { display: flex; align-items: start; justify-content: space-between; gap: 12px 24px; padding: 18px 20px; border-bottom: 1px solid var(--rule-soft); }
+.overview { margin: 18px 0 16px; border-radius: 14px; background: var(--surface-raised); overflow: hidden; }
+.overviewHead { display: flex; align-items: start; justify-content: space-between; gap: 12px 24px; padding: 18px 20px 4px; }
 .overviewHead p:first-child { margin: 0 0 4px; }
-.overviewHead h2 { margin: 0; font-size: clamp(19px, 2.5vw, 25px); }
+.overviewHead h2 { margin: 0; font-size: 18px; }
 .overviewHead > p { margin: 0; max-width: 54ch; color: var(--body); font-size: 13px; line-height: 1.5; }
 .overviewBody { display: grid; grid-template-columns: minmax(0, 3fr) minmax(230px, 2fr); }
 .density { min-width: 0; padding: 18px 20px; }
 .plotTitle { display: flex; justify-content: space-between; gap: 8px; margin: 0 0 10px; color: var(--muted); }
 .plotTitle span:last-child { text-align: right; }
-.bins { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 3px; align-items: end; border-bottom: 1px solid var(--rule); }
+.bins { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 3px; align-items: end; box-shadow: 0 1px 0 var(--rule); }
 .bin, .binEmpty { min-width: 0; height: 100px; display: flex; flex-direction: column; align-items: center; justify-content: end; padding: 4px 2px 0; }
+.bin { border-radius: 6px 6px 0 0; }
 .bin:hover, .bin:focus-visible, .binSelected { background: var(--lit); }
 .binCount { margin: auto 0 3px; color: var(--ink); font-size: 12px; }
 .binBar { display: block; width: 100%; max-width: 38px; min-height: 4px; background: var(--body); border-radius: 2px 2px 0 0; }
@@ -32,21 +34,22 @@
 .plotAxis { display: flex; justify-content: space-between; gap: 10px; margin-top: 7px; color: var(--muted); }
 .plotAxis span:last-child { text-align: right; }
 .noTime, .unplaced { margin: 8px 0 0; color: var(--muted); }
-.sources { min-width: 0; padding: 18px 20px; border-left: 1px solid var(--rule-soft); }
+.sources { min-width: 0; padding: 18px 20px; }
 .source { display: block; width: 100%; min-height: 56px; text-align: left; padding: 10px 0; border-top: 1px solid var(--rule-soft); }
 .source:first-of-type { border-top: 0; }
 .sourceLine { display: flex; justify-content: space-between; gap: 8px; color: var(--body); font-size: 13px; }
 .sourceLine span { min-width: 0; overflow-wrap: anywhere; }
 .sourceLine strong { flex: none; font-weight: 400; color: var(--muted); }
-.sourceTrack { display: block; height: 6px; margin-top: 8px; background: var(--rule); }
+.sourceTrack { display: block; height: 6px; margin-top: 8px; border-radius: 3px; overflow: hidden; background: var(--rule); }
 .sourceTrack span { display: block; height: 100%; background: var(--body); }
 .sourceAction { display: block; margin-top: 5px; color: var(--muted); font-size: 11px; }
 .source:hover .sourceLine, .source:focus-visible .sourceLine { color: var(--ink); }
 
 @media (max-width: 680px) {
-  .filterToggle { display: flex; align-items: center; width: 100%; gap: 8px; min-height: 44px; padding: 9px 12px; border: 1px solid var(--rule); text-align: left; }
+  .filterToggle { display: flex; align-items: center; width: 100%; gap: 8px; min-height: 48px; padding: 9px 14px; border-radius: 10px; background: var(--surface-raised); text-align: left; }
+  .controls:not(.controlsClosed) { margin-top: 8px; }
   .filterToggle > span:first-child { color: var(--muted); }
-  .filterValue { min-width: 0; flex: 1; color: var(--ink); font-family: var(--font-readout); font-size: 12.5px; text-align: right; }
+  .filterValue { min-width: 0; flex: 1; color: var(--ink); font-size: 14px; font-weight: 500; text-align: right; }
   .filterChevron { color: var(--muted); transition: transform 0.15s ease-out; }
   .filterToggle[aria-expanded='true'] .filterChevron { transform: rotate(180deg); }
   .controls { width: 100%; }
@@ -54,7 +57,7 @@
   .overviewHead { display: block; }
   .overviewHead > p { margin-top: 8px; }
   .overviewBody { grid-template-columns: minmax(0, 1fr); }
-  .sources { border-left: 0; border-top: 1px solid var(--rule-soft); }
+
   .overviewHead, .density, .sources { padding-left: 16px; padding-right: 16px; }
   .bin, .binEmpty { height: 96px; }
 }
@@ -86,7 +89,7 @@
 
 .time { grid-area: time; color: var(--muted); }
 .level { grid-area: level; color: var(--ink); display: inline-flex; align-items: center; flex-wrap: wrap; gap: 5px; min-width: 0; }
-.levelText { font-size: 11px; color: var(--muted); overflow-wrap: anywhere; }
+.levelText { font-size: 12px; color: var(--body); overflow-wrap: anywhere; }
 .provider { grid-area: provider; min-width: 0; color: var(--ink); overflow-wrap: anywhere; }
 .id { grid-area: id; color: var(--muted); text-align: right; white-space: nowrap; }
 .message {
@@ -145,17 +148,18 @@
 .rawRecord summary { width: fit-content; min-height: 36px; padding: 7px 0; cursor: pointer; color: var(--body); }
 .rawRecord summary:hover { color: var(--ink); }
 .rawRecord pre { max-height: 360px; margin: 6px 0 0; padding: 12px; overflow: auto; background: var(--inspection-well); color: var(--body); font-size: 11.5px; white-space: pre; }
-.actions { display: flex; gap: 16px; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .action {
-  font-family: var(--font-readout);
-  font-size: 12.5px;
+  font: 500 14px/1.2 var(--font-text);
   color: var(--ink);
-  border-bottom: 1px solid var(--rule);
-  min-height: 32px;
+  min-height: 44px;
+  padding: 0 14px;
+  border-radius: 8px;
+  background: var(--surface-raised);
 }
-.action:hover { border-color: var(--muted); }
+.action:hover { background: var(--surface-raised-hover); }
 
-.before { margin-top: 14px; padding-left: 12px; border-left: 1px solid var(--rule); }
+.before { margin-top: 14px; padding: 12px 14px; border-radius: 10px; background: var(--field); }
 .before p { margin: 0 0 6px; }
 .beforeRows { list-style: none; margin: 0; padding: 0; }
 .beforeRow {
@@ -181,8 +185,8 @@
 /* The frame: what the list is, under the title that says it. */
 .frameLine { margin: 0 0 8px; color: var(--muted); max-width: 78ch; }
 .frameSideTitle { font-size: 19px; margin: 18px 0 8px; }
-.jumpAfter { min-height: 40px; padding: 0 0 2px; color: var(--ink); border-bottom: 1px solid var(--rule); text-align: left; }
-.jumpAfter:hover { border-color: var(--muted); }
+.jumpAfter { min-height: 44px; padding: 0 14px; border-radius: 8px; background: var(--surface-raised); color: var(--ink); font: 500 14px/1.2 var(--font-text); text-align: left; }
+.jumpAfter:hover { background: var(--surface-raised-hover); }
 .after { margin: 32px 0 0; padding-top: 14px; border-top: 1px solid var(--rule); scroll-margin-top: 20px; }
 .momentMarker { display: flex; align-items: center; gap: 12px; color: var(--muted); margin-bottom: 20px; font-size: 12px; overflow-wrap: anywhere; }
 .momentMarker::before, .momentMarker::after { content: ''; flex: 1; height: 1px; background: var(--rule); }
@@ -195,7 +199,7 @@
 .afterActions .more { margin: 0; }
 .afterActions .action[aria-disabled='true'] { color: var(--muted); cursor: default; }
 
-.nearby { margin: 26px 0 0; padding: 18px 20px; border: 1px solid var(--rule); background: var(--surface-raised); }
+.nearby { margin: 26px 0 0; padding: 18px 20px; border-radius: 14px; background: var(--surface-raised); }
 .nearbyHead { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 8px 20px; }
 .nearbyHead p { margin: 0 0 4px; }
 .nearbyHead h2 { margin: 0; font-size: clamp(19px, 2.5vw, 24px); }
@@ -215,12 +219,14 @@
 /* The way further back. It sits above the list, where the records it asks for arrive. */
 .more {
   display: block;
-  margin: 6px 0 2px;
-  padding: 2px 0;
-  min-height: 36px;
+  margin: 8px 0 4px;
+  padding: 0 14px;
+  min-height: 44px;
+  border-radius: 8px;
+  background: var(--surface-raised);
   color: var(--ink);
-  border-bottom: 1px solid var(--rule);
+  font: 500 14px/1.2 var(--font-text);
 }
-.more:hover { border-color: var(--muted); }
-.more[aria-disabled='true'] { color: var(--muted); border-color: var(--rule-soft); cursor: default; }
+.more:hover { background: var(--surface-raised-hover); }
+.more[aria-disabled='true'] { color: var(--muted); cursor: default; }
 .logStart { margin: 8px 0 2px; color: var(--muted); }

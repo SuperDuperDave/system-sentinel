@@ -4,11 +4,16 @@ import { Devices } from './Devices';
 import { Lockup, Mark } from './Mark';
 import { NavIcon } from './NavIcon';
 import { Live } from './Live';
-import { canRestoreCrashView, clearHeldReadings, hasHeldReading } from './useReading';
-import { useApp, VIEWS, ViewGroup, ViewId } from './store';
+import { clearHeldReadings, hasHeldReading } from './useReading';
+import { useApp, VIEWS, ViewId } from './store';
+import { DoorsProvider, useDoors } from './doors';
+import { AttentionGlyph, OutcomeGlyph } from './Marks';
+import { doorForView } from './situations';
+import { Home } from './views/Home';
+import { Stopped } from './views/Stopped';
+import { Programs } from './views/Programs';
 import { Record } from './views/Record';
 import { Errors } from './views/Errors';
-import { Crashes } from './views/Crashes';
 import { Machine } from './views/Machine';
 import { Performance } from './views/Performance';
 import { Space } from './views/Space';
@@ -19,9 +24,11 @@ import { Agents } from './views/Agents';
 import styles from './App.module.css';
 
 const VIEW_COMPONENTS: { [K in ViewId]: () => ReactElement } = {
+  home: Home,
+  stopped: Stopped,
+  programs: Programs,
   record: Record,
   errors: Errors,
-  crashes: Crashes,
   machine: Machine,
   performance: Performance,
   space: Space,
@@ -30,7 +37,6 @@ const VIEW_COMPONENTS: { [K in ViewId]: () => ReactElement } = {
   stack: Stack,
   agents: Agents,
 };
-const NAV_GROUPS: ViewGroup[] = ['Evidence', 'Interpret', 'Carry'];
 
 export function App() {
   const session = useApp((s) => s.session);
@@ -54,7 +60,7 @@ export function App() {
   if (session === 'unknown') return <CheckingConnection />;
   if (session === 'unreachable') return <ConnectionUnavailable />;
   if (session === 'closed') return <SignIn />;
-  return <Shell />;
+  return <DoorsProvider><Shell /></DoorsProvider>;
 }
 
 function CheckingConnection() {
@@ -115,12 +121,14 @@ function Shell() {
     const formerView = previousNavigation.current.split('\u0000')[0];
     previousNavigation.current = current;
     closeMobileNavigation();
-    const { viewScroll, crashesView: { stopCount, faultCount, focus, changesBefore }, recordOrigin, recordReturnKey, spaceView } = useApp.getState();
-    // Restore only against evidence available at first paint. The requested Crashes section
-    // determines which earlier panels must also be held for the saved position to be meaningful.
-    const crashesReady = canRestoreCrashView(stopCount, faultCount, focus, changesBefore);
+    const { viewScroll, crashesView: { stopCount, changesBefore }, recordOrigin, recordReturnKey, spaceView } = useApp.getState();
+    // Restore only against evidence available at first paint: a situation whose door reading (and,
+    // for a stop, its requested change history) is held draws the same page it left.
+    const stoppedReady = hasHeldReading('crash', { count: stopCount }) &&
+      (!changesBefore || hasHeldReading('changes', { before: changesBefore, hours: 168, count: 100 }));
     const returning = formerView !== view && viewScroll[view] !== undefined &&
-      (view === 'crashes' ? crashesReady : view === 'signals' ? hasHeldReading('signals')
+      (view === 'stopped' ? stoppedReady : view === 'programs' ? hasHeldReading('faults', { count: 30 })
+        : view === 'home' ? true : view === 'signals' ? hasHeldReading('signals')
         // Space draws its held walk from the store at first paint, so its saved position is meaningful.
         : view === 'space' && spaceView.levels.some((level) => level.reading !== null));
     window.scrollTo(0, returning ? viewScroll[view]! : 0);
@@ -181,17 +189,17 @@ function Shell() {
         <Live />
       </header>
       <div className={styles.trace} aria-hidden="true" />
-      <nav className={styles.nav} aria-label="Views">
+      <nav className={styles.nav} aria-label="Doors and places">
         <NavChoices view={view} onChoose={setView} onDevices={() => setDevices(true)} />
       </nav>
-      <nav className={styles.mobileNav} aria-label="Views">
+      <nav className={styles.mobileNav} aria-label="Doors and places">
         <details ref={mobileNavigation}>
           <summary className={styles.mobileSummary}>
             <span className={styles.mobileCurrent}>
               <NavIcon name={activeView.id} />
-              <span><span className={`${styles.mobileEyebrow} label`}>Current view</span><span className={styles.mobileTitle}>{activeView.label}</span></span>
+              <span><span className={styles.mobileEyebrow}>{activeView.group === 'Doors' ? 'You came with' : activeView.group === 'Places' ? 'Place' : 'This machine'}</span><span className={styles.mobileTitle}>{activeView.label}</span></span>
             </span>
-            <span className={styles.mobileToggle}>All views <span className={styles.mobileChevron} aria-hidden="true" /></span>
+            <span className={styles.mobileToggle}>All doors <span className={styles.mobileChevron} aria-hidden="true" /></span>
           </summary>
           <div className={styles.mobileChoices}>
             <NavChoices view={view} onChoose={(next) => { closeMobileNavigation(); setView(next); }} onDevices={() => { closeMobileNavigation(); setDevices(true); }} />
@@ -205,18 +213,41 @@ function Shell() {
 }
 
 function NavChoices({ view, onChoose, onDevices }: { view: ViewId; onChoose: (next: ViewId) => void; onDevices: () => void }) {
+  const { facts } = useDoors();
+  const item = (id: ViewId) => VIEWS.find((entry) => entry.id === id)!;
+  const current = (id: ViewId) => (id === view ? 'page' as const : undefined);
   return <>
-    {NAV_GROUPS.map((group) => (
-      <div className={styles.navGroup} key={group}>
-        <span className={`${styles.navGroupLabel} label`}>{group}</span>
-        {VIEWS.filter((item) => item.group === group).map((item) => (
-          <button key={item.id} className={`${styles.navItem} ${item.id === view ? styles.navActive : ''}`} onClick={() => onChoose(item.id)} aria-current={item.id === view ? 'page' : undefined}>
-            <NavIcon name={item.id} />
-            <span>{item.label}</span>
+    <div className={styles.navGroup}>
+      <button className={`${styles.navItem} ${view === 'home' ? styles.navActive : ''}`} onClick={() => onChoose('home')} aria-current={current('home')}>
+        <NavIcon name="home" />
+        <span>Home</span>
+      </button>
+    </div>
+    <div className={styles.navGroup}>
+      <span className={styles.navGroupLabel}>What brought you here</span>
+      {VIEWS.filter((entry) => entry.group === 'Doors').map((entry) => {
+        const door = doorForView(entry.id)!;
+        const fact = facts[door.id];
+        return (
+          <button key={entry.id} className={`${styles.navItem} ${styles.navDoor} ${entry.id === view ? styles.navActive : ''}`} onClick={() => onChoose(entry.id)} aria-current={current(entry.id)}>
+            <span className={styles.navState}>{fact.attention ? <AttentionGlyph kind={fact.attention} /> : <OutcomeGlyph known={fact.known} />}</span>
+            <span className={styles.navLabel}>{entry.label}</span>
+            <span className={`${styles.navFact} readout`}>
+              <span className="srOnly">: </span>{fact.mini}{fact.attention ? <span className="srOnly">, {fact.attention === 'stop' ? 'a stop' : 'reports'} in the last 30 days</span> : null}
+            </span>
           </button>
-        ))}
-      </div>
-    ))}
+        );
+      })}
+    </div>
+    <div className={styles.navGroup}>
+      <span className={styles.navGroupLabel}>Places</span>
+      {(['machine', 'record', 'signals', 'diagnostics', 'agents'] as ViewId[]).map((id) => (
+        <button key={id} className={`${styles.navItem} ${id === view ? styles.navActive : ''}`} onClick={() => onChoose(id)} aria-current={current(id)}>
+          <NavIcon name={id} />
+          <span>{item(id).label}</span>
+        </button>
+      ))}
+    </div>
     <button className={`${styles.navItem} ${styles.navAside}`} onClick={onDevices} aria-haspopup="dialog">
       <NavIcon name="device" />
       <span>Sign in another device</span>

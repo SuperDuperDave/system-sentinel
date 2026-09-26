@@ -117,21 +117,22 @@
 /* A choice between a few named values. */
 .segmented {
   display: inline-flex;
-  border: 1px solid var(--rule);
-  border-radius: 6px;
-  overflow: hidden;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 10px;
+  background: var(--deep);
 }
 .segment {
-  font-family: var(--font-readout);
-  font-size: 12px;
-  color: var(--muted);
-  padding: 0 12px;
+  font: 500 13.5px/1.2 var(--font-text);
+  color: var(--body);
+  padding: 0 14px;
   min-height: 40px;
+  border-radius: 7px;
   white-space: nowrap;
 }
-.segment + .segment { border-left: 1px solid var(--rule-soft); }
 .segment:hover { color: var(--ink); }
-.segmentOn { color: var(--ink); background: rgba(234, 243, 238, 0.07); }
+.segmentOn { color: var(--ink); background: var(--surface-raised-hover); box-shadow: 0 1px 0 rgba(0, 0, 0, 0.3); }
+@media (pointer: coarse) { .segment { min-height: 44px; } }
 
 /* The tree: the machine's own field names, nested as it nested them. */
 .tree {
@@ -186,16 +187,19 @@
   align-items: baseline;
   flex-wrap: wrap;
   gap: 0 0.55em;
-  min-height: 36px;
-  padding: 2px 0;
+  min-height: 44px;
+  padding: 11px 14px;
+  border-radius: 8px;
+  background: var(--surface-raised);
   text-align: left;
   color: var(--body);
 }
+.moment:hover { background: var(--surface-raised-hover); }
 .momentTime {
   color: var(--ink);
   border-bottom: 1px solid var(--rule);
   padding-bottom: 1px;
 }
-.momentLabel { font-size: 12.5px; color: var(--muted); }
+.momentLabel { font-size: 14px; font-weight: 500; color: var(--ink); }
 .moment:hover .momentTime { border-color: var(--muted); }
 .moment:hover .momentLabel { color: var(--body); }

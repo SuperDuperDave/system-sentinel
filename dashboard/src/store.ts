@@ -1,10 +1,14 @@
 import { create } from 'zustand';
 import type { Reading } from './api';
 
-export type ViewId = 'record' | 'errors' | 'crashes' | 'machine' | 'performance' | 'space' | 'diagnostics' | 'signals' | 'stack' | 'agents';
+export type ViewId = 'home' | 'stopped' | 'programs' | 'performance' | 'space' | 'errors' | 'stack'
+  | 'machine' | 'record' | 'signals' | 'diagnostics' | 'agents';
 
-/** The views, in the order the nav shows them. The studio page copies these names; change them there too. */
-export type ViewGroup = 'Evidence' | 'Interpret' | 'Carry';
+/**
+ * Home, then the doors a person arrives through, in their words, then the places that are about
+ * what the machine is rather than what happened to it. The studio page copies these names.
+ */
+export type ViewGroup = 'Home' | 'Doors' | 'Places';
 
 interface PerformanceViewState {
   hours: number;
@@ -69,23 +73,28 @@ export interface SpaceViewState { levels: SpaceLevel[]; mode: SpaceMode }
 const INITIAL_SPACE_VIEW: SpaceViewState = { levels: [], mode: 'tiles' };
 
 export const VIEWS: { id: ViewId; label: string; group: ViewGroup }[] = [
-  { id: 'record', label: 'Record', group: 'Evidence' },
-  { id: 'errors', label: 'Hardware errors', group: 'Evidence' },
-  { id: 'crashes', label: 'Crashes', group: 'Evidence' },
-  { id: 'machine', label: 'Machine', group: 'Evidence' },
-  { id: 'performance', label: 'Performance', group: 'Evidence' },
-  { id: 'space', label: 'Space', group: 'Evidence' },
-  { id: 'diagnostics', label: 'Diagnostics', group: 'Interpret' },
-  { id: 'signals', label: 'Signals', group: 'Interpret' },
-  { id: 'stack', label: 'Stack', group: 'Carry' },
-  { id: 'agents', label: 'Agents', group: 'Carry' },
+  { id: 'home', label: 'Home', group: 'Home' },
+  { id: 'stopped', label: 'Stopped or restarted', group: 'Doors' },
+  { id: 'programs', label: 'A program crashed', group: 'Doors' },
+  { id: 'performance', label: 'Feels slow', group: 'Doors' },
+  { id: 'space', label: 'Disk filling up', group: 'Doors' },
+  { id: 'errors', label: 'Hardware errors', group: 'Doors' },
+  { id: 'stack', label: 'Hand to my agent', group: 'Doors' },
+  { id: 'machine', label: 'Machine', group: 'Places' },
+  { id: 'record', label: 'The System log', group: 'Places' },
+  { id: 'signals', label: 'Signals', group: 'Places' },
+  { id: 'diagnostics', label: 'Diagnostics', group: 'Places' },
+  { id: 'agents', label: 'Agent setup', group: 'Places' },
 ];
+
+/** Addresses written before the doors existed still land where they meant. */
+const FORMER_VIEWS: Record<string, ViewId> = { crashes: 'stopped' };
 
 /** The address carries the visible view and a held investigation moment, never a credential. */
 function navigationFromAddress(): { view: ViewId; moment: string | null } {
   const query = new URLSearchParams(window.location.search);
-  const requested = query.get('view');
-  const view = VIEWS.find((item) => item.id === requested)?.id ?? 'record';
+  const requested = query.get('view') ?? '';
+  const view = VIEWS.find((item) => item.id === requested)?.id ?? FORMER_VIEWS[requested] ?? (query.get('moment') ? 'record' : 'home');
   const candidate = query.get('moment');
   const moment = candidate && candidate.length <= 64 && /^\d{4}-\d{2}-\d{2}T/.test(candidate) ? qualifiedMoment(candidate) : null;
   return { view, moment };
@@ -102,7 +111,7 @@ function qualifiedMoment(value: string): string | null {
 
 function writeAddress(view: ViewId, moment: string | null, state: object | null = null) {
   const url = new URL(window.location.href);
-  if (view === 'record') url.searchParams.delete('view');
+  if (view === 'home') url.searchParams.delete('view');
   else url.searchParams.set('view', view);
   if (moment) url.searchParams.set('moment', moment);
   else url.searchParams.delete('moment');

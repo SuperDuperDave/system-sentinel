@@ -22,6 +22,9 @@ Answers:
   - Memory and Power: synthetic source-outcome examples, optionally with selected source
     failures when ``SENTINEL_FIXTURE_DIAGNOSTIC_FAILURES=1`` is set
   - anything else: empty
+    Set SENTINEL_FIXTURE_HOME_GAPS=1 to show the four outcome shapes on the home at once: the
+    crash collector answers with no stop, storage fails, the Application log times out and the
+    processor snapshot is refused.
 
 Run: SYSTEM_SENTINEL_HOME=<scratch dir> ./.venv/bin/python fixture-server.py --port 8021
 """
@@ -468,11 +471,35 @@ def answer_processes() -> BridgeResult:
                                       "total_processes": len(rows), "processes": rows, "warnings": []}], took_ms=412)
 
 
+def home_gap(script: str) -> BridgeResult | None:
+    """The home's not-observed shapes, made on purpose: each is a real bridge outcome."""
+    from sentinel.readings import system as machine
+
+    if "dump_inventory = $dump_inventory" in script and "$announced" in script:
+        answer = answer_crash(script)
+        item = answer.items[0]
+        collection = {name: {**item["collection"][name], "outcome": "empty", "returned": 0, "bound_reached": False}
+                      for name in ("system", "reports")}
+        return BridgeResult("ok", items=[{**item, "system": [], "reports": [], "before": [],
+                                          "collection": {**collection, "before": []}}], took_ms=answer.took_ms)
+    if script == machine.STORAGE_SCRIPT:
+        return BridgeResult("failed", error="Get-PhysicalDisk : Access to a CIM resource was not available to the client.", took_ms=90)
+    if script == machine.SYSTEM_SCRIPT:
+        return BridgeResult("denied", error="Access is denied.", took_ms=12)
+    if "log = 'Application'" in script:
+        return BridgeResult("timeout", error="The query did not finish within 30 seconds.", took_ms=30000)
+    return None
+
+
 class FixtureBridge:
     exe = "fixture"
     available = True
 
     def run(self, script: str, *, timeout: float = 60, depth: int = 6) -> BridgeResult:
+        if os.environ.get("SENTINEL_FIXTURE_HOME_GAPS") == "1":
+            gap = home_gap(script)
+            if gap is not None:
+                return gap
         if "$env:COMPUTERNAME" in script:
             return BridgeResult("ok", items=[{"host": FIXTURE_HOST, "user": FIXTURE_USER, "ps": "5.1", "os": "10.0"}], took_ms=3)
         if "dump_inventory = $dump_inventory" in script and "$announced" in script:

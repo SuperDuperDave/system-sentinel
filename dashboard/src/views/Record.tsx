@@ -1,7 +1,8 @@
 import { Fragment, Ref, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { AddToStack } from '../AddToStack';
 import { EventRecord, Reading, type RecordId, observed, section } from '../api';
-import { clock, Glyph, OutcomeLine, firstLine } from '../Outcome';
+import { clock, OutcomeLine, firstLine } from '../Outcome';
+import { LevelGlyph } from '../Marks';
 import { Segmented, byDay, day, part } from '../Sections';
 import { useApp, VIEWS } from '../store';
 import { Taken, useReading } from '../useReading';
@@ -69,9 +70,13 @@ function Log() {
   return (
     <section>
       <div className={styles.head}>
-        <h1 className={`${styles.title} display`}>Record</h1>
+        <h1 className={`${styles.title} display`}>The System log</h1>
+        {taken.reading ? <AddToStack item={{ kind: 'reading', envelope: taken.reading }} label="Stack this reading" /> : null}
+      </div>
+      <p className={styles.intro}>What Windows wrote down, newest first. Open a row for its full message and the records before it. An entry alone does not establish a cause.</p>
+      <div className={styles.controlRow}>
         <button className={styles.filterToggle} onClick={() => setFiltersOpen((open) => !open)} aria-expanded={filtersOpen} aria-controls="record-controls">
-          <span className="readout">Window</span>
+          <span>Showing</span>
           <span className={styles.filterValue}>{levels === 'errors' ? 'Critical and error' : 'Every level'} · {boot ? `This Windows session · up to ${BOOT_COUNT}` : `Last ${count}`}</span>
           <span className={styles.filterChevron} aria-hidden="true">⌄</span>
         </button>
@@ -96,11 +101,9 @@ function Log() {
           />
           {/* The count belongs to the last-records window; since boot has its own, so the control
               goes rather than sitting there meaning nothing, and returns with the value it had. */}
-          {boot ? null : <Segmented value={count} onChange={setCount} options={COUNTS.map((c) => ({ value: c, label: `last ${c}` }))} label="How many" />}
+          {boot ? null : <Segmented value={count} onChange={setCount} options={COUNTS.map((c) => ({ value: c, label: `${c}` }))} label="How many" />}
         </div>
-        {taken.reading ? <AddToStack item={{ kind: 'reading', envelope: taken.reading }} label="Stack this reading" /> : null}
       </div>
-      <p className={styles.intro}>What did Windows record? Browse System log entries by time and source. Open a row for its full message, raw fields and the records before it. An entry alone does not establish a cause.</p>
       <OutcomeLine
         taken={taken}
         noun={boot ? 'records since the reported Windows session start' : 'records'}
@@ -485,12 +488,11 @@ function RecordOverview({ records, selected, onOpen }: { records: EventRecord[];
 
 function Row({ record, reading, open, onToggle }: { record: EventRecord; reading: Reading<EventRecord[]>; open: boolean; onToggle: () => void }) {
   const t = new Date(record.TimeCreated);
-  const level = levelKind(record.Level);
   return (
     <li className={`${styles.row} ${open ? styles.rowOpen : ''}`} data-record={record.RecordId}>
       <button className={styles.rowButton} onClick={onToggle} aria-expanded={open}>
         <span className={`${styles.time} readout`}><span className={styles.srOnly}>{day.format(t)} </span>{clock.format(t)}</span>
-        <span className={styles.level}><Glyph kind={level} /><span className={`${styles.levelText} readout`}>{record.LevelDisplayName}</span></span>
+        <span className={styles.level}><LevelGlyph level={record.Level} /><span className={`${styles.levelText} readout`}>{record.LevelDisplayName}</span></span>
         <span className={`${styles.provider} readout`}>{shortProvider(record.ProviderName)}</span>
         <span className={`${styles.id} readout`}>event {record.Id}</span>
         <span className={styles.message}>{record.Message ? firstLine(record.Message) : <em className={styles.noMessage}>no message text</em>}</span>
@@ -546,7 +548,7 @@ function Before({ moment }: { moment: string }) {
             {before.rows.map((r) => (
               <li key={r.RecordId} className={styles.beforeRow} data-record={r.RecordId}>
                 <span className={`${styles.time} readout`}><span className={styles.srOnly}>{day.format(new Date(r.TimeCreated))} </span>{clock.format(new Date(r.TimeCreated))}</span>
-                <span className={styles.level}><Glyph kind={levelKind(r.Level)} /><span className={`${styles.levelText} readout`}>{r.LevelDisplayName}</span></span>
+                <span className={styles.level}><LevelGlyph level={r.Level} /><span className={`${styles.levelText} readout`}>{r.LevelDisplayName}</span></span>
                 <span className={`${styles.provider} readout`}>{shortProvider(r.ProviderName)}</span>
                 <span className={`${styles.id} readout`}>event {r.Id}</span>
                 <span className={styles.message}>{r.Message ? firstLine(r.Message) : ''}</span>
@@ -661,10 +663,6 @@ function More({ before }: { before: Widened }) {
       {before.taken.state === 'taking' ? 'Taking…' : `${before.moreCount} more before this`}
     </button>
   );
-}
-
-function levelKind(level: number): 'critical' | 'error' | 'warning' | 'info' {
-  return level === 1 ? 'critical' : level === 2 ? 'error' : level === 3 ? 'warning' : 'info';
 }
 
 function shortProvider(name: string): string {

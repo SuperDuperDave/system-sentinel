@@ -78,24 +78,31 @@
 }
 .navGroup { display: flex; gap: 4px; }
 .navGroup + .navGroup { margin-left: 10px; }
-.navGroupLabel { display: none; }
+.navGroupLabel { display: none; color: var(--muted); font-size: 12.5px; font-weight: 500; }
 
 .navItem {
   display: inline-flex;
   align-items: center;
-  gap: 9px;
+  gap: 10px;
   text-align: left;
-  font-family: var(--font-readout);
-  font-size: 13px;
-  color: var(--muted);
-  padding: 8px 10px;
-  border-radius: 6px;
+  font-family: var(--font-text);
+  font-size: 14px;
+  color: var(--body);
+  padding: 8px 12px;
+  border-radius: 8px;
   white-space: nowrap;
-  min-height: 40px;
+  min-height: 44px;
 }
-.navItem svg { flex: none; opacity: 0.8; }
-.navItem:hover { color: var(--ink); }
-.navActive { color: var(--ink); background: rgba(234, 243, 238, 0.06); }
+.navItem svg { flex: none; opacity: 0.85; }
+.navItem:hover { color: var(--ink); background: rgba(234, 243, 238, 0.04); }
+.navActive { color: var(--ink); background: var(--surface-raised); font-weight: 500; }
+
+/* A door in the rail keeps its fact: the glance survives on every page. */
+.navDoor { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; gap: 10px; white-space: normal; }
+.navState { display: inline-flex; justify-content: center; color: var(--muted); }
+.navLabel { min-width: 0; line-height: 1.25; }
+.navFact { color: var(--muted); font-size: 11.5px; white-space: nowrap; }
+.navActive .navFact { color: var(--body); }
 /* Not a view: the same control, set apart by the gap rather than by a rule. */
 .navAside { margin-left: 10px; white-space: normal; }
 
@@ -118,7 +125,7 @@
 .mobileCurrent { display: inline-flex; align-items: center; gap: 12px; min-width: 0; }
 .mobileCurrent > svg { flex: none; }
 .mobileCurrent > span { min-width: 0; }
-.mobileEyebrow { display: block; color: var(--muted); font-size: 10px; }
+.mobileEyebrow { display: block; color: var(--muted); font-size: 12px; }
 .mobileTitle { display: block; color: var(--ink); font-size: 15px; line-height: 1.3; }
 .mobileToggle { display: inline-flex; align-items: center; gap: 9px; flex: none; color: var(--body); font-size: 12px; }
 .mobileChevron { width: 7px; height: 7px; border: solid currentColor; border-width: 0 1.5px 1.5px 0; transform: translateY(-2px) rotate(45deg); }
@@ -127,7 +134,7 @@
 .mobileChoices .navGroup { flex-direction: column; gap: 2px; }
 .mobileChoices .navGroup + .navGroup { margin: 18px 0 0; }
 .mobileChoices .navGroupLabel { display: block; padding: 0 12px 6px; }
-.mobileChoices .navItem { width: 100%; min-height: 44px; padding: 9px 12px; }
+.mobileChoices .navItem { width: 100%; min-height: 48px; padding: 9px 12px; }
 .mobileChoices .navAside { margin: 18px 0 0; }
 
 .main {
@@ -152,14 +159,14 @@
     gap: 4px;
     padding: 20px 12px 32px;
     overflow: visible;
-    border-right: 1px solid var(--rule-soft);
+    background: var(--deep);
   }
   .navGroup { flex-direction: column; gap: 2px; }
   .navGroup + .navGroup { margin: 22px 0 0; }
-  .navGroupLabel { display: block; padding: 0 12px 7px; }
+  .navGroupLabel { display: block; padding: 0 12px 6px; }
   .navItem { width: 100%; padding: 8px 12px; }
   .navAside { margin: 24px 0 0; }
-  .main { padding: 28px 32px 64px; }
+  .main { padding: 32px 40px 72px; }
 }
 
 /* Sign in */

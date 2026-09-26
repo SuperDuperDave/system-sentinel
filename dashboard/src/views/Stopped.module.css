@@ -1,0 +1,129 @@
+/* It stopped or restarted: the stops beside the composition of one of them. */
+
+.situation { max-width: 1180px; }
+.headFinding { margin: 16px 0 0; display: flex; flex-direction: column; gap: 4px; font-size: 15px; }
+.reach { color: var(--muted); font-size: 13.5px; line-height: 1.45; }
+
+.layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 24px; margin-top: 8px; }
+
+.stopList ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.stopButton {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 11px 14px 12px;
+  border-radius: 10px;
+  text-align: left;
+  color: var(--body);
+  min-height: 44px;
+}
+.stopButton:hover { background: rgba(234, 243, 238, 0.04); }
+.stopSelected, .stopSelected:hover { background: var(--surface-raised); }
+.stopSelected .stopName { color: var(--ink); }
+.stopWhen { display: flex; align-items: center; gap: 8px; color: var(--body); font-size: 12.5px; }
+.stopWhen .readout { font-size: 12.5px; }
+.stopDot { width: 12px; height: 12px; display: inline-grid; place-items: center; }
+.stopDot::after { content: ''; width: 5px; height: 5px; border-radius: 50%; background: var(--muted); }
+.newWord { color: var(--attention-stop); font-weight: 500; }
+.stopAge { margin-left: auto; color: var(--muted); font-size: 12.5px; white-space: nowrap; }
+.stopName { color: var(--body); font-size: 15px; font-weight: 500; overflow-wrap: anywhere; padding-left: 20px; }
+.stopMeta { color: var(--muted); font-size: 13px; padding-left: 20px; }
+.more { margin-top: 8px; }
+
+.composition { min-width: 0; }
+.compositionTitle { margin: 0 0 22px; color: var(--ink); font-size: 22px; font-weight: 500; line-height: 1.25; }
+.compositionEyebrow { display: block; margin-bottom: 4px; color: var(--muted); font-size: 13px; font-weight: 500; }
+.steps { list-style: none; margin: 0; padding: 0; }
+
+.missing { margin: 0; padding: 18px 20px; border-radius: 12px; box-shadow: inset 0 0 0 1px var(--rule); color: var(--body); }
+.quiet { color: var(--muted); }
+
+/* The stop's three evidence times, placed by when each was written. */
+.times { margin: 4px 0 18px; padding: 16px 18px 14px; border-radius: 12px; background: var(--surface-raised); }
+.timeLine { position: relative; height: 18px; margin: 0 8px 12px; }
+.timeLine::before { content: ''; position: absolute; left: 0; right: 0; top: 50%; height: 1px; background: var(--rule); }
+.tick { position: absolute; top: 2px; width: 2px; height: 14px; margin-left: -1px; border-radius: 1px; background: var(--body); }
+.tickStart { background: var(--phosphor); box-shadow: 0 0 6px rgba(111, 240, 168, 0.5); }
+.timeLabels { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.timeLabels li { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.timeLabels li:nth-child(2) { text-align: center; }
+.timeLabels li:nth-child(3) { text-align: right; }
+.timeRole { color: var(--muted); font-size: 12.5px; }
+.timeLabels strong { color: var(--ink); font-weight: 400; font-size: 14px; }
+.timeNote { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.timeCaption { margin: 12px 0 0; color: var(--muted); font-size: 12.5px; line-height: 1.5; }
+
+.keyFacts { margin: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px 24px; }
+.keyFacts div { min-width: 0; }
+.keyFacts dt { color: var(--muted); font-size: 12.5px; }
+.keyFacts dd { margin: 2px 0 0; color: var(--ink); font-size: 14px; overflow-wrap: anywhere; }
+
+.exact { margin-top: 14px; }
+.exact summary { width: fit-content; min-height: 44px; padding: 12px 0; cursor: pointer; color: var(--body); font-size: 14px; }
+.exact summary:hover { color: var(--ink); }
+.exactBody { padding: 16px 18px; border-radius: 12px; background: var(--inspection-well); }
+
+/* The record before: the last rows, ending at the stop. */
+.logRows { list-style: none; margin: 0; padding: 0; }
+.logRow {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  grid-template-areas: 'time source' 'level message';
+  gap: 2px 12px;
+  padding: 8px 0;
+  align-items: baseline;
+}
+.logRow + .logRow { box-shadow: 0 -1px 0 var(--rule-soft); }
+.logTime { grid-area: time; color: var(--muted); font-size: 12.5px; }
+.logLevel { grid-area: level; display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12.5px; }
+.logSource { grid-area: source; color: var(--ink); font-size: 13.5px; min-width: 0; overflow-wrap: anywhere; }
+.logSource .readout { color: var(--muted); font-size: 12px; }
+.logMessage { grid-area: message; color: var(--body); font-size: 13.5px; line-height: 1.45; min-width: 0; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.logEarlier { color: var(--muted); font-size: 12.5px; padding: 0 0 6px; }
+.logMarker { display: flex; align-items: center; gap: 10px; margin-top: 6px; color: var(--muted); font-size: 12px; }
+.logMarker::before, .logMarker::after { content: ''; flex: 1; height: 1px; background: var(--phosphor); opacity: 0.45; }
+.stepActions { margin-top: 10px; }
+
+.caveat { margin: 0 0 12px; color: var(--muted); font-size: 13px; line-height: 1.5; max-width: 72ch; }
+.sides { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+.side { min-width: 0; }
+.sideHead { margin: 0 0 6px; }
+.sideRows { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; color: var(--body); font-size: 13px; }
+.sideRows li { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 12px; }
+.sideRows li span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sideRows .readout { color: var(--muted); font-size: 12.5px; }
+
+.furtherStep { display: grid; grid-template-columns: 32px minmax(0, 1fr); column-gap: 16px; }
+.furtherMark { width: 32px; height: 32px; display: grid; place-items: center; color: var(--muted); }
+.further { margin-top: 28px; }
+.furtherTitle { margin: 4px 0 0; color: var(--ink); font-size: 18px; font-weight: 500; }
+.furtherLede { margin: 6px 0 12px; color: var(--body); font-size: 14px; }
+.furtherChoices { display: flex; flex-wrap: wrap; gap: 8px; }
+.furtherBody { margin-top: 14px; padding: 4px 18px 18px; border-radius: 12px; background: var(--inspection-well); min-width: 0; }
+
+@media (min-width: 720px) {
+  .keyFacts { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .sides { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+  .logRow {
+    grid-template-columns: 72px 92px minmax(120px, 170px) minmax(0, 1fr);
+    grid-template-areas: 'time level source message';
+  }
+  .logMessage { -webkit-line-clamp: 1; }
+}
+
+@media (min-width: 1100px) {
+  .layout { grid-template-columns: 290px minmax(0, 1fr); gap: 36px; }
+  .stopList { position: sticky; top: 20px; align-self: start; }
+}
+
+@media (max-width: 639px) {
+  .timeLine { display: none; }
+  .timeLabels { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .timeLabels li:nth-child(n) { text-align: left; }
+  .times { padding: 14px; }
+  .furtherStep { grid-template-columns: 26px minmax(0, 1fr); column-gap: 12px; }
+  .furtherMark { width: 26px; }
+  .compositionTitle { font-size: 20px; }
+  .furtherBody { margin-left: calc(-1 * var(--gutter)); margin-right: calc(-1 * var(--gutter)); padding: 4px var(--gutter) 16px; border-radius: 0; }
+}

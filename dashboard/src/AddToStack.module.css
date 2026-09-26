@@ -2,16 +2,19 @@
 .wrap { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0.6em; min-width: 0; }
 
 .button {
-  font-family: var(--font-readout);
-  font-size: 12.5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: 8px;
+  background: var(--surface-raised);
   color: var(--ink);
-  border-bottom: 1px solid var(--rule);
-  padding: 0 0 1px;
-  min-height: 40px;
+  font: 500 14px/1.2 var(--font-text);
   white-space: nowrap;
 }
-.button:hover { border-color: var(--muted); }
-.button:disabled { color: var(--muted); border-color: transparent; cursor: default; }
+.button:hover { background: var(--surface-raised-hover); }
+.button:disabled { color: var(--muted); cursor: default; }
 
 .done { color: var(--muted); min-height: 40px; display: inline-flex; align-items: center; white-space: nowrap; }
 .problem { color: var(--body); overflow-wrap: anywhere; min-width: 0; }

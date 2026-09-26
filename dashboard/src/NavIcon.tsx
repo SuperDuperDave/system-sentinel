@@ -6,8 +6,10 @@ export function NavIcon({ name }: { name: ViewId | 'device' }) {
   return (
     <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true" focusable="false" {...shared}>
       {name === 'record' && <><path d="M3 4.5h14M3 8h9M3 11.5h14M3 15h7" /><circle cx="15" cy="15" r="1" fill="currentColor" stroke="none" /></>}
+      {name === 'programs' && <><rect x="3" y="4" width="14" height="12" rx="1.5" /><path d="M3 7.5h14M8 10.5l4 3M12 10.5l-4 3" /></>}
       {name === 'errors' && <><path d="M6 3.5h8l2.5 2.5v8L14 16.5H6L3.5 14V6z" /><path d="M7 10h2l1-2 1.5 4 1-2H14" /></>}
-      {name === 'crashes' && <><path d="M10 2.5v3M10 14.5v3M2.5 10h3M14.5 10h3" /><path d="M7 6.5 13 13.5M13 6.5 7 13.5" /></>}
+      {name === 'home' && <><path d="M3.5 9.5 10 4l6.5 5.5M5.5 8v8h9V8" /><path d="M8.5 16v-4h3v4" /></>}
+      {name === 'stopped' && <><path d="M10 2.5v3M10 14.5v3M2.5 10h3M14.5 10h3" /><path d="M7 6.5 13 13.5M13 6.5 7 13.5" /></>}
       {name === 'machine' && <><rect x="3" y="3" width="14" height="11" rx="1.5" /><path d="M7 17h6M10 14v3M6 6h8M6 9h5" /></>}
       {name === 'performance' && <><path d="M2.5 14.5h15M3 11.5l3-2 2 1.5 2.5-5 2 3 2.5-1.5 2 2" /><circle cx="10.5" cy="6" r="1" fill="currentColor" stroke="none" /></>}
       {name === 'space' && <><circle cx="10" cy="10" r="7" /><path d="M10 3c-2.6 2.2-2.6 11.8 0 14M3.6 7h12.8M3.6 13h12.8" /></>}

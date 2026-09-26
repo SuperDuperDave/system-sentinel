@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Reading } from './api';
 import { CopyButton } from './Copy';
 import { Taken } from './useReading';
+import { OutcomeGlyph, knownOfReading } from './Marks';
 import styles from './Outcome.module.css';
 
 const NOT_OBSERVED: Record<string, string> = {
@@ -53,16 +54,16 @@ export function OutcomeLine<T>({ taken, noun = 'records', singular, emptyText }:
   let body: React.ReactNode;
   if (r.outcome === 'ok') {
     const countedNoun = r.count === 1 ? singular ?? noun : noun;
-    body = <>{r.count == null ? noun : `${r.count} ${countedNoun}`} · taken {when} · {cost}</>;
+    body = <><OutcomeGlyph known="observed" /> <span className={styles.found}>{r.count == null ? noun : `${r.count} ${countedNoun}`}</span> <span className={styles.meta}>· taken {when} · {cost}</span></>;
   } else if (r.outcome === 'empty') {
-    body = <>{emptyText ?? `No ${noun}`} · taken {when} · {cost}</>;
+    body = <><OutcomeGlyph known="zero" /> <span className={styles.found}>{emptyText ?? `No ${noun}`}</span> <span className={styles.meta}>· taken {when} · {cost}</span></>;
   } else {
     const missed = r.outcome === 'unavailable' && r.error?.kind === 'local_store'
       ? 'Sentinel could not read local performance history'
       : NOT_OBSERVED[r.outcome] ?? r.outcome;
     body = (
       <>
-        <Glyph kind="warn" /> Not observed: {missed}
+        <OutcomeGlyph known={knownOfReading(r)} /> <span className={styles.found}>{knownOfReading(r) === 'failed' ? 'Failed' : 'Not read'}: {missed}</span>
         {r.error?.detail ? <span className={styles.detail}> · {firstLine(r.error.detail)}</span> : null}
       </>
     );
