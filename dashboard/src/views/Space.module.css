@@ -1,0 +1,327 @@
+/* Space. One drawing at a time over one list. Groups are set apart by space and a change of
+   surface; the only glow is the planet's rim and the phosphor edge of the selection. */
+
+.lede { margin: 0 0 18px; color: var(--body); max-width: 68ch; }
+.quiet { margin: 12px 0 0; color: var(--body); max-width: 68ch; }
+.strong { color: var(--ink); font-weight: 600; }
+
+/* The offer before anything is walked. */
+.offer { border-top: 1px solid var(--rule-soft); padding: 22px 0 8px; max-width: 68ch; }
+.offer p { margin: 0 0 12px; }
+
+.scan,
+.scanLead,
+.control,
+.enter {
+  font-family: var(--font-readout);
+  font-size: 12.5px;
+  color: var(--ink);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  padding: 0 14px;
+  min-height: 44px;
+  white-space: nowrap;
+}
+.scan:hover,
+.control:hover { border-color: var(--muted); }
+.scan:disabled,
+.control:disabled,
+.enter:disabled { color: var(--muted); border-color: var(--rule-soft); cursor: default; }
+.scan:disabled { cursor: progress; }
+.scanLead { margin: 6px 0 0; border-color: var(--phosphor-deep); font-size: 13px; }
+.scanLead:hover,
+.enter:hover:not(:disabled) { border-color: var(--phosphor); }
+
+.textButton {
+  color: var(--ink);
+  border-bottom: 1px solid var(--rule);
+  min-height: 40px;
+}
+.textButton:hover { border-color: var(--muted); }
+
+/* The walk path: every ancestor is a held walk of its own. */
+.path { margin: 4px 0 16px; }
+.pathLabel { margin: 0 0 6px; }
+.pathList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.pathItem { display: flex; align-items: stretch; min-width: 0; }
+.pathItem + .pathItem::before {
+  content: '›';
+  align-self: center;
+  color: var(--muted);
+  margin: 0 6px 0 0;
+}
+.crumb {
+  display: grid;
+  gap: 1px;
+  align-content: center;
+  min-width: 0;
+  max-width: 260px;
+  min-height: 44px;
+  padding: 5px 10px;
+  border-radius: 6px;
+  background: var(--surface-raised);
+  text-align: left;
+  color: var(--body);
+}
+button.crumb:hover { background: var(--lit); }
+.crumbHere { background: var(--lit); box-shadow: inset 0 -2px 0 var(--phosphor-deep); }
+.crumbName {
+  color: var(--ink);
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.crumbMeta { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.outcome { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 4px 16px; }
+.outcome > :first-child { flex: 1 1 320px; min-width: 0; }
+
+.separate {
+  margin: 10px 0 0;
+  max-width: 76ch;
+  padding-left: 12px;
+  border-left: 2px solid var(--rule);
+  color: var(--body);
+  font-size: 14.5px;
+}
+
+/* The atlas: drawing and inspector side by side on a wide screen, stacked on a phone. */
+.atlas {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  margin: 22px 0 0;
+}
+@media (min-width: 1000px) {
+  .atlas { grid-template-columns: minmax(0, 1fr) 300px; align-items: start; }
+}
+.drawing { min-width: 0; }
+
+/* The aspect here is the layout's aspect in Space.tsx (WIDE, NARROW, WIDE_QUERY). */
+.map {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 10 / 11;
+  margin: 0;
+  overflow: hidden;
+  border-radius: 6px;
+  background: var(--inspection-well);
+}
+@media (min-width: 640px) {
+  .map { aspect-ratio: 16 / 9; }
+}
+.noArea { display: grid; place-items: center; padding: 24px; text-align: center; color: var(--body); }
+
+.tile {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 6px 7px;
+  overflow: hidden;
+  text-align: left;
+  color: var(--ink);
+  background-color: var(--tile);
+  border: 1px solid var(--deep);
+}
+.tile:hover { background-image: linear-gradient(rgba(234, 243, 238, 0.07), rgba(234, 243, 238, 0.07)); }
+/* A lower bound is hatched: the true figure is at least this, possibly more. */
+.tilePartial,
+.tilePartial:hover {
+  background-image: repeating-linear-gradient(135deg, rgba(6, 16, 13, 0.4) 0 2px, transparent 2px 7px);
+}
+/* The folded tail is measured but has no names and no handle. */
+.tileTail {
+  background-image: radial-gradient(rgba(234, 243, 238, 0.2) 1px, transparent 1.3px);
+  background-size: 6px 6px;
+}
+.tileOn {
+  z-index: 1;
+  outline: 2px solid var(--phosphor);
+  outline-offset: -2px;
+  box-shadow: inset 0 0 18px rgba(111, 240, 168, 0.25);
+}
+.tile:focus-visible { z-index: 2; outline: 2px solid var(--phosphor-core); outline-offset: -3px; }
+.tileName,
+.tileFigure {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tileName { font-size: 13px; line-height: 1.25; }
+.tileFigure { font-family: var(--font-readout); font-size: 12px; font-variant-numeric: tabular-nums; }
+
+/* The planet. It sits in the same frame as the tiles so switching never moves the page. */
+.planetStage { cursor: grab; touch-action: pan-y; background: radial-gradient(circle at 50% 50%, var(--lit), var(--inspection-well) 70%); }
+.planetStage:active { cursor: grabbing; }
+.planet { display: block; width: 100%; height: 100%; }
+.planetControls { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 0; }
+.control { padding: 0 12px; }
+
+.surfaceKey { margin: 12px 0 0; }
+.surfaceLabel { margin: 0 0 6px; }
+.surface {
+  display: flex;
+  height: 16px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--deep);
+}
+.surfacePart { flex: 0 1 0; min-width: 0; background-color: var(--tile); }
+.surfaceOn { outline: 2px solid var(--phosphor); outline-offset: -2px; }
+
+.hint { margin: 8px 0 0; color: var(--muted); font-size: 12px; }
+
+/* The inspector: a change of surface, not a box. */
+.inspector {
+  min-width: 0;
+  padding: 14px 16px 16px;
+  border-radius: 6px;
+  background: var(--surface-raised);
+}
+.inspector > :global(.label) { margin: 0 0 4px; }
+.inspectEmpty { margin: 0; color: var(--body); }
+.inspectName { margin: 0; font-size: 19px; line-height: 1.25; overflow-wrap: anywhere; }
+.inspectLabel { margin: 2px 0 0; color: var(--muted); }
+.inspectFigure { margin: 8px 0 0; color: var(--ink); font-size: 14px; }
+.inspectWhy { margin: 10px 0 12px; color: var(--body); font-size: 14px; }
+.coreSample,
+.matter { margin: 16px 0; padding-top: 13px; border-top: 1px solid var(--rule-soft); }
+.coreTitle { margin: 0 0 5px; color: var(--ink); }
+.coreNote { margin: 0 0 10px; color: var(--body); font-size: 12px; line-height: 1.45; }
+.coreLayers { display: flex; gap: 1px; width: 100%; height: 14px; overflow: hidden; border-radius: 3px; background: var(--deep); }
+.coreLayer { min-width: 1px; }
+.coreLegend { display: grid; gap: 5px; list-style: none; margin: 9px 0 0; padding: 0; }
+.coreLegend li { display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; align-items: center; gap: 7px; font: 11px var(--font-readout); color: var(--body); }
+.coreLegend i { width: 8px; height: 8px; border-radius: 1px; }
+.coreLegend strong { color: var(--ink); font-weight: 500; }
+.matterRow { display: grid; grid-template-columns: 58px minmax(0, 1fr) auto; align-items: center; gap: 7px; margin-top: 5px; font: 11px var(--font-readout); color: var(--body); }
+.matterRow b { display: block; height: 8px; overflow: hidden; border-radius: 2px; background: var(--deep); }
+.matterRow i { display: block; height: 100%; background: var(--phosphor-deep); }
+.matterRow + .matterRow i { background: #738ba8; }
+.matterRow strong { color: var(--ink); font-weight: 500; }
+.enterBlock { margin: 12px 0 14px; }
+.enter { border-color: var(--phosphor-deep); font-size: 13px; }
+.enterNote { margin: 6px 0 0; color: var(--muted); font-size: 13px; }
+.returned { margin: 12px 0 0; }
+.returned > summary { color: var(--muted); cursor: pointer; min-height: 40px; display: flex; align-items: center; }
+.returned > summary:hover { color: var(--ink); }
+
+/* The ranked list: every exact figure, the far side of the planet included. */
+.ranked { list-style: none; margin: 0; padding: 0; }
+.pages { margin: 22px 0; padding: 13px 0 0; border-top: 1px solid var(--rule); }
+.loadMore { min-height: 44px; margin: 10px 0 0; padding: 0 14px; border: 1px solid var(--rule); border-radius: 6px; color: var(--ink); font: 12.5px var(--font-readout); }
+.loadMore:hover { border-color: var(--phosphor); }
+.loadMore:disabled { color: var(--muted); cursor: progress; }
+.pageProblem { color: var(--body); font-size: 13px; }
+.ranked > li { border-top: 1px solid var(--rule-soft); }
+.rankRow {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr) auto;
+  grid-template-areas:
+    'swatch name bytes'
+    'swatch bar share'
+    'swatch state state';
+  column-gap: 10px;
+  row-gap: 3px;
+  align-items: center;
+  width: 100%;
+  min-height: 48px;
+  padding: 10px 8px;
+  text-align: left;
+  color: var(--body);
+}
+.rankRow:hover { color: var(--ink); background: rgba(6, 16, 13, 0.35); }
+.rankOn { background: rgba(6, 16, 13, 0.55); box-shadow: inset 2px 0 0 var(--phosphor); color: var(--ink); }
+.swatch {
+  grid-area: swatch;
+  align-self: stretch;
+  width: 12px;
+  min-height: 12px;
+  border-radius: 2px;
+  background-color: var(--tile);
+}
+.swatchPartial { background-image: repeating-linear-gradient(135deg, rgba(6, 16, 13, 0.45) 0 2px, transparent 2px 5px); }
+.swatchNone { background: none; border: 1px dashed var(--rule); }
+.rank { display: none; color: var(--muted); }
+.rowName { grid-area: name; min-width: 0; color: var(--ink); overflow-wrap: anywhere; }
+.rowLabel { color: var(--muted); }
+.rowBytes { grid-area: bytes; text-align: right; color: var(--ink); white-space: nowrap; }
+.rowShare { grid-area: share; text-align: right; white-space: nowrap; }
+.rowState { grid-area: state; color: var(--muted); font-size: 12px; min-width: 0; }
+.shareBar { grid-area: bar; display: block; height: 4px; border-radius: 2px; background: var(--rule-soft); overflow: hidden; }
+.shareBar > span { display: block; height: 100%; background: var(--phosphor-deep); }
+
+@media (min-width: 760px) {
+  .rankRow {
+    grid-template-columns: 12px 28px minmax(0, 1fr) 120px 96px 60px minmax(0, 200px);
+    grid-template-areas: 'swatch rank name bar bytes share state';
+    min-height: 44px;
+    padding: 8px;
+  }
+  .rank { display: block; grid-area: rank; text-align: right; }
+}
+
+/* The ledger: the volume, what this walk attributed, and the remainder it could not. */
+.ledger,
+.coverage { margin: 8px 0 0; }
+.ledgerBar {
+  display: flex;
+  max-width: 720px;
+  height: 12px;
+  margin: 4px 0 8px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--deep);
+  box-shadow: inset 0 0 0 1px var(--rule-soft);
+}
+.ledgerWalk { background-color: var(--phosphor-deep); }
+.ledgerLower { background-image: repeating-linear-gradient(135deg, rgba(6, 16, 13, 0.45) 0 2px, transparent 2px 7px); }
+.ledgerRest { background-color: rgba(234, 243, 238, 0.24); }
+.ledgerFree { background-color: var(--deep); box-shadow: inset 0 0 0 1px var(--rule); }
+.ledgerKey { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0 0 12px; color: var(--muted); }
+.ledgerKey i {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 6px;
+  vertical-align: -1px;
+  border-radius: 2px;
+}
+
+.examples { list-style: none; margin: 0; padding: 0; }
+.examples li { padding: 4px 0; overflow-wrap: anywhere; color: var(--body); }
+.exampleReason { color: var(--muted); }
+
+@media (prefers-contrast: more) {
+  .tile { border-color: var(--ink); }
+  .crumbMeta,
+  .hint,
+  .rowState,
+  .enterNote { color: var(--body); }
+}
+
+/* Forced colours drop the fills and hatching; borders, the ≥ marks and the list carry the meaning. */
+@media (forced-colors: active) {
+  .tile,
+  .surfacePart,
+  .crumb,
+  .inspector { border: 1px solid CanvasText; }
+  .tileOn,
+  .surfaceOn,
+  .rankOn { outline: 3px solid Highlight; outline-offset: -3px; }
+  .swatch,
+  .ledgerKey i,
+  .shareBar > span,
+  .ledgerBar > span { forced-color-adjust: none; }
+}

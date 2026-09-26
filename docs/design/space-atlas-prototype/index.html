@@ -72,6 +72,25 @@
     .panelHeader strong { font-size:13px; font-weight:600; }
     .panelHeader span { color:var(--muted); font-size:11px; }
     .map { position:relative; height:clamp(420px,40vw,635px); min-height:420px; overflow:hidden; border-radius:7px; background:#071711; border:1px solid #335144; }
+    [hidden] { display:none!important; }
+    .planetShell { position:relative; height:clamp(420px,40vw,635px); min-height:420px; overflow:hidden; border:1px solid #335144; border-radius:7px; background:radial-gradient(circle at 48% 49%,#1d3d2d 0,#0a1d18 43%,#07140f 77%); }
+    .planetShell::before { content:''; position:absolute; inset:0; pointer-events:none; opacity:.14; background-image:radial-gradient(#bdf7d1 1px,transparent 1px),radial-gradient(#93cbae .7px,transparent 1px); background-size:123px 131px,91px 97px; background-position:22px 18px,64px 39px; }
+    .planet { position:relative; display:block; width:100%; height:100%; touch-action:none; cursor:grab; }
+    .planet:active { cursor:grabbing; }
+    .planetGuide { position:absolute; pointer-events:none; inset:auto 15px 15px 15px; display:flex; justify-content:space-between; align-items:end; gap:12px; color:#c1dbca; font:10px 'JetBrains Mono',monospace; text-transform:uppercase; letter-spacing:.08em; text-shadow:0 1px 6px #06100d; }
+    .planetGuide b { display:block; font-size:12px; color:var(--mint); font-weight:500; margin-bottom:4px; }
+    .wholeSurface { margin:11px 0 0; }
+    .wholeSurfaceHead { display:flex; justify-content:space-between; gap:12px; margin:0 0 6px; color:var(--muted); font-size:10px; }
+    .wholeSurfaceBar { position:relative; display:flex; height:24px; border:1px solid #466a55; border-radius:4px; overflow:hidden; background:#11251b; }
+    .wholeSurfaceBar button { min-width:0; border:0; border-right:1px solid #081710; transition:filter .18s; }
+    .wholeSurfaceBar button:hover { filter:brightness(1.3); }
+    .wholeSurfaceBar button[aria-pressed=true] { box-shadow:inset 0 0 0 2px #e5ffe5; z-index:1; }
+    .wholeSurfaceBar button:last-of-type { border-right:0; }
+    .wholeSurfaceMarker { position:absolute; top:0; bottom:0; width:2px; background:#f7fff1; box-shadow:0 0 7px #fff; pointer-events:none; }
+    .regionKey { display:flex; flex-wrap:wrap; gap:7px 16px; padding-top:10px; }
+    .regionKey button { display:flex; align-items:center; gap:6px; padding:2px 0; border:0; background:none; color:#c6ddcf; font:10px 'JetBrains Mono',monospace; white-space:nowrap; }
+    .regionKey button[aria-pressed=true] { color:#fff; text-decoration:underline; text-underline-offset:4px; }
+    .regionKey i { width:8px; height:8px; border-radius:2px; display:inline-block; flex:none; }
     .tile { position:absolute; display:flex; flex-direction:column; align-items:flex-start; justify-content:flex-start; overflow:hidden; border:2px solid #092017; border-radius:7px; padding:clamp(8px,1.1vw,16px); text-align:left; transition:filter .16s,transform .2s,box-shadow .16s; isolation:isolate; }
     .tile:hover { filter:brightness(1.14); z-index:2; }
     .tile.selected { z-index:3; box-shadow:inset 0 0 0 2px #d7ffdc,0 0 0 2px #d7ffdc; }
@@ -129,9 +148,9 @@
     .trailEmpty { color:var(--muted); font-size:13px; padding:25px 7px; }
     .footer { display:flex; justify-content:space-between; gap:18px; margin:24px 2px; color:var(--muted); font-size:11px; }
     .footer strong { color:var(--body); font-weight:500; }
-    @media(max-width:960px) { .mainGrid { grid-template-columns:minmax(0,1fr) 290px; } .scanStamp { display:none; } .map { height:490px; } }
-    @media(max-width:720px) { .mast { height:64px; } .brand span:last-child,.mastRight .live { display:none; } .intro { margin:39px 0 25px; } .lede { font-size:14px; } .ledger { padding:17px; } .ledgerCapacity strong { font-size:26px; } .workspaceHead { align-items:stretch; flex-direction:column; margin-top:29px; gap:13px; } .tools { justify-content:space-between; } .search { flex:1; min-width:120px; } .mainGrid { display:flex; flex-direction:column; } .map { height:390px; min-height:390px; } .inspector { min-height:320px; } .inspector .eyebrow { margin-bottom:11px; } .bigMeasure { margin-top:17px; } .inspectRule { margin:18px 0; } .inspectNote { margin:18px 0; } .trailHeader,.trailRow { grid-template-columns:1fr 78px 82px; gap:5px; } .trail { padding:16px 11px 5px; } .trailName { gap:7px; } .trailValue { font-size:10px; } .footer { flex-direction:column; } }
-    @media(max-width:420px) { .map { height:330px; min-height:330px; } .mapFooter .hint { display:none; } .trailHeader,.trailRow { grid-template-columns:1fr 72px 70px; } .trailName .rank { display:none; } .ledgerLegend { gap:8px 17px; } }
+    @media(max-width:960px) { .mainGrid { grid-template-columns:minmax(0,1fr) 290px; } .scanStamp { display:none; } .map,.planetShell { height:490px; } }
+    @media(max-width:720px) { .mast { height:64px; } .brand span:last-child,.mastRight .live { display:none; } .intro { margin:39px 0 25px; } .lede { font-size:14px; } .ledger { padding:17px; } .ledgerCapacity strong { font-size:26px; } .workspaceHead { align-items:stretch; flex-direction:column; margin-top:29px; gap:13px; } .tools { justify-content:space-between; } .search { flex:1; min-width:120px; } .mainGrid { display:flex; flex-direction:column; } .map,.planetShell { height:390px; min-height:390px; } .inspector { min-height:320px; } .inspector .eyebrow { margin-bottom:11px; } .bigMeasure { margin-top:17px; } .inspectRule { margin:18px 0; } .inspectNote { margin:18px 0; } .trailHeader,.trailRow { grid-template-columns:1fr 78px 82px; gap:5px; } .trail { padding:16px 11px 5px; } .trailName { gap:7px; } .trailValue { font-size:10px; } .footer { flex-direction:column; } }
+    @media(max-width:420px) { .map,.planetShell { height:330px; min-height:330px; } .mapFooter .hint { display:none; } .trailHeader,.trailRow { grid-template-columns:1fr 72px 70px; } .trailName .rank { display:none; } .ledgerLegend { gap:8px 17px; } .planetGuide { font-size:8px; } }
     @media(prefers-reduced-motion:reduce) { *,*::before,*::after { transition:none!important; scroll-behavior:auto!important; } }
   </style>
 </head>
@@ -154,23 +173,23 @@
         <span class="ledgerTime mono">EXAMPLE SCAN 25 SEP 2026 · 21:14 &nbsp; / &nbsp; PREVIOUS 18 SEP 2026</span>
       </section>
       <section aria-label="Explore the invented scan">
-        <div class="workspaceHead"><div><span class="eyebrow">The map and the trail</span><h2>Follow the footprint</h2></div><div class="tools"><div class="segment" aria-label="Map area metric"><button type="button" id="footprint" aria-pressed="true">Footprint</button><button type="button" id="growth" aria-pressed="false">Growth</button></div><input class="search" id="search" type="search" placeholder="Filter this level…" aria-label="Filter folders at this level"></div></div>
+        <div class="workspaceHead"><div><span class="eyebrow">A world made of files</span><h2>Follow the footprint</h2></div><div class="tools"><div class="segment" aria-label="Visualization"><button type="button" id="planetMode" aria-pressed="true">Planet</button><button type="button" id="mapMode" aria-pressed="false">Map</button></div><div class="segment" aria-label="Visualized measure"><button type="button" id="footprint" aria-pressed="true">Footprint</button><button type="button" id="growth" aria-pressed="false">Growth</button></div><input class="search" id="search" type="search" placeholder="Filter this level…" aria-label="Filter folders at this level"></div></div>
         <nav class="breadcrumbs" id="breadcrumbs" aria-label="Current location"></nav>
         <div class="mainGrid">
-          <section class="mapPanel" aria-label="Interactive spatial map"><div class="panelHeader"><strong id="mapHeading">Allocated size</strong><span id="mapCaption">Area = local allocation</span></div><div class="map" id="map"></div><div class="mapFooter"><span class="hint">Click to inspect · double click to open</span><span id="mapCount" class="mono"></span></div></section>
+          <section class="mapPanel" aria-label="Interactive spatial map"><div class="panelHeader"><strong id="mapHeading">Allocated size</strong><span id="mapCaption">Area = local allocation</span></div><div class="planetShell" id="planetShell"><canvas class="planet" id="planet" tabindex="0" aria-label="File planet. Colored region area represents allocated size. Drag or use arrow keys to rotate. Click or press Enter to inspect. Scroll or pinch inward to enter a selected region; scroll outward to return. The directory trail below is an equivalent list.">An interactive file planet with an equivalent directory trail below.</canvas><div class="planetGuide"><span><b id="planetScope">SURVEY GLOBE · HOME</b>Drag to orbit · scroll or pinch to dive</span><span id="planetCount">AREA = ALLOCATED SIZE</span></div></div><div class="wholeSurface" id="wholeSurface"><div class="wholeSurfaceHead mono"><span id="wholeSurfaceTitle">WHOLE SURFACE · NEAR AND FAR SIDE</span><span>SELECT TO ORBIT</span></div><div class="wholeSurfaceBar" id="wholeSurfaceBar"></div><div class="regionKey" id="regionKey" aria-label="Region sizes"></div></div><div class="map" id="map" hidden></div><div class="mapFooter"><span class="hint" id="mapHint">Drag to orbit · scroll to dive · select for detail</span><span id="mapCount" class="mono"></span></div></section>
           <aside class="inspector" id="inspector" aria-live="polite"></aside>
         </div>
         <section class="trail" aria-label="Ranked directory trail"><div class="trailHeader mono"><span>NAME</span><span>ON DISK</span><span>CHANGE</span></div><div id="rows"></div></section>
       </section>
     </main>
-    <footer class="footer"><span><strong>Space Atlas concept</strong> · Invented data for interaction review. No disk was scanned and no cleanup action is available.</span><span class="keyboard">Tab moves focus · Enter inspects · Shift+Enter opens · Backspace goes up</span></footer>
+    <footer class="footer"><span><strong>Space Atlas concept</strong> · Invented data; no disk scan or cleanup action. Colored surface area represents each region’s share of the measured scope.</span><span class="keyboard">Tab moves focus · arrows orbit · Enter inspects · Shift+Enter dives · Backspace goes up</span></footer>
   </div>
   <script>
-    const node = (id,name,size,previous,children=[],note='',coverage='complete') => ({id,name,size,previous,children,note,coverage});
+    const node = (id,name,size,previous,children=[],note='',coverage='complete',kind='folder') => ({id,name,size,previous,children,note,coverage,kind});
     const root = node('home','Home',622,null,[
-      node('work','Work',174,139,[node('builds','Build output',68,42,[], 'Generated output. Check the owning build tools before clearing it.'),node('projects','Projects',51,47,[], 'Some project history may exist only here.'),node('vms','Virtual machines',37,36),node('workother','Other work',18,14)],'Several recent builds explain much of the increase.'),
+      node('work','Work',174,139,[node('builds','Build output',68,42,[node('renderfile','renderer.cache',27,12,[],'Invented file. A real scan would report its actual allocation and identity.','complete','file'),node('bundlefile','app.bundle.js',19,12,[],'Invented generated file. Check its build owner before acting.','complete','file'),node('objectsfile','objects.pack',13,11,[],'Invented file. Hardlink status would be checked before a savings claim.','complete','file'),node('logfile','build.log',9,7,[],'Invented file. A name never makes deletion safe.','complete','file')], 'Generated output. Check the owning build tools before clearing it.'),node('projects','Projects',51,47,[], 'Some project history may exist only here.'),node('vms','Virtual machines',37,36),node('workother','Other work',18,14)],'Several recent builds explain much of the increase.'),
       node('media','Media',148,135,[node('video','Video',88,80),node('photos','Raw photos',42,39),node('music','Music',18,16)],'Large files, but likely personal content. Size does not imply disposability.'),
-      node('apps','Applications',112,109,[node('games','Games',70,70),node('tools','Tools',26,24),node('appother','Other apps',16,15)],'Use the application’s own removal flow for installed software.'),
+      node('apps','Applications',112,125,[node('games','Games',70,80),node('tools','Tools',26,28),node('appother','Other apps',16,17)],'Use the application’s own removal flow for installed software.'),
       node('downloads','Downloads',84,73,[node('installers','Installers',31,28),node('captures','Captures',25,18),node('misc','Other downloads',28,27)],'Review individual files before treating them as copies.'),
       node('cache','Tool caches',62,52,[node('packages','Package stores',30,26),node('render','Render cache',19,16),node('temp','Temporary data',13,10)],'Some caches have a supported clean command. A folder name alone is not a safety check.'),
       node('archive','Archive',42,null,[node('old','Older material',30,null),node('records','Records',12,null)],'One child could not be read. Its footprint is a lower bound and its change is unknown.','partial')
@@ -178,7 +197,13 @@
     const byId = new Map(), parent = new Map();
     function index(n,p=null) { byId.set(n.id,n); if(p) parent.set(n.id,p.id); n.children.forEach(c=>index(c,n)); }
     index(root);
-    let current=root, selected=root.children[0], metric='footprint', filter='';
+    let current=root, selected=root.children[0], metric='footprint', mode='planet', filter='';
+    let planetParticles=[], projected=[], planetOrder=[], planetTiles=[], planetGeometry=null, yaw=.72, pitch=-.18, dragging=null, velocity=0, targetYaw=null, planetFramePending=false;
+    const surfaceCanvas=document.createElement('canvas');
+    let zoom=1,targetZoom=1,pendingDive=null,pinchDistance=null;
+    const pointers=new Map(), orientationByRoot=new Map();
+    const reducedMotion=window.matchMedia('(prefers-reduced-motion: reduce)');
+    const planetColors={surging:'#ed987a',growing:'#efbf7b',stable:'#8de7b1',shrinking:'#8ebfcf',unknown:'#9caf9f'};
     const $ = id => document.getElementById(id);
     const gib = value => `${value} GiB`;
     const delta = n => n.previous===null || n.coverage!=='complete' ? null : n.size-n.previous;
@@ -199,6 +224,7 @@
       const left=items.slice(0,at), right=items.slice(at), share=left.reduce((sum,n)=>sum+weight(n),0)/total;
       return w>=h ? [...split(left,x,y,w*share,h),...split(right,x+w*share,y,w*(1-share),h)] : [...split(left,x,y,w,h*share),...split(right,x,y+h*share,w,h*(1-share))];
     }
+    function tileAt(u,v){return planetTiles.find(t=>u>=t.x&&u<t.x+t.w&&v>=t.y&&v<t.y+t.h)||planetTiles.at(-1);}
     function renderMap(items) {
       const visible=items.filter(n=>weight(n)>0);
       $('map').innerHTML='';
@@ -216,18 +242,157 @@
         $('map').append(tile);
       });
     }
+    function rebuildPlanet(items) {
+      const visible=items.filter(n=>weight(n)>0), total=visible.reduce((sum,n)=>sum+weight(n),0), count=2400;
+      planetOrder=visible;planetTiles=total?split(visible,0,0,1,1):[];
+      if(!total) { planetParticles=[]; $('planetCount').textContent='NO COMPARABLE SURFACE'; return; }
+      planetParticles=Array.from({length:count},(_,i)=>{
+        const y=1-2*(i+.5)/count, radius=Math.sqrt(1-y*y), angle=i*Math.PI*(3-Math.sqrt(5));
+        const x=Math.cos(angle)*radius, z=Math.sin(angle)*radius;
+        const node=tileAt((Math.atan2(z,x)+Math.PI)/(Math.PI*2),(1-y)/2).node;
+        return {x,y,z,node,color:planetColors[change(node)]};
+      });
+      $('planetCount').textContent=`${visible.length} REGIONS · AREA = ${metric==='footprint'?'GiB':'GROWTH'}`;
+    }
+    function drawPlanet() {
+      const canvas=$('planet'), ctx=canvas.getContext('2d');
+      if(!ctx || mode!=='planet') return;
+      const w=canvas.clientWidth,h=canvas.clientHeight,dpr=Math.min(window.devicePixelRatio||1,2);
+      if(canvas.width!==Math.round(w*dpr)||canvas.height!==Math.round(h*dpr)){canvas.width=Math.round(w*dpr);canvas.height=Math.round(h*dpr);}
+      ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);
+      const baseRadius=Math.min(w*.39,h*(w<420?.37:.42)),r=baseRadius*zoom;
+      const cosY=Math.cos(yaw),sinY=Math.sin(yaw),cosX=Math.cos(pitch),sinX=Math.sin(pitch);
+      let fx=0,fy=0,fc=0;
+      for(const p of planetParticles){if(p.node.id!==selected.id)continue;const x=p.x*cosY-p.z*sinY,z=p.x*sinY+p.z*cosY;const y=p.y*cosX-z*sinX,depth=p.y*sinX+z*cosX;if(depth>0){fx+=x;fy+=y;fc++;}}
+      const cx=w/2-(zoom-1)*(fc?fx/fc:0)*baseRadius,cy=h/2-(zoom-1)*(fc?fy/fc:0)*baseRadius;
+      planetGeometry={cx,cy,r};
+      const halo=ctx.createRadialGradient(cx,cy,r*.6,cx,cy,r*1.42);
+      halo.addColorStop(0,'#66d99a24');halo.addColorStop(.5,'#3ac78018');halo.addColorStop(1,'#3ac78000');
+      ctx.fillStyle=halo;ctx.fillRect(cx-r*1.45,cy-r*1.45,r*2.9,r*2.9);
+      // The same treemap coordinates are wrapped onto the sphere. Longitude and sin(latitude)
+      // have a constant area Jacobian, so each tile has the same share in both views.
+      const dimension=Math.min(440,Math.max(260,Math.round(r*1.8)));
+      if(surfaceCanvas.width!==dimension){surfaceCanvas.width=dimension;surfaceCanvas.height=dimension;}
+      const surfaceContext=surfaceCanvas.getContext('2d'),pixels=surfaceContext.createImageData(dimension,dimension);
+      const colors=planetOrder.map(n=>{const hex=planetColors[change(n)];return [1,3,5].map(i=>parseInt(hex.slice(i,i+2),16));});
+      for(let py=0;py<dimension;py++){
+        const Y=(py+.5)/dimension*2-1;
+        for(let px=0;px<dimension;px++){
+          const X=(px+.5)/dimension*2-1,d2=X*X+Y*Y;
+          if(d2>=1)continue;
+          const Z=Math.sqrt(1-d2),originalY=Y*cosX+Z*sinX,z1=-Y*sinX+Z*cosX;
+          const originalX=X*cosY+z1*sinY,originalZ=-X*sinY+z1*cosY;
+          const u=(Math.atan2(originalZ,originalX)+Math.PI)/(Math.PI*2),v=(1-originalY)/2;
+          const tile=tileAt(u,v),n=tile.node,region=planetOrder.indexOf(n),color=colors[region],active=n.id===selected.id;
+          const shade=(.42+.40*Z+.13*Math.max(0,-X*.7-Y*.7))*(active?1.12:.92);
+          const hatch=n.coverage!=='complete'&&((px+py*2)%18<2)?.67:1;
+          const edge=Math.min(u-tile.x,tile.x+tile.w-u,v-tile.y,tile.y+tile.h-v)<.003?.69:1;
+          const offset=(py*dimension+px)*4;
+          for(let channel=0;channel<3;channel++)pixels.data[offset+channel]=Math.min(255,color[channel]*shade*hatch*edge+10);
+          pixels.data[offset+3]=255;
+        }
+      }
+      surfaceContext.putImageData(pixels,0,0);
+      ctx.drawImage(surfaceCanvas,cx-r,cy-r,r*2,r*2);
+      ctx.save();ctx.beginPath();ctx.arc(cx,cy,r-.5,0,Math.PI*2);ctx.clip();
+      projected=[];
+      const labelSums=new Map();
+      for(const point of planetParticles){
+        const x=point.x*cosY-point.z*sinY, z=point.x*sinY+point.z*cosY;
+        const y=point.y*cosX-z*sinX, depth=point.y*sinX+z*cosX;
+        if(depth<=0)continue;
+        const px=cx+x*r,py=cy+y*r;
+        projected.push({...point,px,py,depth});
+        const sum=labelSums.get(point.node.id)||{node:point.node,x:0,y:0,count:0};
+        sum.x+=px;sum.y+=py;sum.count++;labelSums.set(point.node.id,sum);
+      }
+      projected.sort((a,b)=>a.depth-b.depth);
+      for(let i=0;i<projected.length;i+=17){
+        const point=projected[i];ctx.fillStyle='#ecffdc58';ctx.beginPath();ctx.arc(point.px,point.py,.65,0,Math.PI*2);ctx.fill();
+      }
+      function line(points,color,width){
+        ctx.beginPath();let drawing=false;
+        for(const p of points){
+          const x=p.x*cosY-p.z*sinY,z=p.x*sinY+p.z*cosY;
+          const y=p.y*cosX-z*sinX,depth=p.y*sinX+z*cosX;
+          if(depth<=0){drawing=false;continue;}
+          const px=cx+x*r,py=cy+y*r;
+          if(!drawing){ctx.moveTo(px,py);drawing=true;}else ctx.lineTo(px,py);
+        }
+        ctx.strokeStyle=color;ctx.lineWidth=width;ctx.stroke();
+      }
+      for(const y of [-.65,-.3,0,.3,.65]){
+        const radius=Math.sqrt(1-y*y);
+        line(Array.from({length:160},(_,i)=>{const a=-Math.PI+i*Math.PI*2/159;return {x:Math.cos(a)*radius,y,z:Math.sin(a)*radius};}),'#d3f7d522',.8);
+      }
+      for(let i=0;i<12;i++){
+        const a=-Math.PI+i*Math.PI/6;
+        line(Array.from({length:100},(_,j)=>{const y=-.98+j*1.96/99,rad=Math.sqrt(1-y*y);return {x:Math.cos(a)*rad,y,z:Math.sin(a)*rad};}),'#d3f7d51a',.7);
+      }
+      ctx.restore();
+      ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);ctx.strokeStyle='#abf7ba71';ctx.lineWidth=1.3;ctx.shadowColor='#84f6ab';ctx.shadowBlur=20;ctx.stroke();ctx.shadowBlur=0;
+      const labels=[...labelSums.values()].filter(s=>s.count>48&&(w>=420||s.node.id===selected.id)).sort((a,b)=>b.count-a.count).slice(0,w<420?1:4);
+      ctx.font=`${w<420?10:12}px 'JetBrains Mono',monospace`;
+      for(const item of labels){
+        const text=w<420?`${item.node.name} · ${gib(item.node.size)}`:`${item.node.name} · ${metric==='growth'?`+${weight(item.node)} GiB`:gib(item.node.size)} · ${Math.round(weight(item.node)/planetOrder.reduce((sum,n)=>sum+weight(n),0)*100)}%`, px=item.x/item.count,py=item.y/item.count;
+        const tw=ctx.measureText(text).width;
+        ctx.fillStyle='#071910d9';ctx.fillRect(px-tw/2-6,py-10,tw+12,20);
+        ctx.fillStyle=item.node.id===selected.id?'#dffff0':'#c1ddca';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(text,px,py);
+      }
+      if(!planetParticles.length){ctx.fillStyle='#c5d4c8';ctx.font='12px JetBrains Mono,monospace';ctx.textAlign='center';ctx.fillText('No comparable growth at this level',cx,cy);}
+      const marker=$('wholeSurfaceBar').querySelector('.wholeSurfaceMarker');
+      if(marker){const longitude=(Math.atan2(Math.cos(yaw),Math.sin(yaw))+Math.PI)/(2*Math.PI);marker.style.left=`${longitude*100}%`;}
+    }
+    function orbitToward(n){
+      const points=planetParticles.filter(p=>p.node.id===n.id);
+      if(!points.length)return;
+      const x=points.reduce((sum,p)=>sum+p.x,0)/points.length,z=points.reduce((sum,p)=>sum+p.z,0)/points.length;
+      const desired=Math.atan2(x,z);targetYaw=yaw+Math.atan2(Math.sin(desired-yaw),Math.cos(desired-yaw));
+    }
+    function requestPlanetFrame(){if(mode==='planet'&&!planetFramePending){planetFramePending=true;requestAnimationFrame(planetFrame);}}
+    function planetFrame(){
+      planetFramePending=false;
+      if(mode!=='planet'||document.hidden)return;
+      let animating=false;
+      if(targetYaw!==null&&!dragging){
+        if(reducedMotion.matches){yaw=targetYaw;targetYaw=null;}
+        else {yaw+=(targetYaw-yaw)*.09;if(Math.abs(targetYaw-yaw)<.003){yaw=targetYaw;targetYaw=null;}else animating=true;}
+      }else if(!dragging&&Math.abs(velocity)>.0003&&!reducedMotion.matches){yaw+=velocity;velocity*=.94;animating=true;}else velocity=0;
+      if(Math.abs(targetZoom-zoom)>.003){if(reducedMotion.matches)zoom=targetZoom;else{zoom+=(targetZoom-zoom)*.13;animating=true;}}
+      if(pendingDive&&zoom>2.03){const next=pendingDive;pendingDive=null;go(next,'in');}
+      drawPlanet();
+      if(animating)requestPlanetFrame();
+    }
+    function pickPlanet(x,y){
+      if(!planetGeometry||!planetTiles.length)return null;
+      const X=(x-planetGeometry.cx)/planetGeometry.r,Y=(y-planetGeometry.cy)/planetGeometry.r,d2=X*X+Y*Y;
+      if(d2>1)return null;
+      const Z=Math.sqrt(1-d2),cosX=Math.cos(pitch),sinX=Math.sin(pitch),cosY=Math.cos(yaw),sinY=Math.sin(yaw);
+      const originalY=Y*cosX+Z*sinX,z1=-Y*sinX+Z*cosX;
+      const originalX=X*cosY+z1*sinY,originalZ=-X*sinY+z1*cosY;
+      return tileAt((Math.atan2(originalZ,originalX)+Math.PI)/(Math.PI*2),(1-originalY)/2)?.node||null;
+    }
+    function renderWholeSurface(items){
+      const bar=$('wholeSurfaceBar'),key=$('regionKey');bar.innerHTML='';key.innerHTML='';
+      const visible=items.filter(n=>weight(n)>0),total=visible.reduce((sum,n)=>sum+weight(n),0);
+      $('wholeSurfaceTitle').textContent=metric==='growth'?'COMPARABLE INCREASE · NEAR AND FAR SIDE':'WHOLE SCANNED SURFACE · NEAR AND FAR SIDE';
+      visible.forEach(n=>{const share=Math.round(weight(n)/total*100),button=document.createElement('button');button.type='button';button.style.flex=`${weight(n)} 1 0`;button.style.background=planetColors[change(n)];button.setAttribute('aria-label',`${n.name}, ${share}% of displayed area, ${n.coverage==='complete'?'':'at least '}${gib(n.size)}. Orbit to region.`);button.setAttribute('aria-pressed',n.id===selected.id?'true':'false');button.addEventListener('click',()=>select(n,true));bar.append(button);
+        const legend=document.createElement('button');legend.type='button';legend.setAttribute('aria-pressed',n.id===selected.id?'true':'false');legend.innerHTML=`<i style="background:${planetColors[change(n)]}"></i>${escapeHtml(n.name)} ${n.coverage==='complete'?'':'≥ '}${metric==='growth'?`+${weight(n)} GiB`:gib(n.size)} · ${share}%`;legend.addEventListener('click',()=>select(n,true));key.append(legend);
+      });
+      const marker=document.createElement('span');marker.className='wholeSurfaceMarker';marker.setAttribute('aria-hidden','true');bar.append(marker);
+    }
     function renderRows(items) {
       $('rows').innerHTML='';
       if(!items.length){$('rows').innerHTML='<div class="trailEmpty">No folders match this filter.</div>';return;}
       items.forEach((n,i)=>{
         const row=document.createElement('button');row.type='button';row.className='trailRow';row.setAttribute('aria-selected',selected.id===n.id?'true':'false');
         const d=delta(n);row.innerHTML=`<span class="trailName"><span class="rank mono">${String(i+1).padStart(2,'0')}</span><span class="miniBar ${change(n)}"></span><strong>${escapeHtml(n.name)}</strong></span><span class="trailValue">${n.coverage==='complete'?'':'≥ '}${gib(n.size)}</span><span class="trailValue ${d===null?'dim':d>0?'up':d<0?'down':''}">${changeText(n)}</span>`;
-        row.addEventListener('click',()=>select(n));row.addEventListener('dblclick',()=>open(n));row.addEventListener('keydown',e=>{if(e.key==='Enter'&&e.shiftKey){e.preventDefault();open(n);}});$('rows').append(row);
+        row.addEventListener('click',()=>select(n,true));row.addEventListener('dblclick',()=>open(n));row.addEventListener('keydown',e=>{if(e.key==='Enter'&&e.shiftKey){e.preventDefault();open(n);}});$('rows').append(row);
       });
     }
     function renderInspector() {
       const n=selected, d=delta(n), isCurrent=n.id===current.id;
-      $('inspector').innerHTML=`<div class="eyebrow">${isCurrent?'Current location':'Selection'} · ${n.coverage==='complete'?'Measured':'Partial'}</div><h3 class="inspectName">${escapeHtml(n.name)}</h3><div class="inspectPath mono">${escapeHtml(path(n))}</div><div class="bigMeasure"><strong>${n.coverage==='complete'?'':'≥ '}${n.size}</strong><span>GiB allocated in this example</span></div><div class="inspectRule"></div><dl class="facts"><dt>Share of example scan</dt><dd>${Math.round(n.size/root.size*100)}%</dd><dt>Compared with prior scan</dt><dd>${d===null?'Not comparable':changeText(n)}</dd><dt>Coverage</dt><dd>${n.coverage==='complete'?'Complete for this folder':'Incomplete · lower bound'}</dd><dt>Contains</dt><dd>${n.children.length?`${n.children.length} groups shown`:'Further detail not in concept'}</dd></dl><p class="inspectNote"><strong>Worth knowing.</strong> ${escapeHtml(n.note||'The footprint is observed in this example. Size alone does not show whether content is safe to remove.')}</p><button type="button" class="openButton" id="openSelected" ${n.children.length&&!isCurrent?'':'disabled'}>${n.children.length&&!isCurrent?'Open folder ↗':'No deeper view'}</button>`;
+      $('inspector').innerHTML=`<div class="eyebrow">${isCurrent?'Current location':'Selection'} · ${n.kind==='file'?'File':n.coverage==='complete'?'Measured':'Partial'}</div><h3 class="inspectName">${escapeHtml(n.name)}</h3><div class="inspectPath mono">${escapeHtml(path(n))}</div><div class="bigMeasure"><strong>${n.coverage==='complete'?'':'≥ '}${n.size}</strong><span>GiB allocated in this example</span></div><div class="inspectRule"></div><dl class="facts"><dt>Share of example scan</dt><dd>${Math.round(n.size/root.size*100)}%</dd><dt>Compared with prior scan</dt><dd>${d===null?'Not comparable':changeText(n)}</dd><dt>Coverage</dt><dd>${n.coverage==='complete'?'Complete for this item':'Incomplete · lower bound'}</dd><dt>Contains</dt><dd>${n.children.length?`${n.children.length} groups shown`:n.kind==='file'?'One invented file':'Further detail not in concept'}</dd></dl><p class="inspectNote"><strong>Worth knowing.</strong> ${escapeHtml(n.note||'The footprint is observed in this example. Size alone does not show whether content is safe to remove.')}</p><button type="button" class="openButton" id="openSelected" ${n.children.length&&!isCurrent?'':'disabled'}>${n.children.length&&!isCurrent?(mode==='planet'?'Zoom into region ↗':'Open folder ↗'):'No deeper view'}</button>`;
       $('openSelected').addEventListener('click',()=>open(n));
     }
     function renderCrumbs() {
@@ -235,22 +400,44 @@
       $('breadcrumbs').innerHTML='';chain.forEach((item,i)=>{if(i){const slash=document.createElement('span');slash.className='slash';slash.textContent='/';$('breadcrumbs').append(slash);}const b=document.createElement('button');b.type='button';b.textContent=item.name;b.setAttribute('aria-current',item.id===current.id?'location':'false');b.addEventListener('click',()=>go(item));$('breadcrumbs').append(b);});
     }
     function render() {
-      const items=sorted();$('footprint').setAttribute('aria-pressed',metric==='footprint');$('growth').setAttribute('aria-pressed',metric==='growth');
+      const items=children();$('footprint').setAttribute('aria-pressed',metric==='footprint');$('growth').setAttribute('aria-pressed',metric==='growth');$('planetMode').setAttribute('aria-pressed',mode==='planet');$('mapMode').setAttribute('aria-pressed',mode==='map');
+      $('planetShell').hidden=mode!=='planet';$('wholeSurface').hidden=mode!=='planet';$('map').hidden=mode!=='map';
+      $('planetScope').textContent=`SURVEY GLOBE · ${current.name.toUpperCase()}`;
       $('mapHeading').textContent=metric==='footprint'?'Allocated footprint':'Growth since prior scan';
-      $('mapCaption').textContent=metric==='footprint'?'Area = local allocation':'Area = comparable increase only';
+      $('mapCaption').textContent=mode==='planet'?(metric==='footprint'?'One globe = this measured scope':'Positive comparable growth only'):metric==='footprint'?'Area = local allocation':'Area = comparable increase only';
+      $('mapHint').textContent=mode==='planet'?'Drag to orbit · scroll to dive · select for detail':'Click to inspect · double click to open';
       $('mapCount').textContent=`${items.length} GROUPS`;
-      renderCrumbs();renderMap(items);renderRows(items);renderInspector();
+      renderCrumbs();renderMap(items);rebuildPlanet(items);renderWholeSurface(items);renderRows(sorted());renderInspector();requestPlanetFrame();
     }
-    function select(n){selected=n;render();}
-    function open(n){if(n.children.length){go(n);}}
-    function go(n){current=n;selected=n.children[0]||n;filter='';$('search').value='';location.hash=`#${n.id}`;render();$('breadcrumbs').querySelector('button:last-child')?.focus();}
+    function select(n,orbit=false){selected=n;render();if(orbit&&mode==='planet')orbitToward(n);}
+    function open(n){if(!n.children.length)return;if(mode==='planet'&&!reducedMotion.matches){selected=n;render();orbitToward(n);pendingDive=n;targetZoom=2.2;}else go(n,'in');}
+    function go(n,direction='direct'){
+      orientationByRoot.set(current.id,{yaw,pitch});
+      const saved=orientationByRoot.get(n.id);if(saved){yaw=saved.yaw;pitch=saved.pitch;}
+      current=n;selected=n.children[0]||n;filter='';$('search').value='';targetYaw=null;pendingDive=null;
+      zoom=direction==='in'?.66:direction==='out'?1.65:1;targetZoom=1;
+      location.hash=`#${n.id}`;render();if(direction==='in'&&mode==='planet')orbitToward(selected);$('breadcrumbs').querySelector('button:last-child')?.focus();
+    }
+    function up(){if(!parent.has(current.id))return;const child=current;go(byId.get(parent.get(current.id)),'out');selected=child;render();}
     $('footprint').addEventListener('click',()=>{metric='footprint';render();});
     $('growth').addEventListener('click',()=>{metric='growth';render();});
+    $('planetMode').addEventListener('click',()=>{mode='planet';render();});
+    $('mapMode').addEventListener('click',()=>{mode='map';render();});
+    $('planet').addEventListener('wheel',e=>{e.preventDefault();if(e.deltaY<0){const rect=$('planet').getBoundingClientRect(),point=pickPlanet(e.clientX-rect.left,e.clientY-rect.top);if(point&&point.id!==selected.id)select(point);targetZoom=Math.min(2.2,targetZoom+.32);if(targetZoom>2.02&&selected.children.length)pendingDive=selected;}else if(pendingDive){pendingDive=null;targetZoom=1;}else if(zoom>1.05||targetZoom>1){targetZoom=Math.max(1,targetZoom-.38);}else up();requestPlanetFrame();},{passive:false});
+    $('planet').addEventListener('pointerdown',e=>{pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});$('planet').setPointerCapture(e.pointerId);targetYaw=null;velocity=0;if(pointers.size===1)dragging={x:e.clientX,y:e.clientY,moved:false};else{dragging=null;const a=[...pointers.values()];pinchDistance=Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y);}});
+    $('planet').addEventListener('pointermove',e=>{if(!pointers.has(e.pointerId))return;pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});if(pointers.size>=2){const a=[...pointers.values()],distance=Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y);if(pinchDistance!==null){targetZoom=Math.max(1,Math.min(2.2,targetZoom+(distance-pinchDistance)*.012));if(targetZoom>2.02&&selected.children.length)pendingDive=selected;}pinchDistance=distance;requestPlanetFrame();return;}if(!dragging)return;const dx=e.clientX-dragging.x,dy=e.clientY-dragging.y;if(Math.abs(dx)+Math.abs(dy)>2)dragging.moved=true;yaw+=dx*.008;pitch=Math.max(-.8,Math.min(.8,pitch+dy*.006));velocity=dx*.0008;dragging.x=e.clientX;dragging.y=e.clientY;requestPlanetFrame();});
+    $('planet').addEventListener('pointerup',e=>{const moved=dragging?.moved;const wasSingle=pointers.size===1;pointers.delete(e.pointerId);dragging=null;pinchDistance=null;if(wasSingle&&!moved){const rect=$('planet').getBoundingClientRect(),point=pickPlanet(e.clientX-rect.left,e.clientY-rect.top);if(point)select(point);}if(pointers.size===1){const point=[...pointers.values()][0];dragging={...point,moved:true};}requestPlanetFrame();});
+    $('planet').addEventListener('pointercancel',e=>{pointers.delete(e.pointerId);dragging=null;pinchDistance=null;});
+    $('planet').addEventListener('dblclick',()=>open(selected));
+    $('planet').addEventListener('keydown',e=>{if(e.key==='ArrowLeft'||e.key==='ArrowRight'){e.preventDefault();yaw+=e.key==='ArrowLeft'?.18:-.18;velocity=0;requestPlanetFrame();}else if(e.key==='ArrowUp'||e.key==='ArrowDown'){e.preventDefault();pitch=Math.max(-.8,Math.min(.8,pitch+(e.key==='ArrowUp'?.14:-.14)));requestPlanetFrame();}else if(e.key==='Enter'){e.preventDefault();if(e.shiftKey)open(selected);else{const rect=$('planet').getBoundingClientRect(),point=pickPlanet(rect.width/2,rect.height/2);if(point)select(point);}}else if(e.key==='Escape'&&parent.has(current.id)){e.preventDefault();up();}});
     $('search').addEventListener('input',e=>{filter=e.target.value.trim().toLowerCase();const visible=children();if(!visible.includes(selected)) selected=visible[0]||current;render();});
     window.addEventListener('hashchange',()=>{const id=location.hash.slice(1);if(byId.has(id)&&current.id!==id){current=byId.get(id);selected=current.children[0]||current;filter='';$('search').value='';render();}});
-    document.addEventListener('keydown',e=>{if(e.key==='Backspace'&&document.activeElement!==$('search')&&parent.has(current.id)){e.preventDefault();const child=current;current=byId.get(parent.get(current.id));selected=child;filter='';$('search').value='';location.hash=`#${current.id}`;render();$('breadcrumbs').querySelector('button:last-child')?.focus();}});
+    document.addEventListener('keydown',e=>{if(e.key==='Backspace'&&document.activeElement!==$('search')&&parent.has(current.id)){e.preventDefault();up();}});
     if(byId.has(location.hash.slice(1))) { current=byId.get(location.hash.slice(1));selected=current.children[0]||current; }
     render();
+    if(mode==='planet'){orbitToward(selected);if(targetYaw!==null){yaw=targetYaw;targetYaw=null;}requestPlanetFrame();}
+    window.addEventListener('resize',requestPlanetFrame);
+    document.addEventListener('visibilitychange',()=>{if(!document.hidden)requestPlanetFrame();});
   </script>
 </body>
 </html>

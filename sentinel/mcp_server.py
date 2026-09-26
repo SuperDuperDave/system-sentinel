@@ -60,6 +60,7 @@ INSTRUCTIONS = (
     "For hardware errors, take 'whea' across both WHEA logs, then 'storms' for System report traffic over time; "
     "use 'whea_window' around a moment and 'whea_record' for one exact report. "
     "For a program that crashed or hung while Windows kept running, take 'faults'. "
+    "When the person asks where disk space went, take 'space': one bounded walk of their home folder. Use its child scope_id for a fresh folder walk and space_page with pagination.next_page_id for the remaining folders from the same walk. Unless coverage.complete, totals are lower bounds; no figure is reclaimable space. "
     "For a broad or unclear question, or when a directed reading does not explain the problem, take 'signals' and match depth to what the person asked. "
     "A quick check can report its leads; a deeper investigation takes cited readings. State which inputs did not answer (gap:inputs and method.readings) "
     "and that Signals does not classify hardware error reports. Join method.class_content_inputs to method.readings before calling an individual class quiet. "

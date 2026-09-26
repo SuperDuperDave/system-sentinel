@@ -11,6 +11,7 @@ import { Errors } from './views/Errors';
 import { Crashes } from './views/Crashes';
 import { Machine } from './views/Machine';
 import { Performance } from './views/Performance';
+import { Space } from './views/Space';
 import { Diagnostics } from './views/Diagnostics';
 import { Signals } from './views/Signals';
 import { Stack } from './views/Stack';
@@ -23,6 +24,7 @@ const VIEW_COMPONENTS: { [K in ViewId]: () => ReactElement } = {
   crashes: Crashes,
   machine: Machine,
   performance: Performance,
+  space: Space,
   diagnostics: Diagnostics,
   signals: Signals,
   stack: Stack,
@@ -113,12 +115,14 @@ function Shell() {
     const formerView = previousNavigation.current.split('\u0000')[0];
     previousNavigation.current = current;
     closeMobileNavigation();
-    const { viewScroll, crashesView: { stopCount, faultCount, focus, changesBefore }, recordOrigin, recordReturnKey } = useApp.getState();
+    const { viewScroll, crashesView: { stopCount, faultCount, focus, changesBefore }, recordOrigin, recordReturnKey, spaceView } = useApp.getState();
     // Restore only against evidence available at first paint. The requested Crashes section
     // determines which earlier panels must also be held for the saved position to be meaningful.
     const crashesReady = canRestoreCrashView(stopCount, faultCount, focus, changesBefore);
     const returning = formerView !== view && viewScroll[view] !== undefined &&
-      (view === 'crashes' ? crashesReady : view === 'signals' && hasHeldReading('signals'));
+      (view === 'crashes' ? crashesReady : view === 'signals' ? hasHeldReading('signals')
+        // Space draws its held walk from the store at first paint, so its saved position is meaningful.
+        : view === 'space' && spaceView.levels.some((level) => level.reading !== null));
     window.scrollTo(0, returning ? viewScroll[view]! : 0);
     const main = document.querySelector('main');
     if (returning && formerView === 'record' && recordOrigin === view && recordReturnKey !== null) {

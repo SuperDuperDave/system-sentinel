@@ -113,7 +113,8 @@ class Spec:
     heavy: bool = False
     """Takes seconds: the dashboard loads it on demand."""
     requires_selection: bool = False
-    """Needs an exact user or agent reference; bulk capture and bench cannot choose one."""
+    """Taken only when asked for by name: it needs an exact user or agent reference, or (``space``) its
+    cost must never be a side effect. Bulk capture and bench leave it out."""
 
     def to_dict(self) -> dict[str, Any]:
         return {

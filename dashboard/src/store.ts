@@ -1,6 +1,7 @@
 import { create } from 'zustand';
+import type { Reading } from './api';
 
-export type ViewId = 'record' | 'errors' | 'crashes' | 'machine' | 'performance' | 'diagnostics' | 'signals' | 'stack' | 'agents';
+export type ViewId = 'record' | 'errors' | 'crashes' | 'machine' | 'performance' | 'space' | 'diagnostics' | 'signals' | 'stack' | 'agents';
 
 /** The views, in the order the nav shows them. The studio page copies these names; change them there too. */
 export type ViewGroup = 'Evidence' | 'Interpret' | 'Carry';
@@ -31,12 +32,49 @@ const INITIAL_CRASHES_VIEW: CrashesViewState = { stopCount: 5, faultCount: 30, f
   stopId: null, faultId: null, dumpId: null, reliabilityDay: null,
   changesStopId: null, changesBefore: null, focus: null };
 
+export type SpaceMode = 'tiles' | 'planet';
+
+/**
+ * One level of the Space walk path. Each level is its own walk of its own scope: a held level is
+ * the answer that walk gave, never a slice of its parent's. The scope handle is opaque and
+ * short-lived; it stays in this tab and never enters the address.
+ */
+export interface SpaceLevel {
+  /** '' is Home; otherwise the handle a parent walk issued on this folder's row. */
+  scopeId: string;
+  /** The row this level was entered from, as the parent walk named it. Null for Home. */
+  name: string | null;
+  label: string | null;
+  /** What the parent walk's row said, kept only to set beside this walk, never to subtract. */
+  entered: { bytes: number | null; lowerBound: boolean; at: string } | null;
+  /** The last walk of this scope that observed the folder. */
+  reading: Reading | null;
+  /** Continuation pages from this exact walk, kept with the level while descending. */
+  pages: Reading[];
+  pageAsking: boolean;
+  pageProblem: string | null;
+  /** The latest walk, when it did not observe; the observed one above stays visible. */
+  failure: Reading | null;
+  /** The latest request, when it never answered. */
+  problem: string | null;
+  asking: boolean;
+  request: number;
+  /** Returned to from a deeper level: the visible walk was taken earlier. */
+  restored: boolean;
+  selected: string | null;
+}
+
+export interface SpaceViewState { levels: SpaceLevel[]; mode: SpaceMode }
+
+const INITIAL_SPACE_VIEW: SpaceViewState = { levels: [], mode: 'tiles' };
+
 export const VIEWS: { id: ViewId; label: string; group: ViewGroup }[] = [
   { id: 'record', label: 'Record', group: 'Evidence' },
   { id: 'errors', label: 'Hardware errors', group: 'Evidence' },
   { id: 'crashes', label: 'Crashes', group: 'Evidence' },
   { id: 'machine', label: 'Machine', group: 'Evidence' },
   { id: 'performance', label: 'Performance', group: 'Evidence' },
+  { id: 'space', label: 'Space', group: 'Evidence' },
   { id: 'diagnostics', label: 'Diagnostics', group: 'Interpret' },
   { id: 'signals', label: 'Signals', group: 'Interpret' },
   { id: 'stack', label: 'Stack', group: 'Carry' },
@@ -103,6 +141,9 @@ interface AppState {
   setCrashesView: (change: Partial<CrashesViewState>) => void;
   signalId: string | null;
   setSignalId: (id: string | null) => void;
+  /** The Space walk path, selection and mode: one navigator for both drawings, held in this tab. */
+  spaceView: SpaceViewState;
+  setSpaceView: (change: (current: SpaceViewState) => SpaceViewState) => void;
   clearViewContext: () => void;
   /** Restore a browser history entry without writing another entry. */
   restoreAddress: () => void;
@@ -142,6 +183,8 @@ export const useApp = create<AppState>((set, get) => ({
   setCrashesView: (change) => set((state) => ({ crashesView: { ...state.crashesView, ...change } })),
   signalId: null,
   setSignalId: (signalId) => set({ signalId }),
-  clearViewContext: () => set({ viewScroll: {}, crashesView: { ...INITIAL_CRASHES_VIEW }, signalId: null, recordOrigin: null, recordReturnKey: null }),
+  spaceView: INITIAL_SPACE_VIEW,
+  setSpaceView: (change) => set((state) => ({ spaceView: change(state.spaceView) })),
+  clearViewContext: () => set({ viewScroll: {}, crashesView: { ...INITIAL_CRASHES_VIEW }, signalId: null, recordOrigin: null, recordReturnKey: null, spaceView: INITIAL_SPACE_VIEW }),
   restoreAddress: () => set((state) => ({ ...navigationFromAddress(), viewScroll: { ...state.viewScroll, [state.view]: window.scrollY } })),
 }));
