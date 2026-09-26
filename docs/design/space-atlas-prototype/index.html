@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Space Atlas — System Sentinel concept</title>
+  <style>
+    @font-face { font-family:'DM Sans'; src:url('../../../dashboard/public/fonts/dm-sans-latin.woff2') format('woff2'); font-weight:400 600; font-display:swap; }
+    @font-face { font-family:'JetBrains Mono'; src:url('../../../dashboard/public/fonts/jetbrains-mono-latin.woff2') format('woff2'); font-weight:400 500; font-display:swap; }
+    :root { --bg:#08130f; --well:#0d201a; --well2:#112820; --ink:#edfaf1; --body:#bad1c4; --muted:#8da99a; --line:#294438; --mint:#9ef8bd; --mint2:#55c48b; --amber:#efbc73; --coral:#ed947a; --blue:#94c6cf; --gap:#64766b; font-family:'DM Sans',system-ui,sans-serif; color:var(--ink); background:var(--bg); }
+    * { box-sizing:border-box; }
+    html { scroll-behavior:smooth; }
+    body { margin:0; min-width:320px; background:radial-gradient(circle at 60% -20%,#1d4a34 0,transparent 44%),var(--bg); }
+    button,input { font:inherit; color:inherit; }
+    button { cursor:pointer; }
+    button:focus-visible,input:focus-visible { outline:2px solid var(--mint); outline-offset:3px; }
+    a { color:var(--mint); }
+    .mono,.eyebrow,.metric,.keyboard,.breadcrumbs,.legend,.pill,.tileSize { font-family:'JetBrains Mono',monospace; }
+    .eyebrow { color:var(--muted); letter-spacing:.14em; text-transform:uppercase; font-size:11px; font-weight:500; }
+    .frame { max-width:1650px; margin:auto; padding:0 clamp(16px,3.2vw,52px) 65px; }
+    .mast { height:78px; display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid var(--line); gap:16px; }
+    .brand { display:flex; gap:12px; align-items:center; white-space:nowrap; }
+    .mark { width:32px; height:32px; border-radius:9px; display:grid; place-items:center; color:#082016; background:radial-gradient(circle at 30% 25%,#d5ffe2,var(--mint2)); box-shadow:0 0 22px #64e49d5c; font-family:'JetBrains Mono',monospace; font-size:21px; font-weight:600; }
+    .brand strong { font-size:15px; letter-spacing:-.025em; }
+    .brand span:last-child { color:var(--muted); font-size:12px; margin-left:9px; }
+    .mastRight { display:flex; align-items:center; gap:18px; color:var(--muted); font-size:12px; }
+    .liveDot { width:6px; height:6px; display:inline-block; background:var(--mint); border-radius:50%; margin-right:7px; box-shadow:0 0 10px var(--mint); }
+    .concept { border:1px solid #648276; padding:6px 9px; border-radius:4px; color:#c3d6cc; }
+    .intro { display:flex; justify-content:space-between; align-items:end; gap:28px; margin:53px 0 31px; }
+    h1,h2,h3,p { margin-top:0; }
+    h1 { font-size:clamp(40px,5.4vw,76px); line-height:1.02; letter-spacing:-.075em; margin:12px 0 15px; font-weight:500; }
+    h1 em { color:var(--mint); font-style:normal; }
+    .lede { color:var(--body); font-size:16px; max-width:650px; margin:0; }
+    .scanStamp { text-align:right; padding-bottom:7px; flex:none; }
+    .scanStamp strong { display:block; font-family:'JetBrains Mono',monospace; font-weight:500; font-size:13px; margin-top:7px; }
+    .ledger { background:linear-gradient(125deg,#15372a,#10261e 65%,#132a20); border:1px solid #37684a; border-radius:14px; padding:22px 26px 20px; box-shadow:0 22px 60px #0005,inset 0 1px #b9ffca12; }
+    .ledgerTop { display:flex; align-items:start; justify-content:space-between; gap:20px; }
+    .ledgerTitle { font-size:13px; color:var(--body); }
+    .ledgerCapacity { display:flex; align-items:baseline; gap:7px; white-space:nowrap; }
+    .ledgerCapacity strong { font:500 31px/1 'JetBrains Mono',monospace; letter-spacing:-.06em; }
+    .ledgerCapacity span { color:var(--muted); font-size:13px; }
+    .capacity { display:flex; height:22px; overflow:hidden; border-radius:5px; background:#263c32; margin:22px 0 10px; box-shadow:inset 0 0 0 1px #bbffd220; }
+    .capacity > span { display:block; height:100%; transition:width .4s ease; }
+    .capacity .known { width:62.2%; background:linear-gradient(90deg,#44c48a,#baf8ae); }
+    .capacity .unattributed { width:16.2%; background:repeating-linear-gradient(135deg,#bb8563 0 4px,#8a674b 4px 8px); }
+    .capacity .free { width:21.6%; background:#324b3d; }
+    .ledgerLegend { display:flex; gap:clamp(13px,2.5vw,36px); flex-wrap:wrap; }
+    .ledgerLegend span { color:var(--body); font-size:12px; display:flex; gap:8px; align-items:center; }
+    .ledgerLegend b { color:var(--ink); font-weight:500; }
+    .swatch { width:9px; height:9px; border-radius:2px; background:var(--mint2); flex:none; }
+    .swatch.gap { background:var(--amber); }
+    .swatch.free { background:#4a6755; }
+    .ledgerNote { margin:14px 0 0; font-size:12px; color:#aac4b3; }
+    .ledgerTime { display:block; margin-top:8px; font-size:11px; color:#8eb7a0; }
+    .workspaceHead { display:flex; justify-content:space-between; gap:20px; align-items:end; margin:37px 0 16px; }
+    .workspaceHead h2 { font-size:27px; letter-spacing:-.04em; font-weight:500; margin:3px 0 0; }
+    .tools { display:flex; gap:9px; align-items:center; flex-wrap:wrap; }
+    .segment { display:flex; background:#0c1c16; border:1px solid var(--line); padding:3px; border-radius:8px; }
+    .segment button { background:none; border:0; border-radius:5px; color:var(--muted); padding:8px 12px; font-size:12px; }
+    .segment button[aria-pressed=true] { background:#234d38; color:var(--ink); box-shadow:inset 0 1px #9affc326; }
+    .search { background:#0c1c16; border:1px solid var(--line); border-radius:8px; padding:9px 11px; width:166px; font-size:12px; outline:none; }
+    .search::placeholder { color:var(--muted); }
+    .breadcrumbs { display:flex; gap:8px; align-items:center; overflow:auto; scrollbar-width:none; padding:10px 0 16px; font-size:12px; }
+    .breadcrumbs button { background:none; border:0; white-space:nowrap; color:var(--muted); }
+    .breadcrumbs button:last-child { color:var(--mint); }
+    .breadcrumbs .slash { color:#526b5e; }
+    .mainGrid { display:grid; grid-template-columns:minmax(0,1.65fr) minmax(300px,.65fr); gap:16px; align-items:stretch; }
+    .mapPanel,.inspector,.trail { background:linear-gradient(145deg,#10251c,#0b1b15 65%); border:1px solid var(--line); border-radius:12px; }
+    .mapPanel { min-width:0; padding:16px; }
+    .panelHeader { display:flex; justify-content:space-between; gap:12px; align-items:baseline; margin:0 0 12px; }
+    .panelHeader strong { font-size:13px; font-weight:600; }
+    .panelHeader span { color:var(--muted); font-size:11px; }
+    .map { position:relative; height:clamp(420px,40vw,635px); min-height:420px; overflow:hidden; border-radius:7px; background:#071711; border:1px solid #335144; }
+    .tile { position:absolute; display:flex; flex-direction:column; align-items:flex-start; justify-content:flex-start; overflow:hidden; border:2px solid #092017; border-radius:7px; padding:clamp(8px,1.1vw,16px); text-align:left; transition:filter .16s,transform .2s,box-shadow .16s; isolation:isolate; }
+    .tile:hover { filter:brightness(1.14); z-index:2; }
+    .tile.selected { z-index:3; box-shadow:inset 0 0 0 2px #d7ffdc,0 0 0 2px #d7ffdc; }
+    .tile::before { content:''; position:absolute; inset:0; z-index:-1; background:linear-gradient(145deg,#ffffff12,transparent 50%,#0005); }
+    .tile::after { content:''; position:absolute; inset:auto -10% -45% 20%; height:80%; z-index:-1; border:1px solid #ffffff1c; transform:rotate(-22deg); border-radius:45%; box-shadow:0 0 0 20px #ffffff08,0 0 0 42px #ffffff06,0 0 0 66px #ffffff04; }
+    .tile.growing { background:linear-gradient(145deg,#795946,#443a2a); }
+    .tile.surging { background:linear-gradient(145deg,#ad6a56,#6a4335); }
+    .tile.stable { background:linear-gradient(145deg,#255d46,#173d31); }
+    .tile.shrinking { background:linear-gradient(145deg,#426977,#294551); }
+    .tile.unknown { background:repeating-linear-gradient(135deg,#465b4f 0 8px,#405348 8px 16px); }
+    .tileIndex { font:500 11px 'JetBrains Mono',monospace; opacity:.8; }
+    .tileName { font-size:clamp(13px,1.6vw,23px); line-height:1.1; letter-spacing:-.035em; margin:auto 0 6px; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:600; }
+    .tileSize { font-size:clamp(10px,.9vw,13px); opacity:.92; white-space:nowrap; }
+    .tile.tiny { padding:5px; }
+    .tile.tiny .tileName { font-size:11px; margin:auto 0 0; }
+    .tile.tiny .tileIndex,.tile.tiny .tileSize { display:none; }
+    .tile.micro .tileName { display:none; }
+    .mapEmpty { display:grid; place-items:center; height:100%; color:var(--muted); text-align:center; padding:25px; }
+    .mapFooter { display:flex; align-items:center; justify-content:space-between; gap:15px; color:var(--muted); font-size:11px; padding-top:12px; }
+    .mapFooter .hint { color:#bdd3c4; }
+    .inspector { padding:21px; display:flex; flex-direction:column; min-width:0; }
+    .inspector .eyebrow { margin-bottom:17px; }
+    .inspectName { font-size:clamp(26px,2.4vw,40px); line-height:1.07; letter-spacing:-.055em; overflow-wrap:anywhere; margin:0 0 7px; font-weight:500; }
+    .inspectPath { color:var(--muted); font-size:11px; overflow-wrap:anywhere; }
+    .bigMeasure { display:flex; align-items:baseline; gap:8px; margin-top:29px; }
+    .bigMeasure strong { font:500 clamp(30px,3vw,50px)/1 'JetBrains Mono',monospace; letter-spacing:-.075em; }
+    .bigMeasure span { font-size:12px; color:var(--muted); }
+    .inspectRule { height:1px; background:var(--line); margin:25px 0 19px; }
+    .facts { display:grid; grid-template-columns:1fr auto; gap:12px 10px; margin:0; font-size:12px; }
+    .facts dt { color:var(--muted); }
+    .facts dd { margin:0; font-family:'JetBrains Mono',monospace; text-align:right; }
+    .inspectNote { color:var(--body); line-height:1.5; font-size:12px; margin:23px 0; }
+    .inspectNote strong { color:var(--ink); font-weight:600; }
+    .openButton { width:100%; border:1px solid #7add9f; background:#225b3c; border-radius:7px; padding:12px; text-align:center; font-size:13px; font-weight:600; margin-top:auto; }
+    .openButton:hover { background:#2f754d; }
+    .openButton:disabled { border-color:#365b43; color:#819f8d; background:#173422; cursor:not-allowed; }
+    .trail { margin-top:16px; padding:18px 20px 9px; }
+    .trailHeader { display:grid; grid-template-columns:1fr 110px 108px; gap:15px; padding:0 7px 11px; border-bottom:1px solid var(--line); color:var(--muted); font-size:11px; }
+    .trailHeader span:not(:first-child) { text-align:right; }
+    .trailRow { width:100%; display:grid; grid-template-columns:1fr 110px 108px; gap:15px; align-items:center; background:none; border:0; border-bottom:1px solid #254033; min-height:57px; padding:6px 7px; text-align:left; }
+    .trailRow:last-child { border-bottom:0; }
+    .trailRow:hover,.trailRow[aria-selected=true] { background:#1c3b2c; }
+    .trailName { display:flex; align-items:center; gap:11px; min-width:0; }
+    .trailName strong { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:600; font-size:13px; }
+    .trailName .rank { color:var(--muted); font-size:11px; width:20px; flex:none; }
+    .trailName .miniBar { display:inline-block; height:19px; width:3px; border-radius:2px; background:var(--mint2); flex:none; }
+    .trailName .miniBar.growing { background:var(--amber); }
+    .trailName .miniBar.surging { background:var(--coral); }
+    .trailName .miniBar.shrinking { background:var(--blue); }
+    .trailName .miniBar.unknown { background:var(--gap); }
+    .trailValue { font:12px 'JetBrains Mono',monospace; text-align:right; white-space:nowrap; }
+    .trailValue.dim { color:var(--muted); }
+    .trailValue.up { color:var(--amber); }
+    .trailValue.down { color:var(--blue); }
+    .trailEmpty { color:var(--muted); font-size:13px; padding:25px 7px; }
+    .footer { display:flex; justify-content:space-between; gap:18px; margin:24px 2px; color:var(--muted); font-size:11px; }
+    .footer strong { color:var(--body); font-weight:500; }
+    @media(max-width:960px) { .mainGrid { grid-template-columns:minmax(0,1fr) 290px; } .scanStamp { display:none; } .map { height:490px; } }
+    @media(max-width:720px) { .mast { height:64px; } .brand span:last-child,.mastRight .live { display:none; } .intro { margin:39px 0 25px; } .lede { font-size:14px; } .ledger { padding:17px; } .ledgerCapacity strong { font-size:26px; } .workspaceHead { align-items:stretch; flex-direction:column; margin-top:29px; gap:13px; } .tools { justify-content:space-between; } .search { flex:1; min-width:120px; } .mainGrid { display:flex; flex-direction:column; } .map { height:390px; min-height:390px; } .inspector { min-height:320px; } .inspector .eyebrow { margin-bottom:11px; } .bigMeasure { margin-top:17px; } .inspectRule { margin:18px 0; } .inspectNote { margin:18px 0; } .trailHeader,.trailRow { grid-template-columns:1fr 78px 82px; gap:5px; } .trail { padding:16px 11px 5px; } .trailName { gap:7px; } .trailValue { font-size:10px; } .footer { flex-direction:column; } }
+    @media(max-width:420px) { .map { height:330px; min-height:330px; } .mapFooter .hint { display:none; } .trailHeader,.trailRow { grid-template-columns:1fr 72px 70px; } .trailName .rank { display:none; } .ledgerLegend { gap:8px 17px; } }
+    @media(prefers-reduced-motion:reduce) { *,*::before,*::after { transition:none!important; scroll-behavior:auto!important; } }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <header class="mast">
+      <div class="brand"><span class="mark" aria-hidden="true">S</span><strong>SPACE ATLAS <span>by System Sentinel</span></strong></div>
+      <div class="mastRight"><span class="live"><span class="liveDot"></span>LOCAL MACHINE</span><span class="concept">INTERACTIVE CONCEPT · INVENTED DATA</span></div>
+    </header>
+    <main>
+      <section class="intro" aria-labelledby="title">
+        <div><div class="eyebrow">Storage / Explore</div><h1 id="title">See where the<br><em>space went.</em></h1><p class="lede">Explore the footprint, follow what grew, and see where the scan stops. Select to inspect; open to move in.</p></div>
+        <div class="scanStamp"><span class="eyebrow">Example scan</span><strong>25 SEP 2026 · 21:14</strong><span class="eyebrow">Previous: 18 SEP 2026</span></div>
+      </section>
+      <section class="ledger" aria-label="Invented volume reconciliation">
+        <div class="ledgerTop"><div><span class="eyebrow">Volume ledger</span><div class="ledgerTitle">Example local volume · 1,000 GiB total</div></div><div class="ledgerCapacity"><strong>216</strong><span>GiB free</span></div></div>
+        <div class="capacity" role="img" aria-label="At least 622 GiB measured by this example scan, 162 GiB difference from volume used, 216 GiB free"><span class="known"></span><span class="unattributed"></span><span class="free"></span></div>
+        <div class="ledgerLegend"><span><i class="swatch"></i><b>≥ 622 GiB</b> measured so far</span><span><i class="swatch gap"></i><b>162 GiB</b> gap to volume used</span><span><i class="swatch free"></i><b>216 GiB</b> free</span></div>
+        <p class="ledgerNote">This scan is partial. The gap can include unread areas and filesystem overhead; it is not available cleanup.</p>
+        <span class="ledgerTime mono">EXAMPLE SCAN 25 SEP 2026 · 21:14 &nbsp; / &nbsp; PREVIOUS 18 SEP 2026</span>
+      </section>
+      <section aria-label="Explore the invented scan">
+        <div class="workspaceHead"><div><span class="eyebrow">The map and the trail</span><h2>Follow the footprint</h2></div><div class="tools"><div class="segment" aria-label="Map area metric"><button type="button" id="footprint" aria-pressed="true">Footprint</button><button type="button" id="growth" aria-pressed="false">Growth</button></div><input class="search" id="search" type="search" placeholder="Filter this level…" aria-label="Filter folders at this level"></div></div>
+        <nav class="breadcrumbs" id="breadcrumbs" aria-label="Current location"></nav>
+        <div class="mainGrid">
+          <section class="mapPanel" aria-label="Interactive spatial map"><div class="panelHeader"><strong id="mapHeading">Allocated size</strong><span id="mapCaption">Area = local allocation</span></div><div class="map" id="map"></div><div class="mapFooter"><span class="hint">Click to inspect · double click to open</span><span id="mapCount" class="mono"></span></div></section>
+          <aside class="inspector" id="inspector" aria-live="polite"></aside>
+        </div>
+        <section class="trail" aria-label="Ranked directory trail"><div class="trailHeader mono"><span>NAME</span><span>ON DISK</span><span>CHANGE</span></div><div id="rows"></div></section>
+      </section>
+    </main>
+    <footer class="footer"><span><strong>Space Atlas concept</strong> · Invented data for interaction review. No disk was scanned and no cleanup action is available.</span><span class="keyboard">Tab moves focus · Enter inspects · Shift+Enter opens · Backspace goes up</span></footer>
+  </div>
+  <script>
+    const node = (id,name,size,previous,children=[],note='',coverage='complete') => ({id,name,size,previous,children,note,coverage});
+    const root = node('home','Home',622,null,[
+      node('work','Work',174,139,[node('builds','Build output',68,42,[], 'Generated output. Check the owning build tools before clearing it.'),node('projects','Projects',51,47,[], 'Some project history may exist only here.'),node('vms','Virtual machines',37,36),node('workother','Other work',18,14)],'Several recent builds explain much of the increase.'),
+      node('media','Media',148,135,[node('video','Video',88,80),node('photos','Raw photos',42,39),node('music','Music',18,16)],'Large files, but likely personal content. Size does not imply disposability.'),
+      node('apps','Applications',112,109,[node('games','Games',70,70),node('tools','Tools',26,24),node('appother','Other apps',16,15)],'Use the application’s own removal flow for installed software.'),
+      node('downloads','Downloads',84,73,[node('installers','Installers',31,28),node('captures','Captures',25,18),node('misc','Other downloads',28,27)],'Review individual files before treating them as copies.'),
+      node('cache','Tool caches',62,52,[node('packages','Package stores',30,26),node('render','Render cache',19,16),node('temp','Temporary data',13,10)],'Some caches have a supported clean command. A folder name alone is not a safety check.'),
+      node('archive','Archive',42,null,[node('old','Older material',30,null),node('records','Records',12,null)],'One child could not be read. Its footprint is a lower bound and its change is unknown.','partial')
+    ],'This example scan did not observe the whole volume. The attributed amount is a lower bound.','partial');
+    const byId = new Map(), parent = new Map();
+    function index(n,p=null) { byId.set(n.id,n); if(p) parent.set(n.id,p.id); n.children.forEach(c=>index(c,n)); }
+    index(root);
+    let current=root, selected=root.children[0], metric='footprint', filter='';
+    const $ = id => document.getElementById(id);
+    const gib = value => `${value} GiB`;
+    const delta = n => n.previous===null || n.coverage!=='complete' ? null : n.size-n.previous;
+    const change = n => { const d=delta(n); return d===null?'unknown':d>=20?'surging':d>=5?'growing':d<=-5?'shrinking':'stable'; };
+    const changeText = n => { const d=delta(n); return d===null?'Unknown':d>0?`+${d} GiB`:d<0?`${d} GiB`:'No change'; };
+    const escapeHtml = value => String(value).replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+    function path(n) { const parts=[n.name]; while(parent.has(n.id)) { n=byId.get(parent.get(n.id)); parts.unshift(n.name); } return parts.join(' / '); }
+    function children() { return current.children.filter(n=>n.name.toLowerCase().includes(filter)); }
+    function weight(n) { return metric==='growth'?Math.max(delta(n)??0,0):n.size; }
+    function sorted() { return children().sort((a,b)=>weight(b)-weight(a)||b.size-a.size); }
+    function split(items,x,y,w,h) {
+      if (!items.length) return [];
+      if(items.length===1) return [{node:items[0],x,y,w,h}];
+      const total=items.reduce((sum,n)=>sum+weight(n),0);
+      let first=0,at=1;
+      for(let i=1;i<items.length;i++) { first+=weight(items[i-1]); at=i; if(first>=total/2) break; }
+      at=Math.min(Math.max(at,1),items.length-1);
+      const left=items.slice(0,at), right=items.slice(at), share=left.reduce((sum,n)=>sum+weight(n),0)/total;
+      return w>=h ? [...split(left,x,y,w*share,h),...split(right,x+w*share,y,w*(1-share),h)] : [...split(left,x,y,w,h*share),...split(right,x,y+h*share,w,h*(1-share))];
+    }
+    function renderMap(items) {
+      const visible=items.filter(n=>weight(n)>0);
+      $('map').innerHTML='';
+      if(!visible.length) { $('map').innerHTML=`<div class="mapEmpty">${metric==='growth'?'No comparable growth at this level. Try Footprint, or open another folder.':'No folders match this filter.'}</div>`; return; }
+      const rects=split(visible,0,0,100,100);
+      rects.forEach(({node:n,x,y,w,h},i)=>{
+        const tile=document.createElement('button');
+        tile.type='button'; tile.className=`tile ${change(n)} ${w*h<115?'micro':w*h<380?'tiny':''} ${selected.id===n.id?'selected':''}`;
+        tile.style.left=`${x}%`; tile.style.top=`${y}%`; tile.style.width=`${w}%`; tile.style.height=`${h}%`;
+        tile.setAttribute('aria-label',`${n.name}, ${gib(n.size)} allocated, change ${changeText(n)}${n.coverage!=='complete'?', partial scan':''}. Select to inspect.`);
+        tile.setAttribute('aria-pressed',selected.id===n.id?'true':'false');
+        tile.innerHTML=`<span class="tileIndex">${String(i+1).padStart(2,'0')} / ${n.coverage==='complete'?'MEASURED':'PARTIAL'}</span><span class="tileName">${escapeHtml(n.name)}</span><span class="tileSize">${n.coverage==='complete'?'':'≥ '}${gib(n.size)} ${metric==='growth'&&delta(n)!==null?'· '+changeText(n):''}</span>`;
+        tile.addEventListener('click',()=>select(n)); tile.addEventListener('dblclick',()=>open(n));
+        tile.addEventListener('keydown',e=>{ if(e.key==='Enter'&&e.shiftKey){e.preventDefault();open(n);} else if(['ArrowRight','ArrowDown','ArrowLeft','ArrowUp'].includes(e.key)){e.preventDefault();const all=[...$('map').querySelectorAll('button')];const next=(all.indexOf(tile)+(e.key==='ArrowRight'||e.key==='ArrowDown'?1:-1)+all.length)%all.length;all[next].focus();} });
+        $('map').append(tile);
+      });
+    }
+    function renderRows(items) {
+      $('rows').innerHTML='';
+      if(!items.length){$('rows').innerHTML='<div class="trailEmpty">No folders match this filter.</div>';return;}
+      items.forEach((n,i)=>{
+        const row=document.createElement('button');row.type='button';row.className='trailRow';row.setAttribute('aria-selected',selected.id===n.id?'true':'false');
+        const d=delta(n);row.innerHTML=`<span class="trailName"><span class="rank mono">${String(i+1).padStart(2,'0')}</span><span class="miniBar ${change(n)}"></span><strong>${escapeHtml(n.name)}</strong></span><span class="trailValue">${n.coverage==='complete'?'':'≥ '}${gib(n.size)}</span><span class="trailValue ${d===null?'dim':d>0?'up':d<0?'down':''}">${changeText(n)}</span>`;
+        row.addEventListener('click',()=>select(n));row.addEventListener('dblclick',()=>open(n));row.addEventListener('keydown',e=>{if(e.key==='Enter'&&e.shiftKey){e.preventDefault();open(n);}});$('rows').append(row);
+      });
+    }
+    function renderInspector() {
+      const n=selected, d=delta(n), isCurrent=n.id===current.id;
+      $('inspector').innerHTML=`<div class="eyebrow">${isCurrent?'Current location':'Selection'} · ${n.coverage==='complete'?'Measured':'Partial'}</div><h3 class="inspectName">${escapeHtml(n.name)}</h3><div class="inspectPath mono">${escapeHtml(path(n))}</div><div class="bigMeasure"><strong>${n.coverage==='complete'?'':'≥ '}${n.size}</strong><span>GiB allocated in this example</span></div><div class="inspectRule"></div><dl class="facts"><dt>Share of example scan</dt><dd>${Math.round(n.size/root.size*100)}%</dd><dt>Compared with prior scan</dt><dd>${d===null?'Not comparable':changeText(n)}</dd><dt>Coverage</dt><dd>${n.coverage==='complete'?'Complete for this folder':'Incomplete · lower bound'}</dd><dt>Contains</dt><dd>${n.children.length?`${n.children.length} groups shown`:'Further detail not in concept'}</dd></dl><p class="inspectNote"><strong>Worth knowing.</strong> ${escapeHtml(n.note||'The footprint is observed in this example. Size alone does not show whether content is safe to remove.')}</p><button type="button" class="openButton" id="openSelected" ${n.children.length&&!isCurrent?'':'disabled'}>${n.children.length&&!isCurrent?'Open folder ↗':'No deeper view'}</button>`;
+      $('openSelected').addEventListener('click',()=>open(n));
+    }
+    function renderCrumbs() {
+      const chain=[];let n=current;while(n){chain.unshift(n);n=parent.has(n.id)?byId.get(parent.get(n.id)):null;}
+      $('breadcrumbs').innerHTML='';chain.forEach((item,i)=>{if(i){const slash=document.createElement('span');slash.className='slash';slash.textContent='/';$('breadcrumbs').append(slash);}const b=document.createElement('button');b.type='button';b.textContent=item.name;b.setAttribute('aria-current',item.id===current.id?'location':'false');b.addEventListener('click',()=>go(item));$('breadcrumbs').append(b);});
+    }
+    function render() {
+      const items=sorted();$('footprint').setAttribute('aria-pressed',metric==='footprint');$('growth').setAttribute('aria-pressed',metric==='growth');
+      $('mapHeading').textContent=metric==='footprint'?'Allocated footprint':'Growth since prior scan';
+      $('mapCaption').textContent=metric==='footprint'?'Area = local allocation':'Area = comparable increase only';
+      $('mapCount').textContent=`${items.length} GROUPS`;
+      renderCrumbs();renderMap(items);renderRows(items);renderInspector();
+    }
+    function select(n){selected=n;render();}
+    function open(n){if(n.children.length){go(n);}}
+    function go(n){current=n;selected=n.children[0]||n;filter='';$('search').value='';location.hash=`#${n.id}`;render();$('breadcrumbs').querySelector('button:last-child')?.focus();}
+    $('footprint').addEventListener('click',()=>{metric='footprint';render();});
+    $('growth').addEventListener('click',()=>{metric='growth';render();});
+    $('search').addEventListener('input',e=>{filter=e.target.value.trim().toLowerCase();const visible=children();if(!visible.includes(selected)) selected=visible[0]||current;render();});
+    window.addEventListener('hashchange',()=>{const id=location.hash.slice(1);if(byId.has(id)&&current.id!==id){current=byId.get(id);selected=current.children[0]||current;filter='';$('search').value='';render();}});
+    document.addEventListener('keydown',e=>{if(e.key==='Backspace'&&document.activeElement!==$('search')&&parent.has(current.id)){e.preventDefault();const child=current;current=byId.get(parent.get(current.id));selected=child;filter='';$('search').value='';location.hash=`#${current.id}`;render();$('breadcrumbs').querySelector('button:last-child')?.focus();}});
+    if(byId.has(location.hash.slice(1))) { current=byId.get(location.hash.slice(1));selected=current.children[0]||current; }
+    render();
+  </script>
+</body>
+</html>
