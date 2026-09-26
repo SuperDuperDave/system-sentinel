@@ -2,6 +2,9 @@
    surface; the only glow is the planet's rim and the phosphor edge of the selection. */
 
 .lede { margin: 0 0 18px; color: var(--body); max-width: 68ch; }
+.labLink { margin: -7px 0 18px; color: var(--muted); font-size: 12px; }
+.labLink a { color: var(--ink); border-bottom: 1px solid var(--rule); }
+.labLink a:hover { border-color: var(--phosphor); }
 .quiet { margin: 12px 0 0; color: var(--body); max-width: 68ch; }
 .strong { color: var(--ink); font-weight: 600; }
 

@@ -245,6 +245,7 @@ export function Space() {
       <p className={styles.lede}>
         Where your home folder&rsquo;s space is, walked only when you ask. Tiles and Planet draw the same areas; the list keeps every exact share. Folder names appear after you request a walk.
       </p>
+      <p className={styles.labLink}><a href="/space-atlas-lab/" target="_blank" rel="noopener noreferrer">Explore the sixteen-lens interaction lab <span aria-hidden="true">↗</span></a> · synthetic examples, separate from this machine&rsquo;s readings</p>
       {!level ? <Offer onScan={scanHome} /> : (
         <>
           <WalkPath levels={levels} onGo={goTo} />

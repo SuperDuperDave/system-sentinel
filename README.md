@@ -36,7 +36,7 @@ Opening Performance also asks Windows which processes are using CPU time, privat
 
 Space walks your Windows home folder only when you ask. Its proportional tiles and rotatable planet show the same measured folder shares; the ranked list gives exact bytes, and a shared walk path lets you enter a folder or return to an earlier view. Partial walks remain lower bounds, folders that could not be measured get no invented area, and the volume ledger shows used space the walk could not attribute. The inspector compares local allocation with logical length and shows last-write age bands. A folded tail can be opened in exact pages without another scan. The `space` and `space_page` readings give agents the same coverage and navigation handles. Entering a folder starts a fresh independent walk, so parent and child figures are not a growth comparison or a claim of reclaimable space.
 
-The [Space Atlas interaction lab](docs/design/space-atlas-lab/index.html) prototypes thirteen further navigation and investigation lenses on clearly labelled synthetic data. The [experience direction](docs/design/SPACE-ATLAS-EXPERIENCE-2026-09-25.md) names the evidence each lens needs before it can be connected to a real machine.
+The [Space Atlas interaction lab](dashboard/public/space-atlas-lab/index.html) prototypes thirteen further navigation and investigation lenses on clearly labelled synthetic data. It also opens from the live Space view. The [experience direction](docs/design/SPACE-ATLAS-EXPERIENCE-2026-09-25.md) names the evidence each lens needs before it can be connected to a real machine.
 
 ## What it reads
 

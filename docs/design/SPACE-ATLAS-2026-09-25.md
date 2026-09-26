@@ -1,6 +1,6 @@
 # Space Atlas — working design
 
-Status: the [interactive concept](space-atlas-prototype/index.html) uses invented data. The dashboard now has an on-demand Windows-backed Space view with tiles, a planet and a shared walk path. Neither surface performs cleanup.
+Status: the [interactive concept](space-atlas-prototype/index.html) and [sixteen-lens interaction lab](../../dashboard/public/space-atlas-lab/index.html) use invented data. The dashboard now has an on-demand Windows-backed Space view with tiles, a planet and a shared walk path. Neither surface performs cleanup.
 
 ## The job
 
