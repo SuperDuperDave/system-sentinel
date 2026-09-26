@@ -1,0 +1,1218 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="robots" content="noindex">
+<title>Space Atlas · Interaction Lab — synthetic data, concept only</title>
+<style>
+@font-face{font-family:'DM Sans';src:local('DM Sans'),url('../../../dashboard/public/fonts/dm-sans-latin.woff2') format('woff2');font-weight:400 600;font-display:swap}
+@font-face{font-family:'JetBrains Mono';src:local('JetBrains Mono'),url('../../../dashboard/public/fonts/jetbrains-mono-latin.woff2') format('woff2');font-weight:400 500;font-display:swap}
+:root{--bg:#07120e;--panel:#0c1b15;--panel2:#10231b;--well:#050f0b;--ink:#edfaf1;--body:#bcd3c6;--muted:#89a696;--faint:#5c7a6a;--line:#1f3a2c;--line2:#2c4d3c;--mint:#9ef8bd;--mint2:#55c48b;--amber:#efbc73;--coral:#ed947a;--blue:#94c6cf;--violet:#c6a4ee;--caution:#f3dea4;--sans:'DM Sans',system-ui,-apple-system,'Segoe UI',sans-serif;--mono:'JetBrains Mono',ui-monospace,'Cascadia Mono',Consolas,monospace}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;min-width:320px;color:var(--ink);background:radial-gradient(1100px 520px at 72% -8%,#173d2b 0,transparent 62%),radial-gradient(700px 420px at -10% 30%,#0f2a1f 0,transparent 70%),var(--bg);font:14px/1.45 var(--sans)}
+button,input,select{font:inherit;color:inherit}
+button{cursor:pointer}
+button:disabled{cursor:not-allowed;opacity:.45}
+a{color:var(--mint)}
+:focus-visible{outline:2px solid var(--mint);outline-offset:2px}
+.mono{font-family:var(--mono)}
+.sr{position:absolute!important;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.skip{position:absolute;left:-9999px;top:40px;z-index:60;background:#0b1a14;border:1px solid var(--mint);padding:8px 12px;border-radius:6px;color:var(--ink)}
+.skip:focus{left:12px}
+.eyebrow{font:500 10.5px/1.25 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+
+/* caution band: always visible */
+.caution{position:sticky;top:0;z-index:30;display:flex;flex-wrap:wrap;justify-content:space-between;gap:3px 16px;padding:7px clamp(12px,2.4vw,32px);background:repeating-linear-gradient(135deg,#2b2512 0 12px,#211d0e 12px 24px);border-bottom:1px solid #6d5d2b;color:var(--caution);font:500 11px/1.35 var(--mono);letter-spacing:.07em;text-transform:uppercase}
+.caution b{color:#fff3cf;font-weight:500}
+.frame{max-width:1780px;margin:0 auto;padding:0 clamp(12px,2.4vw,32px) 48px}
+.mast{display:flex;align-items:flex-end;justify-content:space-between;gap:14px 24px;padding:22px 0 16px;flex-wrap:wrap}
+.brand{display:flex;gap:14px;align-items:center;min-width:0}
+.mark{width:42px;height:42px;border-radius:12px;display:grid;place-items:center;background:radial-gradient(circle at 30% 25%,#d6ffe3,#55c48b 70%);color:#06200f;font:600 21px var(--mono);box-shadow:0 0 26px #5fe3a04d;flex:none}
+.brand h1{margin:0;font-size:clamp(22px,2.4vw,34px);font-weight:500;letter-spacing:-.045em;line-height:1.05}
+.brand h1 em{font-style:normal;color:var(--mint)}
+.brand p{margin:5px 0 0;color:var(--muted);font-size:12.5px;max-width:760px}
+.mastTools{display:flex;gap:8px;flex-wrap:wrap}
+.chip{background:#0c1c16;border:1px solid var(--line2);border-radius:8px;padding:7px 11px;font-size:12px;color:var(--body);min-height:36px}
+.chip:hover{border-color:#4b8a69;color:var(--ink)}
+.chip[aria-pressed=true]{background:#1d4a34;color:var(--ink);border-color:#5aa77d}
+
+/* ledger */
+.ledger{display:grid;grid-template-columns:minmax(150px,auto) minmax(0,1fr) auto;gap:10px 22px;align-items:center;background:linear-gradient(120deg,#12301f,#0d2119 60%,#10271d);border:1px solid #2f5a42;border-radius:14px;padding:13px 18px}
+.ledger h2{margin:2px 0 0;font-size:14px;font-weight:500;color:var(--body)}
+.ledgerBar{display:flex;height:20px;border-radius:5px;overflow:hidden;box-shadow:inset 0 0 0 1px #c3ffd61c}
+.ledgerBar button{border:0;height:100%;padding:0;min-width:0}
+.lb-att{background:linear-gradient(90deg,#3fb67e,#b6f5b0)}
+.lb-unch{background:repeating-linear-gradient(135deg,#b78962 0 4px,#7f6247 4px 8px)}
+.lb-free{background:#1c3328;cursor:default!important}
+.ledgerBar button[aria-pressed=true]{box-shadow:inset 0 0 0 2px #fff}
+.ledgerLegend{display:flex;flex-wrap:wrap;gap:3px 18px;font-size:12px;color:var(--body);margin-top:6px}
+.ledgerLegend b{color:var(--ink);font-weight:500;font-family:var(--mono)}
+.sw{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:6px;vertical-align:0}
+.ledgerFree{text-align:right;white-space:nowrap}
+.ledgerFree strong{display:block;font:500 26px/1 var(--mono);letter-spacing:-.05em}
+.ledgerFree span{color:var(--muted);font-size:12px}
+
+/* shell */
+.shell{display:grid;grid-template-columns:236px minmax(0,1fr) 372px;gap:16px;align-items:start;margin-top:16px}
+.modes{position:sticky;top:44px;max-height:calc(100vh - 56px);overflow:auto;padding:0 4px 12px 0;scrollbar-width:thin}
+.mgroup{margin:0 0 10px}
+.mgroup h3{margin:8px 8px 5px;font:500 10px/1.2 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--faint)}
+.mbtn{display:grid;grid-template-columns:22px minmax(0,1fr) 9px;gap:1px 7px;align-items:center;width:100%;text-align:left;background:none;border:1px solid transparent;border-radius:9px;padding:7px 8px;color:var(--body);margin:1px 0}
+.mbtn .mi{font:500 10px var(--mono);color:var(--faint)}
+.mbtn .mn{font-size:13.5px;color:var(--ink);font-weight:500}
+.mbtn .mq{grid-column:2/3;font-size:11.5px;color:var(--muted);line-height:1.3}
+.mbtn .gd{width:8px;height:8px;border-radius:50%;background:var(--gc)}
+.mbtn:hover{background:#0e2019}
+.mbtn[aria-pressed=true]{background:linear-gradient(90deg,#17402d,#0f2a1f);border-color:#3f7d5c}
+.mbtn[aria-pressed=true] .mq{color:var(--body)}
+.stageCol{min-width:0}
+.side{display:flex;flex-direction:column;gap:14px;position:sticky;top:44px;max-height:calc(100vh - 56px);overflow:auto;scrollbar-width:thin;padding-bottom:10px}
+
+/* descent strip (ancestor controls) */
+.descent{display:flex;gap:4px;align-items:stretch;overflow-x:auto;padding:0 0 8px;scrollbar-width:thin}
+.crumb{display:flex;flex-direction:column;gap:3px;min-width:94px;max-width:210px;flex:0 1 auto;background:#0c1c16;border:1px solid var(--line);border-radius:9px;padding:6px 9px;text-align:left;color:var(--body)}
+.crumb:hover{border-color:#4b8a69}
+.crumb .cl{font-size:9.5px;color:var(--faint);letter-spacing:.1em}
+.crumb .cn{font-size:12.5px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.crumb .cb{position:relative;height:5px;border-radius:3px;background:#1e362a;overflow:hidden}
+.crumb .cb i{position:absolute;top:0;bottom:0}
+.crumb .cv{font-size:10px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.crumb[aria-current=location]{border-color:#5fb487;background:#123224}
+.csep{align-self:center;color:#3d5f4d;font-size:15px}
+
+/* stage header */
+.stageHead{display:flex;justify-content:space-between;align-items:flex-end;gap:10px 20px;flex-wrap:wrap;margin:2px 0 8px}
+.stageHead h2{margin:0;font-size:clamp(20px,2vw,27px);font-weight:500;letter-spacing:-.04em;line-height:1.1}
+.stageHead h2 .mono{font-size:11px;color:var(--faint);letter-spacing:.1em;margin-right:8px;vertical-align:4px}
+.question{margin:3px 0 0;color:var(--body);font-size:14px}
+.question b{color:var(--mint);font-weight:500}
+.gate{border-left:3px solid var(--gc);background:#0b1914;padding:8px 11px;font-size:12px;color:var(--body);border-radius:0 8px 8px 0;margin:0 0 10px;line-height:1.45}
+.gate .gk{font:500 10.5px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--gc);margin-right:6px}
+.gate .gn{display:block;color:var(--muted);margin-top:2px}
+.gate .gn b{color:var(--caution);font-weight:500}
+.controls{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;margin:0 0 10px;min-height:36px}
+.cg{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--muted)}
+.cgl{white-space:nowrap}
+.segc{display:flex;background:#0a1813;border:1px solid var(--line2);padding:3px;border-radius:8px}
+.segc button{background:none;border:0;border-radius:5px;color:var(--muted);padding:6px 10px;font-size:12px;min-height:30px}
+.segc button[aria-pressed=true]{background:#235039;color:var(--ink);box-shadow:inset 0 1px #9affc326}
+.cbtn{background:#10261c;border:1px solid #3a6a51;border-radius:8px;padding:6px 11px;font-size:12px;color:var(--ink);min-height:34px}
+.cbtn:hover:not(:disabled){background:#17392a}
+.cbtn[aria-pressed=true]{background:#235039;border-color:#6fc394}
+.cbtn.primary{background:#1f5a3b;border-color:#7add9f}
+.controls select{background:#0a1813;border:1px solid var(--line2);border-radius:7px;padding:6px 8px;font-size:12px;min-height:34px;max-width:230px}
+.controls input[type=range]{accent-color:#7fe0a6;width:150px}
+.controls output{font-size:11px;color:var(--body);min-width:52px}
+.cnote{font-size:11.5px;color:var(--faint)}
+
+/* stage */
+.stage{position:relative;height:clamp(400px,62vh,720px);border:1px solid var(--line2);border-radius:13px;background:radial-gradient(900px 500px at 50% 40%,#0b1d15,#050f0b 75%);overflow:hidden;box-shadow:0 24px 60px #0006,inset 0 1px #b9ffca0d}
+.stage::after{content:'SYNTHETIC';position:absolute;right:11px;bottom:8px;font:500 9.5px var(--mono);letter-spacing:.24em;color:#f3dea466;pointer-events:none;z-index:9}
+.view{position:absolute;inset:0}
+.view.dive-in{animation:diveIn .34s cubic-bezier(.2,.75,.2,1)}
+.view.dive-out{animation:diveOut .34s cubic-bezier(.2,.75,.2,1)}
+@keyframes diveIn{from{opacity:.2;transform:scale(.9)}}
+@keyframes diveOut{from{opacity:.2;transform:scale(1.08)}}
+.stageFoot{margin:9px 2px 0;font-size:12px;color:var(--muted);line-height:1.5;min-height:36px}
+.stageFoot b{color:var(--body);font-weight:500}
+.stageFoot .mono{font-size:11px}
+.empty{position:absolute;inset:0;display:grid;place-items:center;text-align:center;color:var(--muted);padding:30px;font-size:13px}
+
+/* tiles (shared by several lenses) */
+.tilemap{position:absolute;left:0;top:0;right:0;bottom:0}
+.tile{position:absolute;border:0;padding:0;margin:0;background:none;text-align:left;overflow:hidden;color:#f4fff6;transition:left .5s cubic-bezier(.2,.75,.2,1),top .5s cubic-bezier(.2,.75,.2,1),width .5s cubic-bezier(.2,.75,.2,1),height .5s cubic-bezier(.2,.75,.2,1),opacity .3s}
+.live .tile{transition:none}
+.tile .tb{position:absolute;inset:1.5px;border-radius:7px;background:linear-gradient(150deg,var(--c1),var(--c2));box-shadow:inset 0 1px #ffffff26,inset 0 0 0 1px #ffffff10}
+.tile .tx{position:absolute;inset:1.5px;border-radius:7px;overflow:hidden;pointer-events:none}
+.tile .tl{position:absolute;inset:8px 10px;display:flex;flex-direction:column;gap:1px;pointer-events:none;min-width:0}
+.tile .tr{font:500 10px var(--mono);letter-spacing:.06em;opacity:.8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tile .tn{margin-top:auto;font-weight:600;font-size:clamp(13px,1.3vw,20px);letter-spacing:-.03em;line-height:1.12;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 1px 8px #0009}
+.tile .tv,.tile .tv2{font:500 11.5px var(--mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 1px 6px #0009}
+.tile .tv2{opacity:.82;font-size:10.5px}
+.tile.s .tn{font-size:12px}.tile.s .tr,.tile.s .tv2{display:none}.tile.s .tl{inset:5px 6px}
+.tile.xs .tl{display:none}
+.tile:hover .tb{filter:brightness(1.16)}
+.tile.sel{z-index:3}
+.tile.sel .tb{box-shadow:inset 0 0 0 2px #eafff0,0 0 0 1px #eafff0,0 0 24px #9ef8bd55}
+.tile.holds .tb{box-shadow:inset 0 0 0 2px #eafff0b0}
+.tile.holds .tx{outline:1px dashed #eafff0cc;outline-offset:-7px}
+.tile.partial .tx{background:repeating-linear-gradient(135deg,#0000 0 7px,#ffffff26 7px 9px)}
+.tile.k-tail .tx{background:radial-gradient(#ffffff33 1px,#0000 1.6px) 0 0/7px 7px}
+.tile.fog .tb{background:radial-gradient(120% 90% at 30% 30%,#80846f,#434a3e 58%,#2b3029)}
+.tile.fog .tx{background:repeating-linear-gradient(135deg,#0000 0 10px,#ffffff14 10px 12px)}
+.tile.surveying .tb{box-shadow:inset 0 0 0 1.5px #f3dea4aa}
+.tile.surveying .tx{background:repeating-linear-gradient(90deg,#0000 0 14px,#f3dea41a 14px 15px)}
+.tile.dim{opacity:.32}
+.tile.matter .tb{background:#0a1712}
+.tile.matter .mo,.tile.matter .mf{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);border-radius:6px}
+.tile.matter .mf{background:linear-gradient(150deg,var(--c1),var(--c2))}
+.tile.matter .mo{border:1.6px dashed var(--ce);background:#ffffff06}
+.tile.crated .tx{box-shadow:inset 0 0 0 3px #f3dea4;background:repeating-linear-gradient(45deg,#0000 0 12px,#f3dea41f 12px 14px)}
+.tile .weather{position:absolute;inset:0;opacity:var(--wx,0);background:repeating-radial-gradient(circle at 72% 28%,#0000 0 9px,#ffffff38 9px 10.5px)}
+.tile .stipple{position:absolute;inset:0;opacity:var(--wx,0);background:radial-gradient(#fff 1px,#0000 1.6px) 0 0/var(--sp,9px) var(--sp,9px)}
+.tile.newly .tx{background:repeating-linear-gradient(45deg,#0000 0 6px,#f3dea433 6px 8px)}
+.pins{position:absolute;left:0;right:0;bottom:0;display:flex;gap:6px;padding:6px 8px;flex-wrap:wrap;background:#081610;border-top:1px dashed #3d5a4b;min-height:34px;align-items:center}
+.pins .pl{font:500 10px var(--mono);letter-spacing:.1em;color:var(--faint)}
+.pin{background:none;border:1px dashed #6b7f74;border-radius:6px;color:#b9c9bf;padding:3px 8px;font:500 11px var(--mono)}
+.pin.sel{border-style:solid;border-color:#eafff0;color:#fff}
+.hud{position:absolute;left:10px;top:10px;z-index:5;background:#050f0bd9;border:1px solid #2d4a3b;border-radius:8px;padding:7px 10px;font:500 11px/1.5 var(--mono);color:var(--body);max-width:min(560px,calc(100% - 20px));pointer-events:none}
+.hud b{color:var(--ink);font-weight:500}
+
+/* planet */
+.planetWrap{position:absolute;inset:0;display:grid;grid-template-rows:minmax(0,1fr) auto}
+.planetBox{position:relative;min-height:0}
+.planet{display:block;width:100%;height:100%;touch-action:none;cursor:grab}
+.planet:active{cursor:grabbing}
+.pGuide{position:absolute;left:12px;right:12px;bottom:8px;display:flex;justify-content:space-between;gap:10px;font-size:10px;letter-spacing:.08em;color:#a9c7b4;pointer-events:none;text-shadow:0 1px 6px #050f0b}
+.pGuide b{color:var(--mint);font-weight:500}
+.pKey{padding:6px 12px 10px;border-top:1px solid #1d3629;background:#06120d}
+.pKeyHead{display:flex;justify-content:space-between;gap:8px;font-size:9.5px;letter-spacing:.1em;color:var(--faint);margin-bottom:4px}
+.pKeyCv{display:block;width:100%;height:78px;border-radius:5px;cursor:pointer;box-shadow:inset 0 0 0 1px #ffffff14}
+
+/* archaeology */
+.arch{position:absolute;inset:0;overflow:auto;padding:14px 16px 22px;scrollbar-width:thin}
+.stHead{display:flex;justify-content:space-between;gap:10px;align-items:baseline;margin:0 0 5px;font-size:11.5px;color:var(--muted)}
+.stName{background:none;border:0;padding:2px 0;color:var(--body);font-size:13px;text-align:left}
+.stName:hover{color:var(--ink);text-decoration:underline;text-underline-offset:3px}
+.stName .mono{color:var(--faint);font-size:10px;margin-right:6px}
+.stratum.open .stName{color:var(--ink);font-weight:600;font-size:14px}
+.stBar{display:flex;height:28px;border-radius:6px;overflow:hidden;background:#0b1812;box-shadow:inset 0 0 0 1px #ffffff10}
+.seg{flex:1 1 0;min-width:0;border:0;padding:0 7px;background:var(--c);color:#04130b;font:500 11px var(--mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:left;box-shadow:inset -1px 0 #06110c}
+.stratum.past .seg{filter:saturate(.55) brightness(.62)}
+.stratum.past .seg.path{filter:none}
+.stratum.open .stBar{height:clamp(96px,22vh,150px)}
+.stratum.open .seg{display:flex;flex-direction:column;justify-content:flex-end;padding:8px;gap:1px}
+.seg .sn{font:600 12.5px var(--sans);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.seg .sv{font:500 10.5px var(--mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.seg.sel{box-shadow:inset 0 0 0 3px #fff;filter:none!important}
+.seg.holds{box-shadow:inset 0 0 0 2px #ffffffaa}
+.seg.k-tail{background-image:radial-gradient(#0003 1px,#0000 1.6px);background-size:6px 6px}
+.stDenied{font:500 10.5px var(--mono);color:var(--muted);margin-top:4px}
+.shaft{height:24px;margin:3px 0;clip-path:polygon(var(--l) 0,var(--r) 0,100% 100%,0 100%)}
+.stratum.preview{margin-top:10px;opacity:.85}
+.stratum.preview .stBar{height:34px;outline:1px dashed #9ef8bd88;outline-offset:3px}
+.stratum.preview .seg{filter:saturate(.7) brightness(.8)}
+.stratum.open.born{animation:born .38s cubic-bezier(.2,.75,.2,1)}
+@keyframes born{from{opacity:0;transform:translateY(-10px) scaleY(.7)}}
+
+/* svg lenses */
+.svgv{position:absolute;inset:0;display:block;width:100%;height:100%}
+svg text{font-family:var(--mono)}
+.colh{font-size:9.5px;fill:#5f7f6f;letter-spacing:.12em}
+.rib{opacity:.24;cursor:pointer}
+.rib.stem{opacity:.52}
+.rib.on{opacity:.95}
+.rib:hover{opacity:.78}
+.wbar{stroke:#06110c;stroke-width:.6;cursor:pointer}
+.wbar.sel{stroke:#fff;stroke-width:2}
+.wl{font-size:11px;fill:#dcefe3;paint-order:stroke;stroke:#06110c;stroke-width:3px;stroke-linejoin:round;pointer-events:none}
+.wl .wv{fill:#9fbfae}
+.wl.sel{fill:#fff;font-weight:500}
+.ring{fill:none;stroke:#28483a;stroke-dasharray:2 4}
+.ringl{font-size:9.5px;fill:#5f7f6f;text-anchor:middle}
+.body{transition:transform .7s cubic-bezier(.2,.75,.2,1);cursor:pointer}
+.bc{stroke:#06110c;stroke-width:1.5}
+.body.sel .bc{stroke:#fff;stroke-width:2.5}
+.body.holds .bc{stroke:#fff;stroke-dasharray:3 3}
+.bl{font-size:11px;fill:#e2f3e8;text-anchor:middle;paint-order:stroke;stroke:#06110c;stroke-width:3px;pointer-events:none}
+.bv{font-size:10px;fill:#9fbfae;text-anchor:middle;paint-order:stroke;stroke:#06110c;stroke-width:3px;pointer-events:none}
+.ghost{fill:none;stroke:#f0c674;stroke-dasharray:3 3}
+.tether{stroke:#f0c674aa;stroke-width:1;stroke-dasharray:2 3}
+.cmap-r{cursor:crosshair}
+.clbl{font-size:10.5px;fill:#e6f5ea;paint-order:stroke;stroke:#06110c;stroke-width:3px;pointer-events:none}
+.csub{font-size:10px;fill:#a5c4b2;pointer-events:none}
+.band{cursor:pointer}
+.band.sel rect.bg{stroke:#fff;stroke-width:2}
+.tline{stroke:#cfe8d8;stroke-width:1.2;opacity:.55;cursor:pointer}
+.tline.on{stroke:#fff3cf;stroke-width:3;opacity:1}
+.tlab{font-size:10px;fill:#9fbfae;text-anchor:middle;cursor:pointer}
+.tlab.on{fill:#fff3cf}
+.beachTxt{font-size:10.5px;fill:#dff3e6;paint-order:stroke;stroke:#06110c;stroke-width:3px}
+.flow{fill:none;cursor:pointer;stroke-linecap:round}
+.flow:hover{filter:brightness(1.3)}
+.flow.on{filter:drop-shadow(0 0 5px #fff8)}
+.flow.faded{opacity:.25}
+.port{font-size:10px;fill:#cfe3d7;letter-spacing:.06em}
+.particle{stroke:#06110c;stroke-width:1}
+.star{cursor:pointer}
+.star.sel circle.core{stroke:#fff;stroke-width:2}
+.twin{fill:none;cursor:pointer;stroke-linecap:round}
+.twin.on{stroke-width:3.5!important;filter:drop-shadow(0 0 4px #fff9)}
+.reefL{cursor:pointer}
+.reefL:hover{filter:brightness(1.2)}
+
+/* tideline chips, crate, twins panels */
+.tide{position:absolute;inset:0;display:grid;grid-template-rows:auto auto minmax(0,1fr)}
+.beach{display:block;width:100%;height:112px}
+.tchips{display:flex;gap:5px;padding:4px 10px 8px;overflow-x:auto;scrollbar-width:thin}
+.tchip{flex:none;background:#0b1812;border:1px solid var(--line2);border-radius:7px;padding:4px 8px;font:500 10.5px/1.3 var(--mono);color:var(--body);text-align:left}
+.tchip small{display:block;color:var(--muted);font-size:10px}
+.tchip[aria-pressed=true]{background:#2a2a14;border-color:#f3dea4;color:#fff3cf}
+.tchip:disabled{opacity:1;border-style:dashed;color:var(--faint)}
+.tmapWrap{position:relative;min-height:0;margin:0 1px 1px}
+.tgap{position:absolute;inset:0;display:grid;place-items:center;text-align:center;color:var(--caution);font:500 12px/1.6 var(--mono);padding:20px;background:repeating-linear-gradient(135deg,#0000 0 14px,#f3dea40c 14px 16px)}
+.crateWrap{position:absolute;inset:0;display:grid;grid-template-columns:minmax(0,1.25fr) minmax(260px,1fr)}
+.crateMap{position:relative;min-height:0;border-right:1px solid #1d3629}
+.cratePanel{overflow:auto;padding:12px 14px;font-size:12.5px;color:var(--body);scrollbar-width:thin}
+.cratePanel h4{margin:0 0 4px;font-size:13px;color:var(--ink);font-weight:500}
+.crateGrid{display:grid;grid-template-columns:118px minmax(0,1fr);gap:12px;align-items:start}
+.verdict{border-radius:8px;padding:8px 10px;margin:8px 0;font-size:12.5px;line-height:1.45;background:#10261c;border:1px solid #2e5a43}
+.verdict.warn{background:#2a2412;border-color:#6d5d2b;color:#f6e7bf}
+.verdict.bad{background:#2d1712;border-color:#7a3d2e;color:#f7d2c6}
+.kv{display:grid;grid-template-columns:1fr auto;gap:3px 10px;font-size:12px;margin:6px 0}
+.kv dt{color:var(--muted)}
+.kv dd{margin:0;text-align:right;font-family:var(--mono);color:var(--ink)}
+.crateItem{display:flex;justify-content:space-between;gap:8px;align-items:center;padding:5px 0;border-bottom:1px solid #1d3629;font-size:12px}
+.crateItem button{background:none;border:1px solid var(--line2);border-radius:6px;padding:3px 8px;font-size:11px;color:var(--body)}
+.flag{display:inline-block;font:500 10px var(--mono);letter-spacing:.04em;border:1px solid #4e6f5e;border-radius:4px;padding:1px 5px;margin:2px 3px 0 0;color:#cfe3d7}
+.flag.warn{border-color:#8d7a3b;color:#f3dea4}
+.res{position:absolute;inset:0}
+.phead{position:absolute;top:34px;bottom:44px;width:2px;background:#fff3cf;box-shadow:0 0 12px #fff3cf;left:20px;pointer-events:none;opacity:0}
+.phead.on{opacity:1}
+g.playing rect{opacity:1!important;stroke:#fff3cf;stroke-width:2}
+.row.sounding .rowMain{box-shadow:inset 3px 0 #fff3cf;background:#232513}
+
+/* ranked list + inspector */
+.rank,.inspector{background:linear-gradient(160deg,#0f241b,#0a1813);border:1px solid var(--line);border-radius:13px;padding:13px 12px}
+.rankHead{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin:0 2px 8px}
+.rankHead h3{margin:3px 0 0;font-size:17px;font-weight:500;letter-spacing:-.02em}
+.rankTot{text-align:right;font-size:13px}
+.rankTot small{display:block;color:var(--muted);font-size:10px;margin-top:2px}
+.rankCols{display:grid;grid-template-columns:22px minmax(0,1fr) 84px 76px 28px;gap:6px;padding:0 6px 6px;border-bottom:1px solid var(--line);font-size:9.5px;color:var(--faint);letter-spacing:.08em;text-transform:uppercase}
+.rankCols span:nth-child(3),.rankCols span:nth-child(4){text-align:right}
+.row{display:grid;grid-template-columns:minmax(0,1fr) 28px;align-items:center;border-bottom:1px solid #16301f}
+.rowMain{display:grid;grid-template-columns:22px minmax(0,1fr) 84px 76px;gap:6px;align-items:center;background:none;border:0;text-align:left;padding:7px 6px;border-radius:7px;min-height:44px;width:100%;color:var(--body)}
+.rowMain:hover{background:#12291f}
+.row.sel .rowMain{background:#1a3a2a;color:var(--ink)}
+.row.holds .rowMain{background:#12291f;box-shadow:inset 2px 0 #9ef8bd}
+.rk{font-size:10.5px;color:var(--faint)}
+.rn{display:flex;flex-direction:column;gap:3px;min-width:0}
+.rname{font-size:13px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rsub{font-size:10.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rbar{height:3px;background:#1b3327;border-radius:2px;overflow:hidden}
+.rbar i{display:block;height:100%}
+.rv,.rm{font-size:11px;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rm{color:var(--muted)}
+.row.k-denied .rname{color:var(--muted)}
+.row.k-denied .rv{color:var(--faint)}
+.rowEnter{background:none;border:1px solid transparent;border-radius:7px;height:34px;color:var(--muted);font-size:14px}
+.rowEnter:hover{border-color:#3f7d5c;color:var(--ink);background:#12291f}
+.rowEnter.none{border:0;background:none}
+.recon{margin:8px 4px 0;font-size:10.5px;color:var(--muted);line-height:1.5}
+.recon.ok b{color:var(--mint);font-weight:500}
+.fogsw{background:repeating-linear-gradient(135deg,#b78962 0 3px,#7f6247 3px 6px)!important}
+.inspector .iName{margin:6px 0 2px;font-size:clamp(20px,1.8vw,27px);font-weight:500;letter-spacing:-.04em;line-height:1.1;overflow-wrap:anywhere}
+.iPath{font-size:10.5px;color:var(--muted);overflow-wrap:anywhere}
+.iBig{margin-top:14px;font:500 28px/1 var(--mono);letter-spacing:-.05em}
+.iExact{font-size:11px;color:var(--muted);margin-top:4px}
+.iRule{height:1px;background:var(--line);margin:13px 0}
+.facts{display:grid;grid-template-columns:auto minmax(0,1fr);gap:6px 12px;margin:0;font-size:12px}
+.facts dt{color:var(--muted)}
+.facts dd{margin:0;text-align:right;font-family:var(--mono);font-size:11.5px;color:var(--ink);overflow-wrap:anywhere}
+.ageBar{display:flex;height:10px;border-radius:3px;overflow:hidden;margin:10px 0 4px}
+.ageLeg{display:flex;justify-content:space-between;font-size:9.5px;color:var(--faint)}
+.spark{display:block;margin-top:6px}
+.spl{fill:none;stroke:#9ef8bd;stroke-width:1.5}
+.spd{fill:#9ef8bd}
+.spgap{font-size:8px;fill:#f3dea4}
+.iNote{font-size:12px;color:var(--body);line-height:1.5;margin:12px 0 0}
+.iNote b{color:var(--ink);font-weight:500}
+.plaque{margin-top:12px;border:1px solid #6d5d2b;background:#1d1a0e;border-radius:9px;padding:10px 11px;font-size:12px;color:#efe1b8;line-height:1.5}
+.plaque .eyebrow{color:#cdb67a}
+.iActions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+.iActions button{flex:1 1 auto;min-height:40px;border-radius:8px;border:1px solid #3a6a51;background:#10261c;padding:8px 12px;font-size:13px}
+.iActions button.primary{background:#1f5a3b;border-color:#7add9f;font-weight:600}
+.iActions button:hover:not(:disabled){filter:brightness(1.15)}
+.citeBox{margin-top:14px;border:1px solid #4c8062;border-radius:9px;background:#10251b;padding:12px;font-size:12px;line-height:1.5}
+.citeBox .eyebrow{color:#98e6b3}
+.citeBox p{margin:7px 0;color:var(--body)}
+.citeBox strong{color:var(--ink)}
+.citeBox .citeActions{display:flex;gap:7px;flex-wrap:wrap;margin-top:9px}
+.citeBox button{border:1px solid #478263;background:#173b29;color:var(--ink);border-radius:7px;min-height:34px;padding:5px 9px}
+.citeBox button:hover{background:#235039}
+.citeBox .citeResult{margin-top:9px;padding:8px;border-left:3px solid #91d6a8;background:#0a1b13}
+.citeBox .citeResult.incomparable{border-color:#e1b571}
+.footer{display:flex;justify-content:space-between;gap:18px;flex-wrap:wrap;margin:26px 2px 0;color:var(--muted);font-size:11.5px;line-height:1.6}
+.footer b{color:var(--body);font-weight:500}
+dialog{background:#0c1b15;color:var(--ink);border:1px solid #3f7d5c;border-radius:14px;padding:18px 20px;max-width:560px;width:calc(100% - 32px)}
+dialog::backdrop{background:#020806c0}
+dialog h2{margin:0 0 10px;font-size:18px;font-weight:500}
+dialog table{border-collapse:collapse;width:100%;font-size:12.5px}
+dialog td{padding:5px 6px;border-bottom:1px solid var(--line);vertical-align:top}
+dialog td:first-child{font-family:var(--mono);white-space:nowrap;color:var(--mint);font-size:11.5px}
+kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line2);border-radius:4px;padding:0 4px}
+
+/* reduced motion: no transitions or keyframes anywhere */
+.rm *,.rm *::before,.rm *::after{transition:none!important;animation:none!important;scroll-behavior:auto!important}
+
+@media (max-width:1320px){
+ .shell{grid-template-columns:minmax(0,1fr) 340px}
+ .modes{grid-column:1/-1;position:static;max-height:none;overflow:visible;padding:0}
+ .mgroups{display:flex;gap:6px;overflow-x:auto;padding-bottom:6px;scrollbar-width:thin}
+ .mgroup{display:contents}
+ .mgroup h3{display:none}
+ .mbtn{flex:none;width:auto;min-width:0;grid-template-columns:auto auto 8px;background:#0b1812;border-color:var(--line)}
+ .mbtn .mq{display:none}
+}
+@media (max-width:860px){
+ .shell{grid-template-columns:minmax(0,1fr)}
+ .side{position:static;max-height:none;overflow:visible}
+ .ledger{grid-template-columns:minmax(0,1fr) auto}
+ .ledger .ledgerMain{grid-column:1/-1;grid-row:2}
+ .stage{height:clamp(360px,64vh,560px)}
+ .crateWrap{grid-template-columns:minmax(0,1fr);grid-template-rows:42% minmax(0,1fr)}
+ .crateMap{border-right:0;border-bottom:1px solid #1d3629}
+}
+@media (max-width:480px){
+ .rankCols,.rowMain{grid-template-columns:20px minmax(0,1fr) 76px 60px}
+ .rankCols{grid-template-columns:20px minmax(0,1fr) 76px 60px 28px}
+ .controls input[type=range]{width:110px}
+ .caution{font-size:10px}
+}
+</style>
+</head>
+<body>
+<a class="skip" href="#rank">Skip to the ranked list</a>
+<div class="caution" role="note"><span><b>Concept lab · synthetic data</b> — every value is invented; no disk was read</span><span>No delete, move or cleanup action exists here · nothing is called safe</span></div>
+<div class="frame">
+ <header class="mast">
+  <div class="brand"><span class="mark" aria-hidden="true">S</span><div><h1>Space Atlas <em>interaction lab</em></h1><p>One recursive synthetic hierarchy seen through sixteen lenses: tiles, planet and archaeology, plus the thirteen concepts in the <a href="../SPACE-ATLAS-EXPERIENCE-2026-09-25.md">experience direction</a>. Scope, selection and ancestors are shared; switching lens changes the grammar, never the data or your place.</p></div></div>
+  <div class="mastTools"><button type="button" class="chip" id="motionBtn" aria-pressed="false">Reduce motion</button><button type="button" class="chip" id="helpBtn">Keyboard · ?</button></div>
+ </header>
+
+ <section class="ledger" aria-label="Synthetic volume ledger">
+  <div><div class="eyebrow">Volume ledger · synthetic</div><h2>Example volume · 1 TiB</h2></div>
+  <div class="ledgerMain"><div class="ledgerBar" id="ledgerBar"></div><div class="ledgerLegend" id="ledgerLegend"></div></div>
+  <div class="ledgerFree" id="ledgerFree"></div>
+ </section>
+
+ <div class="shell">
+  <nav class="modes" aria-label="Lenses"><div class="mgroups" id="modeNav"></div></nav>
+
+  <main class="stageCol" id="main">
+   <nav class="descent" id="descent" aria-label="Ancestor strata: current location"></nav>
+   <div class="stageHead"><div><h2 id="modeTitle"></h2><p class="question" id="modeQ"></p></div></div>
+   <div class="gate" id="gate"></div>
+   <div class="controls" id="controls" aria-label="Lens controls"></div>
+   <div class="stage" id="stage" role="region" aria-label="Lens stage"><div class="view" id="view"></div></div>
+   <div class="stageFoot" id="stageFoot" aria-live="off"></div>
+  </main>
+
+  <aside class="side" aria-label="Exact values">
+   <section class="rank" id="rank" aria-label="Ranked children with exact values"></section>
+   <section class="inspector" id="inspector" aria-label="Inspector"></section>
+  </aside>
+ </div>
+
+ <footer class="footer"><span><b>Space Atlas interaction lab</b> · synthetic concept for System Sentinel · 25 Sep 2026. Values, history, events and hashes are invented to exercise the interactions; each lens names the evidence a real feature would need first.</span><span>Area always means allocated bytes unless the lens names another metric. The ranked list is the exact, accessible equivalent of every picture.</span></footer>
+</div>
+<div class="sr" id="live" aria-live="polite"></div>
+<dialog id="help" aria-labelledby="helpTitle">
+ <h2 id="helpTitle">One navigation grammar</h2>
+ <table>
+  <tr><td>↑ ↓ · j k</td><td>Move the selection through the ranked children. Selecting inspects in place; it never navigates.</td></tr>
+  <tr><td>→ · Enter</td><td>Enter the selected folder. A file or tail opens its evidence plaque instead; it has no inner world.</td></tr>
+  <tr><td>← · Backspace · Esc</td><td>Ascend one level. The child you came from stays selected.</td></tr>
+  <tr><td>Home</td><td>Return to the volume.</td></tr>
+  <tr><td>[ ]</td><td>Previous or next lens. Scope and selection are kept.</td></tr>
+  <tr><td>Planet (focused)</td><td>Arrows rotate · Space selects the region facing you.</td></tr>
+  <tr><td>Skyline (focused)</td><td>← → rotate the city 90° · T toggles top-down.</td></tr>
+  <tr><td>Core map (focused)</td><td>Arrows move the drill.</td></tr>
+  <tr><td>?</td><td>This sheet.</td></tr>
+ </table>
+ <p style="font-size:12px;color:var(--muted)">Pointer: click selects, double-click enters. Touch: every row has an enter button (↘), and breadcrumbs ascend — no gesture is required.</p>
+ <form method="dialog"><button class="cbtn primary">Close</button></form>
+</dialog>
+<noscript><p style="padding:20px">This concept lab needs JavaScript.</p></noscript>
+
+<script>
+(()=>{
+'use strict';
+/* =====================================================================
+   Constants and the synthetic hierarchy
+   ===================================================================== */
+const GiB=1073741824,MiB=1048576,KiB=1024,CAPACITY=1099511627776;
+const SNAP=['07 Aug','14 Aug','21 Aug','28 Aug','04 Sep','11 Sep','18 Sep','25 Sep'],NS=8,GAP=4,NOW=7;
+const PALETTE=['#7fe0a6','#8fc2e8','#e8c07a','#c6a4ee','#ea9a80','#79cfc4','#c9d97a','#e6a2c2','#a7b7ff','#d8c3a0'];
+const AGE_BANDS=['< 7 d','7–30 d','30–180 d','180 d–1 y','> 1 y'],AGE_EDGES=[0,7,30,180,365,1460];
+const AGE_COLORS=['#d4ffe0','#8ff0b5','#58b98a','#3f8a6b','#2a5a48'];
+const AGE={fresh:[.62,.22,.1,.05,.01],active:[.18,.27,.32,.16,.07],settled:[.03,.06,.24,.39,.28],old:[0,.01,.03,.12,.84],mixed:[.08,.12,.3,.25,.25]};
+const NEWEST={fresh:.2,active:1.5,settled:6,old:400,mixed:3};
+
+function rng(a){return()=>{a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+const rand=rng(9251);
+const D=(name,o,kids)=>({name,kind:'folder',o:o||{},kids});
+const F=(name,gib,o)=>({name,kind:'file',gib,o:o||{}});
+const DENY=name=>({name,kind:'denied',o:{note:'The walk could not read this folder. It has no measure and no area; its parent total is a lower bound.'}});
+function GEN(name,gib,count,o){
+ o=o||{};const listed=Math.min(o.listed||6,count-1),top=o.topShare??.3;
+ const w=[];for(let i=0;i<listed;i++)w.push(1/Math.pow(i+1,1.15));const ws=w.reduce((a,b)=>a+b,0);
+ const kids=[],used=new Set();
+ for(let i=0;i<listed;i++){let nm;do{nm=(o.prefix||'file-')+String(Math.floor(rand()*9000)+1000)+(o.ext??'.bin')}while(used.has(nm));used.add(nm);kids.push(F(nm,gib*top*w[i]/ws))}
+ const rest=count-listed;
+ kids.push({name:`${rest.toLocaleString('en-US')} smaller files`,kind:'tail',gib:gib*(1-top),count:rest,o:{}});
+ const fo={...o};['listed','topShare','prefix','ext'].forEach(k=>delete fo[k]);
+ return D(name,fo,kids);
+}
+const SPEC=D('Volume',{},[
+ D('Home',{},[
+  D('Work',{age:'active',g:.02,churn:900},[
+   D('Build output',{age:'fresh',g:.06,churn:5200,note:'Generated by build tools in this synthetic story. The owning tool, not the size, decides what could be regenerated.'},[
+    F('renderer.cache',27.4,{g:.09,born:2}),F('objects.pack',13.2,{g:.03}),F('app.bundle.js',3.1,{g:.05}),
+    GEN('intermediate',4.6,14200,{listed:8,prefix:'obj-',ext:'.o',topShare:.18,lr:.9})]),
+   D('Projects',{age:'active',g:.012},[
+    D('atlas-app',{},[GEN('node_modules',6.8,310400,{listed:8,prefix:'pkg-',ext:'.js',topShare:.08,lr:.71,age:'settled',churn:2400}),GEN('src',1.2,48200,{listed:6,prefix:'mod-',ext:'.ts',topShare:.1,lr:.8,age:'fresh'})]),
+    D('thesis-models',{age:'settled',g:.004},[F('dataset.parquet',9.6,{exact:true}),F('weights-final.bin',3.8),F('weights-draft.bin',1.3)]),
+    D('field-notes',{age:'mixed'},[F('lecture-week3.mp4',1.8,{exact:true}),GEN('notes',2.1,3400,{listed:6,prefix:'note-',ext:'.md',topShare:.3})])]),
+   D('Virtual machines',{age:'active',g:.01,churn:40},[
+    F('dev-vm.vhdx',41.3,{lr:3.1,flags:['sparse'],note:'A dynamically expanding disk image: its logical length is far larger than its local allocation.'}),
+    F('lab-vm.vhdx',22.8,{lr:2.8,flags:['sparse']})])]),
+  D('Media',{age:'settled',g:.004,churn:30},[
+   D('Video',{},[F('clip-0412.mov',4.1,{exact:true}),F('lecture-week3.mp4',1.8,{exact:true}),GEN('clips',82.3,212,{listed:8,prefix:'clip-',ext:'.mov',topShare:.7})]),
+   D('Raw photos',{},[F('IMG_2201.raw',.061,{exact:true,lr:1}),GEN('shoots',42.3,18300,{listed:8,prefix:'IMG_',ext:'.raw',topShare:.04})]),
+   GEN('Music',17.9,9100,{listed:6,prefix:'track-',ext:'.flac',topShare:.03,age:'old'})]),
+  D('Downloads',{age:'mixed',g:.018,churn:120},[
+   D('Installers',{},[F('suite-setup-2026.exe',6.4,{exact:true,age:'active'}),F('driver-bundle.zip',2.2),GEN('older installers',22.6,190,{listed:6,prefix:'setup-',ext:'.msi',topShare:.4,age:'old'})]),
+   D('Captures',{age:'fresh',g:.05},[F('clip-0412.mov',4.1,{exact:true}),GEN('screen recordings',20.9,160,{listed:8,prefix:'rec-',ext:'.mp4',topShare:.6})]),
+   D('Other downloads',{},[F('lecture-week3.mp4',1.8,{exact:true}),GEN('misc',9.5,1400,{listed:6,prefix:'dl-',ext:'.bin',topShare:.35})])]),
+  D('Cloud drive',{age:'mixed',g:.01,flags:['placeholder'],churn:60,note:'Most files here are cloud placeholders: large logical length, small local allocation. In a real drive, removing a placeholder can remove the cloud copy too.'},[
+   D('Shared albums',{lr:68},[F('IMG_2201.raw',.0004,{exact:true,logicalGiB:.061}),GEN('albums',.9,12600,{listed:6,prefix:'album-',ext:'.jpg',topShare:.2})]),
+   GEN('Documents',2.1,5300,{listed:6,prefix:'doc-',ext:'.pdf',topShare:.2,lr:10.5}),
+   GEN('Team files',.4,2100,{listed:5,prefix:'team-',ext:'.pptx',topShare:.3,lr:32})]),
+  D('Tool caches',{age:'fresh',churn:3000},[
+   GEN('Package store',30.1,1900000,{listed:8,prefix:'blob-',ext:'',topShare:.02,lr:.66,h:[.93,.97,.12,.31,null,.66,.86,1],clean:{at:2,what:'Package manager clean command'}}),
+   GEN('Render cache',19.4,26000,{listed:6,prefix:'tile-',ext:'.bin',topShare:.1,g:.03}),
+   GEN('Browser cache',6.2,92000,{listed:6,prefix:'entry-',ext:'',topShare:.05,lr:.74,h:[.71,.8,.88,.97,null,.09,.52,1],clean:{at:5,what:'Browser “clear cached files”'}}),
+   GEN('Temp',4.1,88000,{listed:6,prefix:'tmp-',ext:'.tmp',topShare:.06,lr:.7,g:.04})]),
+  D('Archive',{age:'old',g:0,churn:2},[
+   GEN('Older material',30.2,7400,{listed:8,prefix:'arc-',ext:'.zip',topShare:.3,lr:1.46,flags:['compressed'],note:'Filesystem-compressed in this story: logical length exceeds allocation.'}),
+   D('Records',{},[GEN('ledgers',11.9,3100,{listed:6,prefix:'ledger-',ext:'.csv',topShare:.25}),F('index.db',.012,{age:'fresh',newest:.1,note:'One small file written recently. It must not make the whole folder look recently used.'})]),
+   DENY('Locked vault')]),
+  D('Backups',{age:'settled',g:.006,note:'Intentional backup copies in this synthetic story.'},[F('suite-setup-2026.exe',6.4,{exact:true}),F('dataset.parquet',9.6,{exact:true}),GEN('phone backup',5.1,2200,{listed:6,prefix:'bk-',ext:'.dat',topShare:.3})])]),
+ D('Applications',{age:'settled',g:.003,churn:80},[
+  D('Games',{},[GEN('Starfall',38.6,4100,{listed:6,prefix:'pak-',ext:'.pak',topShare:.8}),GEN('Tidewater',21.4,2900,{listed:6,prefix:'pak-',ext:'.pak',topShare:.75}),GEN('Small games',10.1,6400,{listed:6,prefix:'game-',ext:'.bin',topShare:.3})]),
+  GEN('Tools',26.2,41000,{listed:8,prefix:'lib-',ext:'.dll',topShare:.15}),
+  D('Runtimes',{},[F('vc-runtime.dll',.21,{exact:true,lr:1}),GEN('libraries',15.6,58000,{listed:6,prefix:'rt-',ext:'.dll',topShare:.1})])]),
+ D('System data',{age:'mixed',g:.002,churn:400},[
+  F('pagefile.sys',16),F('hiberfil.sys',12.8),
+  D('Component store',{flags:['hardlinks'],note:'Many files here are hardlinked elsewhere; this walk attributes each file once.'},[F('vc-runtime.dll',0,{allocZero:true,logicalGiB:.21,flags:['hardlink-repeat'],note:'A second name for the same file. This walk attributes its bytes once, under Applications / Runtimes.'}),GEN('components',14.3,96000,{listed:6,prefix:'cmp-',ext:'.dll',topShare:.1})]),
+  DENY('Restricted')]),
+ GEN('Shared app data',17.4,120000,{listed:8,prefix:'data-',ext:'.db',topShare:.2,age:'active',g:.01})]);
+
+const byId=new Map();
+const slug=s=>s.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')||'x';
+function build(spec,parent,inh){
+ const o=spec.o,I={...inh};['age','g','lr','churn','h','born'].forEach(k=>{if(o[k]!==undefined)I[k]=o[k]});
+ const n={name:spec.name,kind:spec.kind,parent,children:[],flags:o.flags||[],note:o.note||'',clean:o.clean||null};
+ let id=parent?(parent.id==='root'?'':parent.id+'/')+slug(spec.name):'root';while(byId.has(id))id+='-2';n.id=id;byId.set(id,n);
+ if(spec.kind==='denied'){Object.assign(n,{alloc:null,logical:null,files:null,coverage:'denied',hist:Array(NS).fill(null),age:null,newest:null,churn:null});return n}
+ if(spec.kind==='file'||spec.kind==='tail'){
+  n.alloc=o.allocZero?0:Math.round(spec.gib*GiB*(o.exact?1:1+(rand()-.5)*.003));
+  const lr=o.lr??I.lr??(spec.kind==='tail'?.97:.996);
+  n.logical=o.logicalGiB!=null?Math.round(o.logicalGiB*GiB):Math.round(n.alloc*lr);
+  n.files=spec.kind==='tail'?spec.count:1;n.coverage='complete';
+  const ak=o.age||I.age||'mixed';n.age=AGE[ak].slice();n.newest=o.newest??NEWEST[ak]*(.6+rand()*.8);
+  n.churn=o.churn??Math.round((I.churn||20)*(.2+rand())/4);
+  const h=o.h||I.h,g=o.g??I.g??.004,born=o.born??I.born;n.hist=[];
+  for(let i=0;i<NS;i++){let v=h?(h[i]==null?null:Math.round(n.alloc*h[i])):Math.round(n.alloc/Math.pow(1+g,NOW-i)*(i===NOW?1:1+(rand()-.5)*.006));if(born!=null&&i<born)v=0;if(i===GAP)v=null;n.hist.push(v)}
+  n.hist[NOW]=n.alloc;return n;
+ }
+ n.children=spec.kids.map(k=>build(k,n,I));
+ const real=n.children.filter(c=>c.alloc!=null);
+ n.alloc=real.reduce((s,c)=>s+c.alloc,0);n.logical=real.reduce((s,c)=>s+c.logical,0);n.files=real.reduce((s,c)=>s+c.files,0);
+ n.coverage=n.children.some(c=>c.coverage!=='complete')?'partial':'complete';
+ n.age=[0,0,0,0,0];real.forEach(c=>c.age.forEach((f,i)=>n.age[i]+=f*c.alloc));n.age=n.age.map(v=>n.alloc?v/n.alloc:0);
+ n.newest=Math.min(...real.map(c=>c.newest));n.churn=real.reduce((s,c)=>s+c.churn,0);
+ n.hist=Array.from({length:NS},(_,i)=>i===GAP?null:real.reduce((s,c)=>s+(c.hist[i]||0),0));
+ return n;
+}
+const root=build(SPEC,null,{});
+const UNCH={id:'uncharted',name:'Uncharted',kind:'uncharted',parent:root,children:[],flags:[],note:'',coverage:'unattributed',logical:null,files:null,age:null,newest:null,churn:null,hist:[112.4,113.1,115.0,116.2,null,117.3,117.9,118.4].map(v=>v==null?null:Math.round(v*GiB))};
+UNCH.alloc=UNCH.hist[NOW];byId.set(UNCH.id,UNCH);
+const USED=root.alloc+UNCH.alloc,FREE=CAPACITY-USED;
+function at(...names){let n=root;for(const nm of names){n=n.children.find(c=>c.name===nm);if(!n)throw new Error('missing '+names.join(' / '))}return n}
+
+/* Synthetic investigations: hash groups, transfer events, targets */
+const TWINS=[
+ {id:'clip',title:'clip-0412.mov',cls:'copy',m:[at('Home','Media','Video','clip-0412.mov'),at('Home','Downloads','Captures','clip-0412.mov')]},
+ {id:'lecture',title:'lecture-week3.mp4',cls:'copy',m:[at('Home','Media','Video','lecture-week3.mp4'),at('Home','Downloads','Other downloads','lecture-week3.mp4'),at('Home','Work','Projects','field-notes','lecture-week3.mp4')]},
+ {id:'suite',title:'suite-setup-2026.exe',cls:'backup',m:[at('Home','Downloads','Installers','suite-setup-2026.exe'),at('Home','Backups','suite-setup-2026.exe')]},
+ {id:'dataset',title:'dataset.parquet',cls:'backup',m:[at('Home','Work','Projects','thesis-models','dataset.parquet'),at('Home','Backups','dataset.parquet')]},
+ {id:'vc',title:'vc-runtime.dll',cls:'hardlink',m:[at('Applications','Runtimes','vc-runtime.dll'),at('System data','Component store','vc-runtime.dll')]},
+ {id:'img',title:'IMG_2201.raw',cls:'unknown',m:[at('Home','Media','Raw photos','IMG_2201.raw'),at('Home','Cloud drive','Shared albums','IMG_2201.raw')]}];
+const TWIN_CLS={
+ copy:{label:'Independent copies',color:'#f2d27a',dash:'',text:'Separate files whose content hashes match. They might be duplicates; either copy could still be intentional.'},
+ backup:{label:'Backup copy',color:'#8fc2e8',dash:'7 4',text:'Hashes match and one copy lives under Backups. The rule that labels it a backup is shown, not assumed.'},
+ hardlink:{label:'Hardlink · one file',color:'#9ef8bd',dash:'1 4',text:'Same file ID: two names for one allocation. Not a duplicate — there are no extra bytes.'},
+ unknown:{label:'Not established',color:'#9aa89f',dash:'2 6',text:'One side is a cloud placeholder. Hashing it would download its content, so the match is not established.'}};
+const PORTS={net:'Arrived over the network',proc:'Written by local processes'};
+const FLOWS=[
+ {t:1,from:'net',to:at('Home','Downloads','Installers'),gib:6.4,basis:'incoming',what:'Download finished: suite-setup-2026.exe'},
+ {t:2,from:at('Home','Downloads','Captures'),to:at('Home','Media','Video'),gib:3.2,basis:'observed',what:'Move with file identity preserved'},
+ {t:2,from:'net',to:at('Home','Cloud drive','Documents'),gib:.8,basis:'incoming',what:'Cloud sync downloaded file contents'},
+ {t:3,from:'proc',to:at('Home','Tool caches','Package store'),gib:8.9,basis:'generated',what:'Package install repopulated the store'},
+ {t:3,from:at('Home','Downloads','Installers'),to:at('Home','Backups'),gib:6.4,basis:'inferred',what:'Same name and size appeared; no identity-preserving event'},
+ {t:5,from:'proc',to:at('Home','Work','Build output'),gib:11.8,basis:'generated',what:'Build tools wrote new output'},
+ {t:5,from:at('Home','Downloads','Other downloads'),to:at('Home','Work','Projects','thesis-models'),gib:1.3,basis:'inferred',what:'Matching size and name; the join is an inference'},
+ {t:6,from:'net',to:at('Home','Downloads','Captures'),gib:4.1,basis:'incoming',what:'Download finished: clip-0412.mov'},
+ {t:6,from:at('Home','Media','Video'),to:at('Home','Media','Video'),gib:2.4,basis:'observed',what:'Rename inside the folder'},
+ {t:6,from:'proc',to:at('Home','Tool caches','Browser cache'),gib:3.2,basis:'generated',what:'Browser refilled its cache'},
+ {t:7,from:'net',to:at('Applications','Games'),gib:5.8,basis:'incoming',what:'Game update downloaded'},
+ {t:7,from:at('Home','Work','Build output'),to:at('Home','Work','Projects'),gib:.6,basis:'observed',what:'Move with file identity preserved'}];
+FLOWS.forEach((f,i)=>{f.id='f'+i;f.bytes=Math.round(f.gib*GiB)});
+const BASIS={incoming:{label:'Incoming · network',color:'#8fc2e8',dash:''},generated:{label:'Written locally',color:'#c9d97a',dash:''},observed:{label:'Observed move',color:'#9ef8bd',dash:''},inferred:{label:'Inferred match',color:'#ea9a80',dash:'8 6'}};
+const TARGETS={
+ ext:{label:'External drive · exFAT · 128 KiB clusters',free:900*GiB,cluster:128*KiB,sparse:false,limit:null,compress:null},
+ ntfs:{label:'Second internal · NTFS · 4 KiB clusters',free:380*GiB,cluster:4*KiB,sparse:true,limit:null,compress:null},
+ fat:{label:'USB stick · FAT32 · 32 KiB clusters',free:57.6*GiB,cluster:32*KiB,sparse:false,limit:4*GiB-1,compress:null},
+ backup:{label:'Backup quota · compressing and deduplicating',free:288*GiB,cluster:0,sparse:true,limit:null,compress:[.35,1]}};
+const REEF=[...byId.values()].filter(n=>n.clean);
+
+/* =====================================================================
+   Helpers
+   ===================================================================== */
+const $=s=>document.querySelector(s);
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const pad2=i=>String(i).padStart(2,'0');
+const short=(s,n)=>s.length>n?s.slice(0,n-1)+'…':s;
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const num=n=>n==null?'—':n.toLocaleString('en-US');
+function fmt(b){if(b==null)return '—';if(b===0)return '0 B';const a=Math.abs(b);if(a>=GiB*.995)return (b/GiB).toFixed(2)+' GiB';if(a>=MiB)return (b/MiB).toFixed(1)+' MiB';if(a>=KiB)return (b/KiB).toFixed(1)+' KiB';return Math.round(b)+' B'}
+const fmtS=d=>d==null?'—':(d>0?'+':d<0?'−':'±')+fmt(Math.abs(d));
+const exact=b=>b==null?'no measure':Math.round(b).toLocaleString('en-US')+' bytes';
+function pct(x){if(x==null||!isFinite(x))return '—';if(x===0)return '0%';if(x<.001)return '<0.1%';return (x*100).toFixed(1)+'%'}
+const ge=n=>n&&n.coverage==='partial'?'≥ ':'';
+function fmtDays(d){if(d==null)return '—';if(d<1)return Math.max(1,Math.round(d*24))+' h';if(d<60)return Math.round(d)+' d';if(d<730)return Math.round(d/30.4)+' mo';return (d/365).toFixed(1)+' y'}
+function medianAge(age){if(!age)return null;let c=0;for(let i=0;i<5;i++){if(age[i]>0&&c+age[i]>=.5){const t=(.5-c)/age[i],a=AGE_EDGES[i],b=AGE_EDGES[i+1];return a===0?b*t:Math.exp(Math.log(a)+(Math.log(b)-Math.log(a))*t)}c+=age[i]}return 1460}
+const hexRgb=h=>[1,3,5].map(i=>parseInt(h.slice(i,i+2),16));
+function mix(a,b,t){const A=hexRgb(a),B=hexRgb(b);return '#'+A.map((v,i)=>Math.round(B[i]+(v-B[i])*t).toString(16).padStart(2,'0')).join('')}
+function hash(s){let h=2166136261;for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619)}return (h>>>0)/4294967296}
+const ranked=n=>n.children.slice().sort((a,b)=>(b.alloc??-1)-(a.alloc??-1)||a.name.localeCompare(b.name));
+const measured=n=>ranked(n).filter(c=>c.alloc!=null);
+const enterable=n=>!!n&&n.kind==='folder'&&n.children.length>0;
+function ancestry(n){const a=[];while(n){a.unshift(n);n=n.parent}return a}
+function isAncestor(a,b){if(!a||!b)return false;let q=b.parent;while(q){if(q===a)return true;q=q.parent}return false}
+const within=(n,sc)=>n===sc||isAncestor(sc,n);
+function topChild(n,sc){if(!n||n===sc)return null;while(n.parent&&n.parent!==sc)n=n.parent;return n.parent===sc?n:null}
+function hasFlag(n,f){while(n){if(n.flags&&n.flags.includes(f))return true;n=n.parent}return false}
+function leavesOf(n,out=[]){if(n.kind==='folder')n.children.forEach(c=>leavesOf(c,out));else out.push(n);return out}
+const colorCache=new Map();
+function colorOf(n){if(!n)return '#9ef8bd';if(n===UNCH)return '#9a9a86';if(n.kind==='denied')return '#6f7f76';if(!n.parent)return '#9ef8bd';let c=colorCache.get(n);if(c)return c;const i=measured(n.parent).indexOf(n);c=PALETTE[Math.max(0,i)%PALETTE.length];if(n.kind==='tail')c=mix(c,'#8a948e',.45);colorCache.set(n,c);return c}
+const regionColor=n=>n===S.scope?'#dff7e6':colorOf(topChild(n,S.scope)||n);
+const pathOf=n=>ancestry(n).map(a=>a.name).join(' / ');
+function kindWord(n){return n===UNCH?'uncharted remainder':n.kind==='file'?'file':n.kind==='tail'?'tail aggregate':n.kind==='denied'?'unreadable folder':'folder'}
+function squarify(items,x,y,w,h){
+ const out=[],list=items.filter(i=>i.w>0).sort((a,b)=>b.w-a.w),tot=list.reduce((s,i)=>s+i.w,0);if(tot<=0||w<=0||h<=0)return out;
+ const sc=w*h/tot;let rest=list.map(i=>({i,a:i.w*sc}));
+ const worst=(row,s)=>{let sum=0,mx=0,mn=Infinity;row.forEach(r=>{sum+=r.a;mx=Math.max(mx,r.a);mn=Math.min(mn,r.a)});return Math.max(s*s*mx/(sum*sum),sum*sum/(s*s*mn))};
+ while(rest.length){const s=Math.min(w,h);let row=[rest[0]],best=worst(row,s),k=1;while(k<rest.length){const r2=row.concat(rest[k]),v=worst(r2,s);if(v<=best){row=r2;best=v;k++}else break}
+  const rs=row.reduce((q,r)=>q+r.a,0);
+  if(w>=h){const cw=rs/h;let cy=y;row.forEach(r=>{const ch=r.a/cw;out.push({node:r.i.node,w0:r.i.w,x,y:cy,w:cw,h:ch});cy+=ch});x+=cw;w-=cw}
+  else{const rh=rs/w;let cx=x;row.forEach(r=>{const rw=r.a/rh;out.push({node:r.i.node,w0:r.i.w,x:cx,y,w:rw,h:rh});cx+=rw});y+=rh;h-=rh}
+  rest=rest.slice(row.length)}
+ return out;
+}
+const svgNS='http://www.w3.org/2000/svg';
+const box2=el=>{const b=el.getBoundingClientRect();return [b.width,b.height]};
+function arcPath(r,a0,a1){const x0=r*Math.cos(a0),y0=r*Math.sin(a0),x1=r*Math.cos(a1),y1=r*Math.sin(a1);return `M${x0.toFixed(2)},${y0.toFixed(2)}A${r},${r} 0 ${a1-a0>Math.PI?1:0} 1 ${x1.toFixed(2)},${y1.toFixed(2)}`}
+function spark(hist,w=300,h=48){const vals=hist.filter(v=>v!=null);if(!vals.length)return '';const mx=Math.max(...vals),mn=Math.min(...vals),r=mx-mn||1;const X=i=>6+i*(w-12)/(NS-1),Y=v=>h-8-(v-mn)/r*(h-18);let d='',pen=false;hist.forEach((v,i)=>{if(v==null){pen=false;return}d+=(pen?'L':'M')+X(i).toFixed(1)+','+Y(v).toFixed(1);pen=true});return `<svg class="spark" viewBox="0 0 ${w} ${h}" width="100%" height="${h}" aria-hidden="true"><path class="spl" d="${d}"/>${hist.map((v,i)=>v==null?`<text class="spgap" x="${X(i)}" y="${h-3}" text-anchor="middle">gap</text>`:`<circle class="spd" cx="${X(i)}" cy="${Y(v)}" r="${i===NOW?2.8:1.7}"/>`).join('')}</svg>`}
+
+/* =====================================================================
+   Shared state and navigation
+   ===================================================================== */
+const RMQ=matchMedia('(prefers-reduced-motion: reduce)');
+const S={mode:'tiles',scope:root,sel:null,reduce:RMQ.matches,memory:new Map(),
+ tilesDenom:'walk',terra:{p:.42,playing:false},ws:{depth:3,metric:'bytes'},sky:{rot:0,hmode:'log',ex:1,flat:false},
+ core:{u:.5,v:.5,strata:'hierarchy',depth:3},matter:{th:1},orbits:{basis:'bytes'},tide:{i:3},pr:{a:1,b:NOW,view:'net'},reef:{ev:0},
+ crate:{items:[],target:'ext'},metab:{a:0,b:NOW,show:{incoming:true,generated:true,observed:true,inferred:true},flow:null},cite:null,
+ twins:{cls:{copy:true,backup:true,hardlink:true,unknown:true},min:0,group:null},res:{len:8,vol:.5,playing:false,idx:-1,noise:true}};
+S.sel=ranked(root)[0];
+const view=$('#view'),stage=$('#stage'),ctlEl=$('#controls'),listEl=$('#rank'),inspEl=$('#inspector'),live=$('#live');
+function announce(t){live.textContent='';setTimeout(()=>{live.textContent=t},30)}
+function select(n,opt={}){if(!n)return;S.sel=n;S.memory.set(S.scope.id,n);render(opt)}
+function go(sc,sel,dir){if(!sc||sc===S.scope){if(sel)select(sel);return}
+ stopLive();PL.orient.set(S.scope.id,{yaw:PL.yaw,pitch:PL.pitch});
+ S.memory.set(S.scope.id,S.sel);S.scope=sc;
+ S.sel=sel||S.memory.get(sc.id)||ranked(sc)[0]||sc;if(S.sel!==sc&&!within(S.sel,sc))S.sel=ranked(sc)[0]||sc;
+ render({dir,from:focusKind()});
+ const k=sc.children.length;announce(`${dir==='in'?'Entered':'Now at'} ${sc.name}, level ${ancestry(sc).length-1}. ${k} ${k===1?'child':'children'}, ${ge(sc)}${fmt(sc.alloc)}. Selected ${S.sel.name}.`);
+}
+function enter(n){n=n||S.sel;if(!n)return;if(n===UNCH){announce('Uncharted is not a folder and has no Enter.');return}
+ if(!enterable(n)||n===S.scope){if(n!==S.scope){S.sel=n;render();announce(`${n.name} is a ${kindWord(n)}; it has no inner world. Its evidence plaque is shown.`)}return}
+ go(n,null,'in')}
+function ascend(){if(!S.scope.parent)return;const c=S.scope;go(S.scope.parent,c,'out')}
+function step(d){const rows=ranked(S.scope);if(!rows.length)return;const holder=S.sel===S.scope?null:(S.sel===UNCH?null:topChild(S.sel,S.scope));let i=holder?rows.indexOf(holder):-1;i=clamp(i<0?(d>0?0:rows.length-1):i+d,0,rows.length-1);select(rows[i],{from:focusKind()||'row'})}
+function focusKind(){const a=document.activeElement;if(!a)return null;if(a.classList.contains('rowMain'))return 'row';if(a.classList.contains('tile'))return 'tile';return null}
+function refocus(kind){if(!kind)return;let el=null;const id=CSS.escape(S.sel.id);if(kind==='row')el=listEl.querySelector(`.rowMain[data-row="${id}"]`);else if(kind==='tile')el=view.querySelector(`.tile[data-id="${id}"]`)||listEl.querySelector(`.rowMain[data-row="${id}"]`);if(el)el.focus({preventScroll:true})}
+
+/* =====================================================================
+   Shared tile painter (keyed, so layouts glide between states)
+   ===================================================================== */
+function paintTiles(box,rects,deco){
+ const old=new Map();box.querySelectorAll(':scope>.tile').forEach(e=>old.set(e.dataset.id,e));
+ rects.forEach((r,i)=>{const n=r.node;let b=old.get(n.id);
+  if(b)old.delete(n.id);else{b=document.createElement('button');b.type='button';b.dataset.id=n.id;b.innerHTML='<span class="tb"></span><span class="tx"></span><span class="tl"></span>';b.style.left=r.x+r.w/2+'px';b.style.top=r.y+r.h/2+'px';b.style.width='0px';b.style.height='0px';box.append(b)}
+  const d=deco?deco(n,r,i)||{}:{};const c=d.color||colorOf(n);
+  b.style.setProperty('--c1',mix(c,'#07130e',.66));b.style.setProperty('--c2',mix(c,'#07130e',.34));b.style.setProperty('--ce',c);
+  const size=r.w<44||r.h<28?'xs':(r.w<116||r.h<66?'s':'m');
+  const sel=S.sel===n,holds=!sel&&isAncestor(n,S.sel);
+  b.className=`tile ${size} k-${n.kind} ${n.coverage==='partial'?'partial':''} ${sel?'sel':''} ${holds?'holds':''} ${d.cls||''}`;
+  b.tabIndex=sel||(holds&&!rects.some(q=>q.node===S.sel))?0:-1;
+  b.setAttribute('aria-pressed',sel?'true':'false');
+  b.setAttribute('aria-label',d.aria||`${n.name}, ${ge(n)}${fmt(n.alloc)}${n.alloc!=null&&S.scope.alloc?', '+pct(n.alloc/S.scope.alloc)+' of '+S.scope.name:''}${n.coverage==='partial'?', partial, lower bound':''}. ${enterable(n)?'Enter to open.':''}`);
+  b.querySelector('.tx').innerHTML=d.extra||'';
+  b.querySelector('.tl').innerHTML=d.label??`<span class="tr">${pad2(i+1)}${n.coverage==='partial'?' · PARTIAL ≥':''}${n.kind==='tail'?' · TAIL':''}${n.kind==='file'?' · FILE':''}</span><span class="tn">${esc(n.name)}</span><span class="tv">${ge(n)}${fmt(n.alloc)} · ${pct(n.alloc/S.scope.alloc)}</span>`;
+  requestAnimationFrame(()=>{b.style.left=r.x+'px';b.style.top=r.y+'px';b.style.width=r.w+'px';b.style.height=r.h+'px'});
+ });
+ old.forEach(e=>e.remove());
+}
+function pinsHTML(sc){const d=sc.children.filter(c=>c.coverage==='denied');if(!d.length)return '';return `<span class="pl">NO AREA</span>`+d.map(n=>`<button type="button" class="pin ${S.sel===n?'sel':''}" data-id="${n.id}" aria-label="${esc(n.name)}: unreadable, no measure, no area"><span aria-hidden="true">⌀</span> ${esc(n.name)} · unreadable</button>`).join('')}
+function tileLens(v,items,deco,{pins=true,box}={}){
+ box=box||v.querySelector('.tilemap');const pinEl=v.querySelector('.pins');
+ const ph=pins&&S.scope.children.some(c=>c.coverage==='denied')?36:0;
+ if(pinEl){pinEl.innerHTML=ph?pinsHTML(S.scope):'';pinEl.style.display=ph?'flex':'none'}
+ box.style.bottom=ph+'px';
+ const W=box.clientWidth,H=box.clientHeight;
+ paintTiles(box,squarify(items,0,0,W,H),deco);
+}
+const scopeItems=(wf=n=>n.alloc)=>measured(S.scope).map(n=>({node:n,w:wf(n)})).filter(i=>i.w>0);
+
+/* =====================================================================
+   Controls builder
+   ===================================================================== */
+const C={
+ seg:(name,label,opts)=>`<div class="cg"><span class="cgl">${label}</span><div class="segc" role="group" aria-label="${label}">${opts.map(([v,l])=>`<button type="button" data-ctl="${name}" data-val="${v}" aria-pressed="false">${l}</button>`).join('')}</div></div>`,
+ range:(name,label,min,max,step)=>`<label class="cg"><span class="cgl">${label}</span><input type="range" data-ctl="${name}" min="${min}" max="${max}" step="${step}"><output class="mono" data-out="${name}"></output></label>`,
+ sel:(name,label,opts)=>`<label class="cg"><span class="cgl">${label}</span><select data-ctl="${name}">${opts.map(([v,l,dis])=>`<option value="${v}" ${dis?'disabled':''}>${l}</option>`).join('')}</select></label>`,
+ btn:(name,label,cls='')=>`<button type="button" class="cbtn ${cls}" data-ctl="${name}" data-val="1">${label}</button>`,
+ tog:(name,label)=>`<button type="button" class="cbtn" data-ctl="${name}" data-toggle="1" aria-pressed="false">${label}</button>`,
+ note:t=>`<span class="cnote">${t}</span>`};
+function syncControls(){const m=MODE[S.mode];if(!m.get)return;
+ ctlEl.querySelectorAll('[data-ctl]').forEach(e=>{const v=m.get(e.dataset.ctl,e);if(v===undefined)return;
+  if(e.tagName==='INPUT'){if(document.activeElement!==e)e.value=v}
+  else if(e.tagName==='SELECT')e.value=v;
+  else if(e.dataset.toggle)e.setAttribute('aria-pressed',v?'true':'false');
+  else if(e.closest('.segc'))e.setAttribute('aria-pressed',String(v)===e.dataset.val?'true':'false');
+  else if(typeof v==='string')e.textContent=v;
+  else if(typeof v==='object'&&v){if(v.label!=null)e.textContent=v.label;if(v.disabled!=null)e.disabled=v.disabled}});
+ ctlEl.querySelectorAll('[data-out]').forEach(o=>{const f=m.out&&m.out(o.dataset.out);if(f!=null)o.textContent=f})}
+
+/* =====================================================================
+   Planet (equal-area wrap of the same tile layout)
+   ===================================================================== */
+const PL={yaw:.9,pitch:-.25,target:null,drag:null,vel:0,raf:0,G:256,grid:null,rects:[],order:[],geom:null,orient:new Map(),off:document.createElement('canvas'),lastSel:null,lastScope:null};
+function planetBuild(){const items=measured(S.scope).filter(n=>n.alloc>0);PL.order=items;PL.rects=squarify(items.map(n=>({node:n,w:n.alloc})),0,0,1,1);
+ const G=PL.G,grid=new Int16Array(G*G).fill(-1);PL.rects.forEach(r=>{const k=items.indexOf(r.node),x0=Math.round(r.x*G),x1=Math.round((r.x+r.w)*G),y0=Math.round(r.y*G),y1=Math.round((r.y+r.h)*G);for(let y=y0;y<y1;y++)for(let x=x0;x<x1;x++)grid[y*G+x]=k});
+ for(let i=0;i<grid.length;i++)if(grid[i]<0)grid[i]=i>0?grid[i-1]:0;PL.grid=grid}
+function planetUV(X,Y){const d2=X*X+Y*Y;if(d2>=1)return null;const Z=Math.sqrt(1-d2),cy=Math.cos(PL.yaw),sy=Math.sin(PL.yaw),cp=Math.cos(PL.pitch),sp=Math.sin(PL.pitch);const y1=Y*cp+Z*sp,z1=-Y*sp+Z*cp,x2=X*cy+z1*sy,z2=-X*sy+z1*cy;return [(Math.atan2(z2,x2)+Math.PI)/(2*Math.PI),(1+y1)/2,Z]}
+function gridAt(u,v){const G=PL.G;return PL.grid[clamp((v*G)|0,0,G-1)*G+clamp((u*G)|0,0,G-1)]}
+function planetDraw(){const cv=view.querySelector('canvas.planet');if(!cv)return;const w=cv.clientWidth,h=cv.clientHeight;if(!w||!h)return;const dpr=Math.min(devicePixelRatio||1,2);
+ if(cv.width!==Math.round(w*dpr)||cv.height!==Math.round(h*dpr)){cv.width=Math.round(w*dpr);cv.height=Math.round(h*dpr)}
+ const ctx=cv.getContext('2d');ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);
+ const r=Math.max(50,Math.min(w*.42,h*.43)),cx=w/2,cy=h/2-4;PL.geom={cx,cy,r};
+ const halo=ctx.createRadialGradient(cx,cy,r*.7,cx,cy,r*1.35);halo.addColorStop(0,'#5fe0a02a');halo.addColorStop(1,'#5fe0a000');ctx.fillStyle=halo;ctx.fillRect(0,0,w,h);
+ if(!PL.order.length){ctx.fillStyle='#89a696';ctx.font='12px '+getComputedStyle(document.body).getPropertyValue('--mono');ctx.textAlign='center';ctx.fillText('Nothing measured at this level',cx,cy);return}
+ const Dm=Math.max(160,Math.min(440,Math.round(r*1.8)));const off=PL.off;if(off.width!==Dm){off.width=Dm;off.height=Dm}
+ const octx=off.getContext('2d'),img=octx.createImageData(Dm,Dm),data=img.data;
+ const cyw=Math.cos(PL.yaw),syw=Math.sin(PL.yaw),cp=Math.cos(PL.pitch),sp=Math.sin(PL.pitch),G=PL.G,grid=PL.grid;
+ const cols=PL.order.map(n=>hexRgb(colorOf(n))),n=PL.order.length,selK=PL.order.findIndex(q=>q===S.sel||isAncestor(q,S.sel));
+ const sx=new Float64Array(n),sy=new Float64Array(n),cnt=new Uint32Array(n);
+ for(let py=0;py<Dm;py++){const Y=(py+.5)/Dm*2-1;for(let px=0;px<Dm;px++){const X=(px+.5)/Dm*2-1,d2=X*X+Y*Y;if(d2>=1)continue;const Z=Math.sqrt(1-d2);
+  const y1=Y*cp+Z*sp,z1=-Y*sp+Z*cp,x2=X*cyw+z1*syw,z2=-X*syw+z1*cyw;const u=(Math.atan2(z2,x2)+Math.PI)/(2*Math.PI),v=(1+y1)/2;
+  const gx=Math.min(G-1,(u*G)|0),gy=clamp((v*G)|0,0,G-1),k=grid[gy*G+gx];
+  const edge=grid[gy*G+Math.min(G-1,gx+1)]!==k||grid[Math.min(G-1,gy+1)*G+gx]!==k;const node=PL.order[k];
+  let s=.36+.52*Z+.14*Math.max(0,-X*.6-Y*.7);if(selK>=0)s*=k===selK?1.12:.78;if(edge)s*=.5;
+  if(node.coverage==='partial'&&((px+py)%10<2))s*=.66;if(node.kind==='tail'&&px%4===0&&py%4===0)s*=.55;
+  const o=(py*Dm+px)*4,c=cols[k];data[o]=Math.min(255,c[0]*s+5);data[o+1]=Math.min(255,c[1]*s+5);data[o+2]=Math.min(255,c[2]*s+5);data[o+3]=255;
+  sx[k]+=X;sy[k]+=Y;cnt[k]++}}
+ octx.putImageData(img,0,0);ctx.save();ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);ctx.clip();ctx.imageSmoothingEnabled=true;ctx.drawImage(off,cx-r,cy-r,r*2,r*2);
+ ctx.strokeStyle='#d3f7d51c';ctx.lineWidth=.8;for(const lat of [-.6,-.3,0,.3,.6]){ctx.beginPath();let pen=false;for(let i=0;i<=120;i++){const lon=-Math.PI+i*Math.PI/60,rr=Math.sqrt(1-lat*lat),x2=rr*Math.cos(lon),z2=rr*Math.sin(lon),X=x2*cyw-z2*syw,z1=x2*syw+z2*cyw,Z=lat*sp+z1*cp,Y=lat*cp-z1*sp;if(Z<=0){pen=false;continue}const px=cx+X*r,py=cy+Y*r;pen?ctx.lineTo(px,py):ctx.moveTo(px,py);pen=true}ctx.stroke()}
+ ctx.restore();ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);ctx.strokeStyle='#abf7ba88';ctx.lineWidth=1.3;ctx.shadowColor='#84f6ab';ctx.shadowBlur=18;ctx.stroke();ctx.shadowBlur=0;
+ const mono=getComputedStyle(document.body).getPropertyValue('--mono');ctx.font=`${w<460?10:11.5}px ${mono}`;ctx.textAlign='center';ctx.textBaseline='middle';
+ const idx=[...Array(n).keys()].filter(k=>cnt[k]>Dm*Dm*.01).sort((a,b)=>cnt[b]-cnt[a]).slice(0,w<460?2:5);if(selK>=0&&cnt[selK]>0&&!idx.includes(selK))idx.push(selK);
+ const tot=S.scope.alloc;idx.forEach(k=>{const q=PL.order[k],t=`${short(q.name,18)} · ${ge(q)}${fmt(q.alloc)} · ${pct(q.alloc/tot)}`,x=cx+sx[k]/cnt[k]*r,y=cy+sy[k]/cnt[k]*r,tw=ctx.measureText(t).width;ctx.fillStyle='#061109dd';ctx.fillRect(x-tw/2-6,y-10,tw+12,20);ctx.fillStyle=k===selK?'#ffffff':'#cfe6d6';ctx.fillText(t,x,y)});
+ const uv=planetUV(0,0);const f=view.querySelector('.pFacing');if(f&&uv){const q=PL.order[gridAt(uv[0],uv[1])];f.innerHTML=`FACING · <b>${esc(q.name.toUpperCase())}</b>`}
+ planetKeyDraw()}
+function planetKeyDraw(){const kc=view.querySelector('canvas.pKeyCv');if(!kc||!PL.grid)return;const w=kc.clientWidth,h=kc.clientHeight;if(!w||!h)return;const dpr=Math.min(devicePixelRatio||1,2),KW=Math.round(w*dpr),KH=Math.round(h*dpr);if(kc.width!==KW||kc.height!==KH){kc.width=KW;kc.height=KH}
+ const ctx=kc.getContext('2d'),img=ctx.createImageData(KW,KH),d=img.data,cyw=Math.cos(PL.yaw),syw=Math.sin(PL.yaw),cp=Math.cos(PL.pitch),sp=Math.sin(PL.pitch),cols=PL.order.map(n=>hexRgb(colorOf(n))),G=PL.G,selK=PL.order.findIndex(q=>q===S.sel||isAncestor(q,S.sel));
+ for(let py=0;py<KH;py++){const v=(py+.5)/KH,y1=2*v-1,rr=Math.sqrt(Math.max(0,1-y1*y1));for(let px=0;px<KW;px++){const u=(px+.5)/KW,lon=u*2*Math.PI-Math.PI,x2=rr*Math.cos(lon),z2=rr*Math.sin(lon),z1=x2*syw+z2*cyw,Z=y1*sp+z1*cp;
+  const gx=Math.min(G-1,(u*G)|0),gy=Math.min(G-1,(v*G)|0),k=PL.grid[gy*G+gx],edge=PL.grid[gy*G+Math.min(G-1,gx+1)]!==k||PL.grid[Math.min(G-1,gy+1)*G+gx]!==k;
+  let s=Z>0?.95:.34;if(k===selK)s*=1.15;if(edge)s*=.45;const o=(py*KW+px)*4,c=cols[k];d[o]=Math.min(255,c[0]*s);d[o+1]=Math.min(255,c[1]*s);d[o+2]=Math.min(255,c[2]*s);d[o+3]=255}}
+ ctx.putImageData(img,0,0);ctx.save();ctx.scale(dpr,dpr);const mono=getComputedStyle(document.body).getPropertyValue('--mono');ctx.font=`10px ${mono}`;ctx.textAlign='center';ctx.textBaseline='middle';
+ PL.rects.forEach(r=>{if(r.w*w<64||r.h*h<14)return;const x=(r.x+r.w/2)*w,y=(r.y+r.h/2)*h;ctx.fillStyle='#050f0bcc';const t=short(r.node.name,Math.floor(r.w*w/7));const tw=ctx.measureText(t).width;ctx.fillRect(x-tw/2-3,y-7,tw+6,14);ctx.fillStyle='#e6f5ea';ctx.fillText(t,x,y)});
+ let uc=((Math.PI/2-PL.yaw+Math.PI)/(2*Math.PI))%1;if(uc<0)uc+=1;const vc=(1+Math.sin(PL.pitch))/2;ctx.strokeStyle='#fff3cf';ctx.lineWidth=1.5;ctx.beginPath();ctx.arc(uc*w,vc*h,6,0,Math.PI*2);ctx.moveTo(uc*w-11,vc*h);ctx.lineTo(uc*w+11,vc*h);ctx.moveTo(uc*w,vc*h-11);ctx.lineTo(uc*w,vc*h+11);ctx.stroke();ctx.restore()}
+function planetTarget(n){const t=n===S.scope||n===UNCH?null:topChild(n,S.scope);if(!t)return null;const r=PL.rects.find(q=>q.node===t);if(!r)return null;const u=r.x+r.w/2,v=r.y+r.h/2,lon=u*2*Math.PI-Math.PI,y1=2*v-1,yaw=Math.PI/2-lon,d=Math.atan2(Math.sin(yaw-PL.yaw),Math.cos(yaw-PL.yaw));return {yaw:PL.yaw+d,pitch:clamp(Math.asin(clamp(y1,-1,1)),-1.1,1.1)}}
+function planetAnimate(){if(PL.raf)return;const f=()=>{PL.raf=0;let more=false;
+ if(PL.target&&!PL.drag){if(S.reduce){PL.yaw=PL.target.yaw;PL.pitch=PL.target.pitch;PL.target=null}else{PL.yaw+=(PL.target.yaw-PL.yaw)*.15;PL.pitch+=(PL.target.pitch-PL.pitch)*.15;if(Math.abs(PL.target.yaw-PL.yaw)<.002&&Math.abs(PL.target.pitch-PL.pitch)<.002){PL.yaw=PL.target.yaw;PL.pitch=PL.target.pitch;PL.target=null}else more=true}}
+ else if(!PL.drag&&Math.abs(PL.vel)>.0005&&!S.reduce){PL.yaw+=PL.vel;PL.vel*=.9;more=true}else PL.vel=0;
+ planetDraw();if(more)PL.raf=requestAnimationFrame(f)};PL.raf=requestAnimationFrame(f)}
+function planetPick(x,y){if(!PL.geom)return null;const uv=planetUV((x-PL.geom.cx)/PL.geom.r,(y-PL.geom.cy)/PL.geom.r);return uv?PL.order[gridAt(uv[0],uv[1])]:null}
+
+/* =====================================================================
+   Lens-specific state for animated or audio lenses
+   ===================================================================== */
+const TER={raf:0,timer:0,cache:null,disc:new Map(),done:new Map()};
+const MET={raf:0};
+const RES={ctx:null,nodes:[],timers:[],master:null};
+function stopLive(){
+ if(S.terra.playing){S.terra.playing=false;cancelAnimationFrame(TER.raf);clearTimeout(TER.timer);view.classList.remove('live')}
+ cancelAnimationFrame(PL.raf);PL.raf=0;PL.target=null;PL.vel=0;
+ cancelAnimationFrame(MET.raf);MET.raf=0;
+ resStop(true)}
+
+/* =====================================================================
+   Terra Cognita helpers
+   ===================================================================== */
+function terraWalk(){if(TER.cache&&TER.cache.id===S.scope.id)return TER.cache;const order=[];(function rec(n){n.children.slice().sort((a,b)=>a.name.localeCompare(b.name)).forEach(c=>{if(c.kind==='folder'&&c.children.length)rec(c);else order.push(c)})})(S.scope);
+ TER.cache={id:S.scope.id,order,top:order.map(l=>topChild(l,S.scope)),per:new Map()};order.forEach((l,i)=>{const t=TER.cache.top[i];TER.cache.per.set(t,(TER.cache.per.get(t)||0)+1)});return TER.cache}
+function terraPlay(){if(S.terra.p>=1)S.terra.p=0;S.terra.playing=true;view.classList.add('live');
+ if(S.reduce){const tick=()=>{S.terra.p=Math.min(1,Math.round((S.terra.p+.1)*10)/10);renderStage();renderList();syncControls();if(S.terra.p<1&&S.terra.playing)TER.timer=setTimeout(tick,420);else terraStop()};TER.timer=setTimeout(tick,120)}
+ else{let last=performance.now();const f=t=>{S.terra.p=Math.min(1,S.terra.p+(t-last)/7500);last=t;renderStage();syncControls();if(S.terra.p<1&&S.terra.playing)TER.raf=requestAnimationFrame(f);else terraStop()};TER.raf=requestAnimationFrame(f)}}
+function terraStop(){S.terra.playing=false;cancelAnimationFrame(TER.raf);clearTimeout(TER.timer);TER.raf=0;view.classList.remove('live');render()}
+
+/* =====================================================================
+   Core sample helpers
+   ===================================================================== */
+function childRects(node,x,y,w,h,depth){const p=depth===0?2:Math.min(2.5,w*.06,h*.06);return squarify(measured(node).filter(c=>c.alloc>0).map(c=>({node:c,w:c.alloc})),x+p,y+p,w-2*p,h-2*p)}
+function nest(node,x,y,w,h,depth,maxD,out){if(node.kind!=='folder'||depth>=maxD)return;childRects(node,x,y,w,h,depth).forEach(r=>{out.push({...r,depth:depth+1});if(r.w>5&&r.h>5)nest(r.node,r.x,r.y,r.w,r.h,depth+1,maxD,out)})}
+function coreChain(px,py,W,H){const chain=[{node:S.scope,x:0,y:0,w:W,h:H,depth:0}];let cur=chain[0];while(cur.node.kind==='folder'){const rs=childRects(cur.node,cur.x,cur.y,cur.w,cur.h,cur.depth);if(!rs.length)break;let best=null,bd=Infinity;rs.forEach(r=>{const d=Math.max(r.x-px,0,px-(r.x+r.w))+Math.max(r.y-py,0,py-(r.y+r.h));if(d<bd){bd=d;best=r}});cur={...best,depth:cur.depth+1};chain.push(cur)}return chain}
+function rectOf(node,W,H){const path=[];let q=node;while(q&&q!==S.scope){path.unshift(q);q=q.parent}if(q!==S.scope)return null;let cur={x:0,y:0,w:W,h:H,depth:0,node:S.scope};for(const n of path){const r=childRects(cur.node,cur.x,cur.y,cur.w,cur.h,cur.depth).find(r=>r.node===n);if(!r)return null;cur={...r,depth:cur.depth+1}}return cur}
+
+/* =====================================================================
+   Crate, metabolism, twins, resonance helpers
+   ===================================================================== */
+const crateNorm=()=>S.crate.items.filter(n=>!S.crate.items.some(o=>o!==n&&isAncestor(o,n)));
+const inCrate=n=>S.crate.items.some(o=>o===n||isAncestor(o,n));
+function crateCalc(){const items=crateNorm(),T=TARGETS[S.crate.target];let L=0,A=0,n=0,hyd=0,spL=0,spA=0,tailFiles=0;const big=[],sparse=[];
+ items.forEach(it=>{L+=it.logical||0;A+=it.alloc||0;n+=it.files||0;leavesOf(it).forEach(l=>{if(l.kind==='denied')return;if(l.kind==='tail')tailFiles+=l.files;if(l.kind==='file'&&l.logical>4*GiB)big.push(l);if(hasFlag(l,'placeholder'))hyd+=Math.max(0,l.logical-l.alloc);if(hasFlag(l,'sparse')){spL+=l.logical;spA+=l.alloc;sparse.push(l)}})});
+ let lo,hi;if(T.compress){lo=L*T.compress[0];hi=L*T.compress[1]}else{lo=T.sparse?L-spL+spA:L;hi=L+n*T.cluster}
+ return {items,T,L,A,n,lo,hi,big,sparse,hyd,tailFiles}}
+function metEnd(e){if(e==='net'||e==='proc')return {port:e};if(!within(e,S.scope))return {port:'out'};if(e===S.scope)return {node:S.scope};return {node:topChild(e,S.scope)}}
+function metFlows(){return FLOWS.filter(f=>f.t>S.metab.a&&f.t<=S.metab.b&&S.metab.show[f.basis])}
+function metNet(n){let v=0;metFlows().forEach(f=>{const a=f.from!=='net'&&f.from!=='proc'&&within(f.from,n),b=within(f.to,n);if(b&&!a)v+=f.bytes;if(a&&!b)v-=f.bytes});return v}
+const twinOf=n=>TWINS.find(g=>g.m.includes(n));
+function resSegments(){const segs=measured(S.scope).filter(n=>n.alloc>0).map((n,i)=>({node:n,bytes:n.alloc,rank:i}));if(S.scope===root&&S.res.noise)segs.push({node:UNCH,bytes:UNCH.alloc,rank:segs.length,noise:true});const tot=segs.reduce((s,x)=>s+x.bytes,0);let t=0,te=0;segs.forEach(s=>{s.share=s.bytes/tot;s.exact=s.share*S.res.len;s.dur=Math.max(.045,s.exact);s.start=t;s.x0=te;t+=s.dur;te+=s.exact});segs.total=t;return segs}
+function resStop(quiet){RES.timers.forEach(clearTimeout);RES.timers=[];RES.nodes.forEach(n=>{try{n.stop()}catch(e){}});RES.nodes=[];const was=S.res.playing;S.res.playing=false;S.res.idx=-1;const ph=view.querySelector('.phead');if(ph){ph.classList.remove('on');ph.style.transition='none'}if(was&&!quiet)render()}
+function resPlay(){resStop(true);const AC=window.AudioContext||window.webkitAudioContext;if(!AC){announce('This browser has no Web Audio; the composition cannot sound. The score and list remain exact.');return}
+ RES.ctx=RES.ctx||new AC();RES.ctx.resume();const ctx=RES.ctx,master=ctx.createGain();master.gain.value=S.res.vol*.22;master.connect(ctx.destination);RES.nodes.push({stop(){try{master.disconnect()}catch(e){}}});
+ const segs=resSegments(),t0=ctx.currentTime+.08,steps=[0,-3,-5,-7,-10,-12,-15,-17,-19,-22,-24,-27,-29];
+ segs.forEach((s,i)=>{const st=t0+s.start,du=s.dur,g=ctx.createGain();g.gain.setValueAtTime(0,st);g.gain.linearRampToValueAtTime(1,st+Math.min(.02,du/3));g.gain.setValueAtTime(1,st+Math.max(.02,du-.05));g.gain.linearRampToValueAtTime(0,st+du);g.connect(master);
+  let src;if(s.noise){const len=Math.ceil(ctx.sampleRate*du),buf=ctx.createBuffer(1,len,ctx.sampleRate),ch=buf.getChannelData(0);for(let j=0;j<len;j++)ch[j]=(Math.random()*2-1)*.5;src=ctx.createBufferSource();src.buffer=buf;const bp=ctx.createBiquadFilter();bp.type='bandpass';bp.frequency.value=900;bp.Q.value=.7;src.connect(bp);bp.connect(g)}
+  else{src=ctx.createOscillator();src.type='triangle';src.frequency.value=440*Math.pow(2,(74+steps[s.rank%steps.length]-12*Math.floor(s.rank/steps.length)-69)/12);src.connect(g);
+   if(s.node.coverage==='partial'){const l=ctx.createOscillator(),lg=ctx.createGain();l.frequency.value=9;lg.gain.value=.45;l.connect(lg);lg.connect(g.gain);l.start(st);l.stop(st+du);RES.nodes.push(l)}}
+  src.start(st);src.stop(st+du+.02);RES.nodes.push(src);
+  RES.timers.push(setTimeout(()=>{S.res.idx=i;resHighlight()},(s.start+.08)*1000))});
+ RES.timers.push(setTimeout(()=>{resStop(false);announce('Composition finished.')},(segs.total+.3)*1000));
+ S.res.playing=true;S.res.idx=0;renderStage();syncControls();
+ const ph=view.querySelector('.phead');if(ph){const W=view.clientWidth;ph.classList.add('on');ph.style.transition='none';ph.style.left='20px';if(!S.reduce){ph.getBoundingClientRect();ph.style.transition=`left ${segs.total}s linear`;ph.style.left=(W-20)+'px'}}
+ announce(`Playing ${segs.length} regions over ${segs.total.toFixed(1)} seconds. Longest first.`)}
+function resHighlight(){view.querySelectorAll('[data-seg]').forEach(e=>e.classList.toggle('playing',+e.dataset.seg===S.res.idx));listEl.querySelectorAll('.row').forEach(r=>r.classList.remove('sounding'));const seg=resSegments()[S.res.idx];const rowEl=seg&&listEl.querySelector(`.rowMain[data-row="${CSS.escape(seg.node.id)}"]`);if(rowEl)rowEl.parentElement.classList.add('sounding');
+ if(!S.reduce)return;const ph=view.querySelector('.phead');if(ph&&seg){ph.style.left=(20+(view.clientWidth-40)*seg.x0/S.res.len)+'px'}}
+
+/* =====================================================================
+   The lenses
+   ===================================================================== */
+const GROUPS=['Survey & descent','One-scan composition','History & verification','Special investigations','Alternative access'];
+const GATE={now:{label:'Current reading supports',color:'#7fe0a6'},coarse:{label:'Partly supported',color:'#e8c07a'},history:{label:'Needs retained snapshots',color:'#8fc2e8'},special:{label:'Needs a separate input',color:'#c6a4ee'},optional:{label:'Optional access',color:'#a9b8b0'}};
+const shareMetric=n=>n.alloc==null?'—':pct(n.alloc/S.scope.alloc);
+const MODES=[
+/* ---------------- Tiles ---------------- */
+{id:'tiles',name:'Tiles',g:0,q:'What takes up this scope, exactly?',gate:{k:'now',text:'The space reading returns allocated bytes, coverage and child handles for a bounded walk.',needs:'a retained hierarchy snapshot, so every depth reconciles inside one observation.'},
+ controls:()=>C.seg('denom','Denominator',[['walk','Measured walk'],['volume','Whole used volume']])+C.note('Click selects · double-click or Enter enters'),
+ get:()=>S.tilesDenom,ctl:(k,v)=>{S.tilesDenom=v},
+ mount:v=>{v.innerHTML='<div class="tilemap"></div><div class="pins"></div>'},
+ render:v=>{const items=scopeItems();if(S.tilesDenom==='volume'&&S.scope===root)items.push({node:UNCH,w:UNCH.alloc});
+  tileLens(v,items,n=>n===UNCH?{cls:'fog',label:`<span class="tr">NOT A FOLDER · NO ENTER</span><span class="tn">Uncharted</span><span class="tv">${fmt(n.alloc)} · ${pct(n.alloc/USED)} of used</span><span class="tv2">used, not attributed by the walk</span>`,aria:`Uncharted, ${fmt(n.alloc)}, used but not attributed; not a folder`}:null)},
+ foot:()=>`<b>Area = allocated bytes.</b> Denominator: ${S.tilesDenom==='volume'&&S.scope===root?`whole used volume, ${fmt(USED)}, including the uncharted remainder`:`the measured walk of ${esc(S.scope.name)}, ${ge(S.scope)}${fmt(S.scope.alloc)}`}${S.tilesDenom==='volume'&&S.scope!==root?' (the whole-volume denominator applies only at the volume level)':''}. Hatched = partial, a lower bound. Dotted = tail aggregate of unlisted files. Unreadable folders are pins with no area.`},
+/* ---------------- Planet ---------------- */
+{id:'planet',name:'Planet',g:0,q:'Where is it, as a whole world I can turn?',gate:{k:'now',text:'Same allocated bytes as Tiles, wrapped onto a sphere by longitude and sin(latitude), an equal-area mapping.',needs:'nothing beyond Tiles; the far side must always be shown by the unwrapped key and the list.'},
+ controls:()=>C.btn('orbit','Orbit to selection')+C.btn('reset','Reset view')+C.note('Drag to turn · click selects · double-click enters · arrows when focused'),
+ get:()=>undefined,ctl:k=>{if(k==='orbit'){PL.target=planetTarget(S.sel);planetAnimate()}if(k==='reset'){PL.target={yaw:.9,pitch:-.25};planetAnimate()}},
+ mount:v=>{v.innerHTML=`<div class="planetWrap"><div class="planetBox"><canvas class="planet" tabindex="0" data-arrows="own" aria-label="Planet of ${esc(S.scope.name)}. Region area is allocated bytes. Drag or use the arrow keys to turn; Space selects the region facing you. The unwrapped key below and the ranked list show every region, including the far side."></canvas><div class="pGuide mono"><span>EQUAL-AREA WRAP · AREA = ALLOCATED</span><span class="pFacing"></span></div></div><div class="pKey"><div class="pKeyHead mono"><span>WHOLE SURFACE · UNWRAPPED, SAME AREAS</span><span>DIM = FAR SIDE · ⊕ = FACING</span></div><canvas class="pKeyCv" aria-label="Unwrapped whole-surface key. Click a region to select it and turn the planet toward it."></canvas></div></div>`;
+  const o=PL.orient.get(S.scope.id);if(o){PL.yaw=o.yaw;PL.pitch=o.pitch}PL.lastSel=null;
+  const cv=v.querySelector('canvas.planet'),kc=v.querySelector('canvas.pKeyCv');
+  cv.addEventListener('pointerdown',e=>{cv.setPointerCapture(e.pointerId);PL.drag={x:e.clientX,y:e.clientY,moved:false};PL.target=null;PL.vel=0});
+  cv.addEventListener('pointermove',e=>{if(!PL.drag)return;const dx=e.clientX-PL.drag.x,dy=e.clientY-PL.drag.y;if(Math.abs(dx)+Math.abs(dy)>3)PL.drag.moved=true;PL.yaw-=dx*.0085;PL.pitch=clamp(PL.pitch-dy*.007,-1.2,1.2);PL.vel=-dx*.0009;PL.drag.x=e.clientX;PL.drag.y=e.clientY;planetDraw()});
+  const up=e=>{if(!PL.drag)return;const moved=PL.drag.moved;PL.drag=null;if(!moved){const b=cv.getBoundingClientRect(),n=planetPick(e.clientX-b.left,e.clientY-b.top);if(n){select(n);return}}planetAnimate()};
+  cv.addEventListener('pointerup',up);cv.addEventListener('pointercancel',()=>{PL.drag=null});
+  cv.addEventListener('dblclick',()=>enter(S.sel));
+  cv.addEventListener('keydown',e=>{const k=e.key;if(k==='ArrowLeft'||k==='ArrowRight'){PL.yaw+=k==='ArrowLeft'?-.22:.22;PL.target=null;planetDraw();e.preventDefault()}else if(k==='ArrowUp'||k==='ArrowDown'){PL.pitch=clamp(PL.pitch+(k==='ArrowUp'?-.16:.16),-1.2,1.2);PL.target=null;planetDraw();e.preventDefault()}else if(k===' '){const n=planetPick(PL.geom.cx,PL.geom.cy);if(n)select(n);e.preventDefault()}});
+  kc.addEventListener('click',e=>{const b=kc.getBoundingClientRect(),u=(e.clientX-b.left)/b.width,vv=(e.clientY-b.top)/b.height,n=PL.order[gridAt(u,vv)];if(n)select(n)})},
+ render:()=>{planetBuild();if(PL.lastSel!==S.sel){PL.target=planetTarget(S.sel);PL.lastSel=S.sel}planetDraw();if(PL.target)planetAnimate()},
+ foot:()=>`<b>One globe = ${esc(S.scope.name)}.</b> The tile layout is wrapped by longitude and sin(latitude), which preserves area, so each region keeps its Tiles share. Edges foreshorten and half the surface is hidden: the unwrapped key below shows every region with the far side dimmed, and the list stays exact. Nothing rotates while idle.`},
+/* ---------------- Archaeology ---------------- */
+{id:'arch',name:'Archaeology',g:0,q:'How did I get here, and what surrounds each step down?',gate:{k:'now',text:'Each stratum is an observed ancestor scope; scoped child handles already make the descent real.',needs:'a persistent scan ID: two scoped takes are two observations, and a depth change may refresh values.'},
+ controls:()=>C.note('Ancestor bars ascend and select · the open stratum selects · Enter opens the dashed preview'),
+ mount:v=>{v.innerHTML='<div class="arch"></div>'},
+ render:(v,opt)=>{const chain=ancestry(S.scope);let h='';
+  chain.forEach((a,k)=>{const cur=a===S.scope,next=chain[k+1],meas=measured(a).filter(c=>c.alloc>0),den=a.children.filter(c=>c.coverage==='denied');
+   h+=`<section class="stratum ${cur?'open':'past'} ${cur&&opt&&opt.dir==='in'?'born':''}"><div class="stHead"><button type="button" class="stName" data-go="${a.id}" ${cur?'aria-current="location"':''}><span class="mono">L${k}</span>${esc(a.name)}</button><span class="mono">${ge(a)}${fmt(a.alloc)}${next?` · via ${esc(next.name)} ${pct(next.alloc/a.alloc)}`:` · ${meas.length} regions`}</span></div><div class="stBar">`;
+   meas.forEach(c=>{const sh=c.alloc/a.alloc,path=c===next,sel=S.sel===c,holds=!sel&&isAncestor(c,S.sel);
+    const attrs=cur?`data-id="${c.id}"`:`data-go="${a.id}" data-gosel="${c.id}"`;
+    h+=`<button type="button" class="seg ${path?'path':''} ${sel?'sel':''} ${holds?'holds':''} k-${c.kind}" ${attrs} style="flex-grow:${c.alloc};--c:${colorOf(c)}" title="${esc(c.name)} · ${ge(c)}${fmt(c.alloc)} · ${pct(sh)}" aria-label="${esc(c.name)}, ${ge(c)}${fmt(c.alloc)}, ${pct(sh)} of ${esc(a.name)}${cur?'':'. Ascend here with this selected'}">${cur?(sh>.045?`<span class="sn">${esc(c.name)}</span><span class="sv">${ge(c)}${fmt(c.alloc)} · ${pct(sh)}</span>`:''):(sh>.07?esc(short(c.name,22)):'')}</button>`});
+   h+=`</div>${den.length?`<div class="stDenied">+ ${den.map(d=>`⌀ ${esc(d.name)}`).join(', ')} · unreadable · no area</div>`:''}</section>`;
+   if(next){let off=0;for(const c of meas){if(c===next)break;off+=c.alloc}const l=off/a.alloc*100,r=(off+next.alloc)/a.alloc*100,col=colorOf(next);h+=`<div class="shaft" aria-hidden="true" style="--l:${l}%;--r:${r}%;background:linear-gradient(180deg,${col}aa,${col}1a)"></div>`}});
+  if(S.sel.parent===S.scope&&enterable(S.sel)){const p=S.sel,meas=measured(p).filter(c=>c.alloc>0);h+=`<section class="stratum preview"><div class="stHead"><span class="stName"><span class="mono">PREVIEW</span>${esc(p.name)} — browsed, not entered</span><span class="mono">Enter opens this stratum</span></div><div class="stBar">${meas.map(c=>`<span class="seg k-${c.kind}" style="flex-grow:${c.alloc};--c:${colorOf(c)}">${c.alloc/p.alloc>.09?esc(short(c.name,20)):''}</span>`).join('')}</div></section>`}
+  const box=v.querySelector('.arch');box.innerHTML=h;if(opt&&opt.dir)box.scrollTop=box.scrollHeight},
+ foot:()=>`<b>The descent made visible.</b> Every stratum is an ancestor scope with its children at their exact share; the shaft marks the child you went through. Past strata are dimmed but live: a segment click ascends to that level with that region selected. The dashed preview is browsing, which is kept distinct from entering.`},
+/* ---------------- Terra Cognita ---------------- */
+{id:'terra',name:'Terra Cognita',g:0,q:'What do we know, and where does the scan stop?',gate:{k:'coarse',text:'Coverage, partial markers and the volume remainder exist today; the survey playback here is simulated.',needs:'<b>scan progress that really streams</b> before land can appear while scanning. Fog is neither junk nor a folder.'},
+ controls:()=>C.btn('play','Play survey','primary')+C.btn('reset','Restart')+C.range('p','Walked',0,1000,1),
+ get:k=>k==='play'?(S.terra.playing?'Pause survey':S.terra.p>=1?'Replay survey':'Play survey'):k==='p'?Math.round(S.terra.p*1000):undefined,
+ out:k=>k==='p'?Math.round(S.terra.p*100)+'%':null,
+ ctl:(k,v)=>{if(k==='play'){S.terra.playing?terraStop():terraPlay()}if(k==='reset'){if(S.terra.playing){S.terra.playing=false;cancelAnimationFrame(TER.raf);clearTimeout(TER.timer)}S.terra.p=0;view.classList.remove('live')}if(k==='p'){S.terra.p=v/1000}},
+ mount:v=>{v.innerHTML='<div class="tilemap"></div><div class="pins"></div><div class="hud"></div>'},
+ render:v=>{const {order,top,per}=terraWalk(),N=order.length,k=Math.round(S.terra.p*N),disc=new Map(),walked=new Map(),seen=[];
+  for(let i=0;i<k;i++){const l=order[i],t=top[i];walked.set(t,(walked.get(t)||0)+1);if(l.alloc)disc.set(t,(disc.get(t)||0)+l.alloc);if(l.kind==='denied')seen.push(l)}
+  TER.disc=disc;TER.done=new Map([...walked].map(([t,c])=>[t,c===per.get(t)]));
+  let found=0;disc.forEach(x=>found+=x);const isRoot=S.scope===root,items=[...disc].filter(([,w])=>w>0).map(([node,w])=>({node,w}));
+  if(isRoot)items.push({node:UNCH,w:USED-found});
+  const box=v.querySelector('.tilemap'),pins=v.querySelector('.pins');pins.style.display=seen.length?'flex':'none';pins.innerHTML=seen.length?'<span class="pl">FOUND · UNREADABLE</span>'+seen.map(n=>`<button type="button" class="pin ${S.sel===n?'sel':''}" data-id="${n.id}">⌀ ${esc(pathOf(n).split(' / ').slice(-2).join(' / '))}</button>`).join(''):'';box.style.bottom=seen.length?'36px':'0px';
+  if(!items.length){box.innerHTML='';box.insertAdjacentHTML('beforeend','<div class="empty">The walk has not reached anything here yet.</div>')}else{const e=box.querySelector('.empty');if(e)e.remove()}
+  paintTiles(box,squarify(items,0,0,box.clientWidth,box.clientHeight),(n,r)=>{if(n===UNCH){const done=S.terra.p>=1;return {cls:'fog',label:`<span class="tr">${done?'UNCHARTED · NOT A FOLDER':'FOG · NOT SURVEYED YET'}</span><span class="tn">${done?'Uncharted':'Fog'}</span><span class="tv">${fmt(r.w0)}</span><span class="tv2">${done?'used, never attributed by this walk':'used − attributed so far; includes what will stay uncharted'}</span>`,aria:`${done?'Uncharted':'Fog'}, ${fmt(r.w0)}`}}
+   const done=TER.done.get(n);return {cls:done?'':'surveying',label:`<span class="tr">${done?'SURVEYED':'SURVEYING · LOWER BOUND'}</span><span class="tn">${esc(n.name)}</span><span class="tv">${done?ge(n)+fmt(n.alloc):'≥ '+fmt(r.w0)+' so far'}</span>`}});
+  const at=order[Math.max(0,k-1)];v.querySelector('.hud').innerHTML=`WALKED <b>${num(k)}</b> / ${num(N)} NODES · ATTRIBUTED <b>${fmt(found)}</b>${isRoot?` · FOG <b>${fmt(USED-found)}</b>`:''}<br>${k?`AT ${esc(short(pathOf(at),64))}`:'READY AT THE ROOT OF THIS SCOPE'}${isRoot?'':'<br>Below the volume the scope total is unknown until the walk ends, so no fog area is claimed.'}`},
+ metricLabel:'Surveyed',metric:n=>{if(n.alloc==null)return '—';const d=TER.disc.get(n);return d?(TER.done.get(n)?'✓ '+pct(n.alloc/S.scope.alloc):'≥ '+fmt(d)):'not yet'},
+ foot:()=>`<b>Land appears only where the walk has been.</b> At the volume level fog is a legitimate area, because used bytes are a volume fact; it shrinks to the uncharted remainder when the walk ends. Inside a folder, nothing is known about the unwalked rest, so no area is drawn for it. Walk order is directory order, not size.`},
+/* ---------------- Watershed ---------------- */
+{id:'watershed',name:'Watershed',g:0,q:'Which child accounts for this folder’s footprint?',gate:{k:'now',text:'Channel widths use the same allocated totals and child handles as Tiles.',needs:'a retained snapshot and a measurable tail, so deeper channels reconcile with the mouth.'},
+ controls:()=>C.seg('metric','Width',[['bytes','Allocated bytes'],['files','File count']])+C.sel('depth','Upstream depth',[['2','2 levels'],['3','3 levels'],['4','4 levels'],['5','5 levels']]),
+ get:k=>k==='metric'?S.ws.metric:k==='depth'?String(S.ws.depth):undefined,ctl:(k,v)=>{if(k==='metric')S.ws.metric=v;if(k==='depth')S.ws.depth=+v},
+ mount:()=>{},
+ render:v=>{const W=v.clientWidth,H=v.clientHeight,met=S.ws.metric,wt=n=>met==='files'?(n.files||0):(n.alloc||0),sc=S.scope;if(!wt(sc)){v.innerHTML='<div class="empty">Nothing measured here.</div>';return}
+  const byW=a=>a.slice().sort((x,y)=>wt(y)-wt(x));const cols=[[sc]];
+  for(let d=1;d<=S.ws.depth;d++){const col=[];cols[d-1].forEach(p=>{if(p.kind==='folder')byW(p.children.filter(c=>wt(c)>0)).forEach(c=>col.push(c))});if(!col.length)break;cols.push(col)}
+  const padT=30,padB=16,avail=Math.max(80,H-padT-padB),gapOf=(a,b)=>a.parent===b.parent?2:9;
+  const gaps=cols.map(col=>{let g=0;for(let i=1;i<col.length;i++)g+=gapOf(col[i-1],col[i]);return g});let maxG=Math.max(...gaps),gs=1;if(maxG>avail*.4){gs=avail*.4/maxG;maxG=avail*.4}
+  const k=(avail-maxG)/wt(sc),labelW=Math.min(200,Math.max(116,W*.2)),barW=11,x0=14,colW=cols.length>1?(W-x0-labelW-barW)/(cols.length-1):0,P=new Map();
+  cols.forEach((col,d)=>{const tot=col.reduce((s,n)=>s+wt(n)*k,0);let g=0;for(let i=1;i<col.length;i++)g+=gapOf(col[i-1],col[i])*gs;let y=padT+(avail-tot-g)/2;const x=x0+d*colW;col.forEach((n,i)=>{if(i)y+=gapOf(col[i-1],n)*gs;const h=wt(n)*k;P.set(n,{x,y,h,d});y+=h})});
+  const off=new Map();P.forEach((p,n)=>{if(n.kind!=='folder')return;let o=0;byW(n.children.filter(c=>wt(c)>0)).forEach(c=>{if(P.has(c))off.set(c,o);o+=wt(c)*k})});
+  const stem=new Set([sc]);let s=sc;while(s.kind==='folder'){const ks=byW(s.children.filter(c=>wt(c)>0));if(!ks.length||!P.has(ks[0]))break;s=ks[0];stem.add(s)}
+  const path=new Set();if(within(S.sel,sc)){let q=S.sel;while(q){path.add(q);if(q===sc)break;q=q.parent}}
+  let rib='',bars='',lab='',heads='';cols.forEach((c,d)=>{heads+=`<text class="colh" x="${x0+d*colW}" y="16">${d===0?'MOUTH':'UPSTREAM '+d}</text>`});
+  P.forEach((p,n)=>{if(n!==sc){const pp=P.get(n.parent),o=off.get(n),xa=pp.x+barW,ya=pp.y+o,xb=p.x,yb=p.y,h=Math.max(.4,p.h),xm=(xa+xb)/2;rib+=`<path class="rib ${stem.has(n)?'stem':''} ${path.has(n)?'on':''}" data-id="${n.id}" fill="${regionColor(n)}" d="M${xa.toFixed(1)},${ya.toFixed(2)}C${xm.toFixed(1)},${ya.toFixed(2)} ${xm.toFixed(1)},${yb.toFixed(2)} ${xb.toFixed(1)},${yb.toFixed(2)}L${xb.toFixed(1)},${(yb+h).toFixed(2)}C${xm.toFixed(1)},${(yb+h).toFixed(2)} ${xm.toFixed(1)},${(ya+h).toFixed(2)} ${xa.toFixed(1)},${(ya+h).toFixed(2)}Z"><title>${esc(n.name)} · ${met==='files'?num(n.files)+' files':fmt(n.alloc)}</title></path>`}
+   bars+=`<rect class="wbar ${S.sel===n?'sel':''}" data-id="${n.id}" x="${p.x}" y="${p.y.toFixed(2)}" width="${barW}" height="${Math.max(.8,p.h).toFixed(2)}" fill="${regionColor(n)}"/>`;
+   const last=p.d===cols.length-1;if(p.h>=(last?10:20)||n===sc||(S.sel===n&&p.h>=3)){lab+=`<text class="wl ${S.sel===n?'sel':''}" x="${p.x+barW+5}" y="${(p.y+p.h/2).toFixed(1)}" dy=".35em">${esc(short(n.name,last?28:18))} <tspan class="wv">${met==='files'?num(n.files):ge(n)+fmt(n.alloc)}</tspan></text>`}
+   const den=n.kind==='folder'&&p.d<cols.length-1?n.children.filter(c=>c.coverage==='denied').length:0;if(den)lab+=`<text class="wl" x="${p.x+barW+3}" y="${(p.y+p.h+9).toFixed(1)}" style="font-size:9.5px;fill:#9aaba2">⌀ ${den} unreadable</text>`});
+  v.innerHTML=`<svg class="svgv" viewBox="0 0 ${W} ${H}" role="img" aria-label="Watershed of ${esc(sc.name)}: channel width is ${met==='files'?'file count':'allocated bytes'}">${heads}<g>${rib}</g><g>${bars}</g><g>${lab}</g></svg>`},
+ metricLabel:'Files',metric:n=>n.files==null?'—':num(n.files),
+ foot:()=>{const met=S.ws.metric,wt=n=>met==='files'?(n.files||0):(n.alloc||0);const st=[S.scope];let s=S.scope;while(s.kind==='folder'){const ks=s.children.filter(c=>wt(c)>0).sort((a,b)=>wt(b)-wt(a));if(!ks.length)break;s=ks[0];st.push(s);if(st.length>S.ws.depth)break}const last=st[st.length-1];
+  return `<b>Main stem:</b> ${st.map(n=>esc(n.name)).join(' → ')} carries ${pct(wt(last)/wt(S.scope))} of the mouth by ${met==='files'?'file count':'allocated bytes'}. Width is exact and comparable across columns. Switch to file count to see where a multitude of small files hides behind a narrow byte channel.`}},
+/* ---------------- Matter ---------------- */
+{id:'matter',name:'Matter',g:1,q:'Why does a large-looking file occupy little local space?',gate:{k:'coarse',text:'The walk already collects logical and allocated totals plus placeholder, compression and hardlink counts.',needs:'per-node logical/allocated aggregates. An outline is not a cleanup hint: deleting a placeholder may delete the cloud copy.'},
+ controls:()=>C.range('th','Emphasise where the two differ by at least',1,5,.1),get:k=>k==='th'?S.matter.th:undefined,out:k=>k==='th'?'×'+(+S.matter.th).toFixed(1):null,ctl:(k,v)=>{S.matter.th=+v},
+ mount:v=>{v.innerHTML='<div class="tilemap"></div><div class="pins"></div>'},
+ render:v=>{tileLens(v,measured(S.scope).map(n=>({node:n,w:Math.max(n.alloc||0,n.logical||0)})).filter(i=>i.w>0),n=>{const L=n.logical||0,A=n.alloc||0,M=Math.max(L,A,1),fA=Math.sqrt(A/M),fL=Math.sqrt(L/M),ratio=A&&L?Math.max(L,A)/Math.min(L,A):Infinity;
+   const fl=[hasFlag(n,'placeholder')?'☁ PLACEHOLDER':'',n.flags.includes('sparse')||leavesOf(n).some(l=>l.flags.includes('sparse'))?'SPARSE':'',hasFlag(n,'compressed')?'COMPRESSED':'',n.flags.includes('hardlink-repeat')?'HARDLINK NAME':'',L&&A&&L/A<.85?'SLACK':''].filter(Boolean).join(' · ');
+   const rt=!A&&L?'no local bytes attributed':L/A>=1.05?`logical ×${(L/A).toFixed(2)}`:L/A<=.95?`allocated ×${(A/L).toFixed(2)} (cluster slack)`:'about equal';
+   return {cls:`matter ${ratio<S.matter.th?'dim':''}`,extra:`<i class="mo" style="width:${fL*100}%;height:${fL*100}%"></i><i class="mf" style="width:${fA*100}%;height:${fA*100}%"></i>`,label:`<span class="tr">${fl||'&nbsp;'}</span><span class="tn">${esc(n.name)}</span><span class="tv">A ${fmt(A)} · L ${fmt(L)}</span><span class="tv2">${rt}</span>`,aria:`${n.name}: allocated ${fmt(A)}, logical ${fmt(L)}, ${rt}`}})},
+ metricLabel:'Logical',metric:n=>fmt(n.logical),
+ foot:()=>`<b>Solid fill = allocated bytes · dashed outline = logical length.</b> Each tile is sized by the larger of the two, so both shapes share one honest frame. In ${esc(S.scope.name)}: logical ${fmt(S.scope.logical)}, allocated ${ge(S.scope)}${fmt(S.scope.alloc)}. Cloud placeholders, sparse images and compression make the outline larger; many tiny files make the fill larger.`},
+/* ---------------- Orbits ---------------- */
+{id:'orbits',name:'Orbits',g:1,q:'Which material was last written recently?',gate:{k:'coarse',text:'Byte-weighted last-write age bands are already returned, so a coarse form is possible now.',needs:'finer age aggregates for exact radii. Last write is not last use.'},
+ controls:()=>C.seg('basis','Radius',[['bytes','Byte-weighted median write'],['newest','Newest single file']]),get:()=>S.orbits.basis,ctl:(k,v)=>{S.orbits.basis=v},
+ mount:v=>{v.innerHTML='<svg class="svgv"><g class="rings"></g><g class="links"></g><g class="bodies"></g><g class="center"></g></svg>'},
+ render:v=>{const svg=v.querySelector('svg'),W=v.clientWidth,H=v.clientHeight;svg.setAttribute('viewBox',`0 0 ${W} ${H}`);const cx=W/2,cy=H/2+8,R=Math.min(W,H)/2-34,R0=24,rad=d=>R0+(R-R0)*Math.min(1,Math.log1p(Math.max(0,d))/Math.log1p(1460));
+  svg.querySelector('.rings').innerHTML=[[1,'1 d'],[7,'7 d'],[30,'30 d'],[180,'6 mo'],[365,'1 y'],[1460,'4 y']].map(([d,l])=>`<circle class="ring" cx="${cx}" cy="${cy}" r="${rad(d)}"/><text class="ringl" x="${cx}" y="${cy-rad(d)-4}">${l}</text>`).join('');
+  svg.querySelector('.center').innerHTML=`<circle cx="${cx}" cy="${cy}" r="6" fill="#9ef8bd"/><text class="bv" x="${cx}" y="${cy+18}">NOW · 25 SEP</text>`;
+  const kids=measured(S.scope).filter(n=>n.alloc>0&&n.age),maxA=Math.max(1,...kids.map(n=>n.alloc)),bodies=svg.querySelector('.bodies'),have=new Map();bodies.querySelectorAll('g.body').forEach(g=>have.set(g.dataset.id,g));let links='';
+  kids.forEach((n,i)=>{const a=-Math.PI/2+i*2*Math.PI/Math.max(1,kids.length),dB=medianAge(n.age),dN=n.newest,d=S.orbits.basis==='bytes'?dB:dN,r=rad(d),x=cx+Math.cos(a)*r,y=cy+Math.sin(a)*r,br=Math.max(4,32*Math.sqrt(n.alloc/maxA));
+   let g=have.get(n.id);if(g)have.delete(n.id);else{g=document.createElementNS(svgNS,'g');g.setAttribute('class','body');g.dataset.id=n.id;g.innerHTML='<g class="donut"></g><circle class="bc"/><text class="bl"/><text class="bv"/>';g.style.transform=`translate(${cx}px,${cy}px)`;bodies.append(g);g.getBoundingClientRect()}
+   const sel=S.sel===n,holds=!sel&&isAncestor(n,S.sel);g.setAttribute('class',`body ${sel?'sel':''} ${holds?'holds':''}`);g.style.transform=`translate(${x.toFixed(1)}px,${y.toFixed(1)}px)`;
+   const c=g.querySelector('.bc');c.setAttribute('r',br);c.setAttribute('fill',colorOf(n));
+   const t=g.querySelector('.bl');t.setAttribute('y',br+13);t.textContent=short(n.name,18);const tv=g.querySelector('.bv');tv.setAttribute('y',br+25);tv.textContent=fmtDays(d)+(S.orbits.basis==='bytes'?' · median':' · newest');
+   let dn='';if(sel||holds){let a0=-Math.PI/2;n.age.forEach((f,j)=>{if(f<=0)return;const a1=a0+f*2*Math.PI;dn+=`<path d="${arcPath(br+6,a0,a1-.001)}" stroke="${AGE_COLORS[j]}" stroke-width="5" fill="none"/>`;a0=a1})}g.querySelector('.donut').innerHTML=dn;
+   if(S.orbits.basis==='newest'){const rb=rad(dB),xb=cx+Math.cos(a)*rb,yb=cy+Math.sin(a)*rb;links+=`<line class="tether" x1="${xb}" y1="${yb}" x2="${x}" y2="${y}" ${sel?'style="stroke:#f0c674;stroke-width:2"':''}/><circle class="ghost" cx="${xb}" cy="${yb}" r="${br}" ${sel?'style="stroke-width:2"':''}/>`}});
+  have.forEach(g=>g.remove());svg.querySelector('.links').innerHTML=links},
+ metricLabel:'Last write',metric:n=>n.age?fmtDays(S.orbits.basis==='bytes'?medianAge(n.age):n.newest):'—',
+ foot:()=>{const s=S.sel&&S.sel.age?S.sel:null;return `<b>Radius = ${S.orbits.basis==='bytes'?'byte-weighted median last-write age':'age of the single newest file (a misleading basis, shown for contrast)'}; body area = allocated bytes.</b> ${S.orbits.basis==='newest'?'Dashed ghosts mark the honest byte-weighted positions: one freshly written file drags a whole folder to the centre (see Archive → Records). ':''}${s?`${esc(s.name)}: ${AGE_BANDS.map((b,i)=>`${b} ${pct(s.age[i])}`).join(' · ')}.`:''} Last write is not last use.`}},
+/* ---------------- Core sample ---------------- */
+{id:'core',name:'Core Sample',g:1,q:'What is inside this folder, and at which depth?',gate:{k:'coarse',text:'Hierarchy strata use measured child totals now.',needs:'byte-weighted last-write bands per node for age strata. Old means last written, not unused.'},
+ controls:()=>C.seg('strata','Strata',[['hierarchy','Hierarchy'],['age','Last-write age']])+C.sel('depth','Map depth',[['2','2'],['3','3'],['4','4']])+C.btn('center','Drill at selection'),
+ get:k=>k==='strata'?S.core.strata:k==='depth'?String(S.core.depth):undefined,
+ ctl:(k,v)=>{if(k==='strata')S.core.strata=v;if(k==='depth')S.core.depth=+v;if(k==='center'){const m=view.querySelector('svg.cmap');if(m){const [W,H]=box2(m),r=rectOf(S.sel,W,H);if(r){S.core.u=(r.x+r.w/2)/W;S.core.v=(r.y+r.h/2)/H}}}},
+ mount:v=>{v.innerHTML='<div style="position:absolute;inset:0;display:grid;grid-template-columns:minmax(0,1.45fr) minmax(210px,1fr)" class="coreWrap"><svg class="cmap" style="display:block;width:100%;height:100%;min-height:0;cursor:crosshair" tabindex="0" data-arrows="own" role="img" aria-label="Cross-section map. Click, or focus and use the arrow keys, to place the drill."></svg><svg class="ccol" style="display:block;width:100%;height:100%;min-height:0" role="img" aria-label="Core sample strata"></svg></div>';
+  if(v.clientWidth<620){const w=v.querySelector('.coreWrap');w.style.gridTemplateColumns='minmax(0,1fr)';w.style.gridTemplateRows='52% minmax(0,1fr)'}
+  const m=v.querySelector('svg.cmap');
+  const drill=()=>{const [W,H]=box2(m),ch=coreChain(S.core.u*W,S.core.v*H,W,H),vis=ch.filter(c=>c.depth>0&&c.depth<=S.core.depth);const t=vis[vis.length-1];if(t&&t.node!==S.sel)select(t.node);else render()};
+  m.addEventListener('click',e=>{const b=m.getBoundingClientRect();S.core.u=clamp((e.clientX-b.left)/b.width,0,1);S.core.v=clamp((e.clientY-b.top)/b.height,0,1);drill()});
+  m.addEventListener('keydown',e=>{const d={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]}[e.key];if(!d)return;e.preventDefault();S.core.u=clamp(S.core.u+d[0]*.025,0,1);S.core.v=clamp(S.core.v+d[1]*.025,0,1);drill()})},
+ render:v=>{const m=v.querySelector('svg.cmap'),col=v.querySelector('svg.ccol'),[MW,MH]=box2(m);if(!MW||!MH)return;
+  if(S.sel!==S.scope&&isAncestor(S.scope,S.sel)){const ch=coreChain(S.core.u*MW,S.core.v*MH,MW,MH);if(!ch.some(c=>c.node===S.sel)){const r=rectOf(S.sel,MW,MH);if(r){S.core.u=(r.x+r.w/2)/MW;S.core.v=(r.y+r.h/2)/MH}}}
+  const px=S.core.u*MW,py=S.core.v*MH,chain=coreChain(px,py,MW,MH),inChain=new Set(chain.map(c=>c.node)),out=[];nest(S.scope,0,0,MW,MH,0,S.core.depth,out);
+  let h='';out.forEach(r=>{const c=regionColor(r.node),on=inChain.has(r.node);h+=`<rect class="cmap-r" x="${r.x.toFixed(1)}" y="${r.y.toFixed(1)}" width="${Math.max(0,r.w).toFixed(1)}" height="${Math.max(0,r.h).toFixed(1)}" rx="${r.depth===1?5:2}" fill="${c}" fill-opacity="${r.depth===1?.34:r.depth===2?.14:.06}" stroke="${on?'#ffffff':c}" stroke-opacity="${on?.95:r.depth===1?.7:.35}" stroke-width="${on?1.6:r.depth===1?1.2:.7}" ${on?'stroke-dasharray="5 3"':''}/>`;if(r.depth===1&&r.w>70&&r.h>26)h+=`<text class="clbl" x="${r.x+7}" y="${r.y+15}">${esc(short(r.node.name,Math.floor(r.w/7.4)))}</text>`});
+  h+=`<g pointer-events="none"><line x1="${px}" y1="0" x2="${px}" y2="${MH}" stroke="#fff3cf" stroke-opacity=".35" stroke-dasharray="3 4"/><circle cx="${px}" cy="${py}" r="9" fill="none" stroke="#fff3cf" stroke-width="2"/><circle cx="${px}" cy="${py}" r="2.5" fill="#fff3cf"/></g>`;
+  m.setAttribute('viewBox',`0 0 ${MW} ${MH}`);m.innerHTML=h;
+  const [CW,CH]=box2(col);col.setAttribute('viewBox',`0 0 ${CW} ${CH}`);let c2=`<text class="colh" x="14" y="18">CORE · SURFACE = ${esc(S.scope.name.toUpperCase())}</text>`;const x0=14,cw=CW-28,top=34;
+  if(S.core.strata==='hierarchy'){const L=chain.slice(1),bh=Math.min(64,(CH-top-14)/Math.max(1,L.length));
+   c2+=`<ellipse cx="${x0+cw/2}" cy="${top}" rx="${cw/2}" ry="6" fill="#1b3a2b"/>`;
+   L.forEach((c,i)=>{const y=top+i*bh,par=chain[i].node,sh=c.node.alloc/par.alloc,col2=regionColor(c.node),sel=S.sel===c.node;c2+=`<g class="band ${sel?'sel':''}" data-id="${c.node.id}"><rect class="bg" x="${x0}" y="${y}" width="${cw}" height="${bh-2}" fill="${mix(col2,'#07130e',.22)}"/><rect x="${x0}" y="${y}" width="${Math.max(1,cw*sh)}" height="${bh-2}" fill="${mix(col2,'#07130e',.62)}"/>${bh>=30?`<text class="clbl" x="${x0+7}" y="${y+14}">D${i+1} · ${esc(short(c.node.name,Math.max(8,Math.floor(cw/7.2)-6)))}</text><text class="csub" x="${x0+7}" y="${y+27}">${ge(c.node)}${fmt(c.node.alloc)} · ${pct(sh)} of ${esc(short(par.name,16))}</text>`:`<text class="csub" x="${x0+6}" y="${y+bh/2+3}">D${i+1} ${esc(short(c.node.name,20))} · ${pct(sh)}</text>`}<title>${esc(pathOf(c.node))} · ${exact(c.node.alloc)}</title></g>`});
+   const last=L[L.length-1];if(last)c2+=`<text class="csub" x="${x0}" y="${Math.min(CH-6,top+L.length*bh+14)}">bottom: ${kindWord(last.node)} · the core stops at a leaf</text>`}
+  else{const t=(chain.find(c=>c.node===S.sel)||chain[Math.min(1,chain.length-1)]).node;const aw=Math.min(110,cw*.42),avail=CH-top-18;let y=top,lastLy=top-14;c2+=`<text class="csub" x="${x0}" y="${top-4}">${esc(short(t.name,30))} · newest on top, oldest deepest</text>`;
+   t.age.forEach((f,i)=>{const hh=f*avail;c2+=`<rect x="${x0}" y="${y.toFixed(1)}" width="${aw}" height="${Math.max(0,hh-1).toFixed(1)}" fill="${AGE_COLORS[i]}" opacity=".9"/>`;const ly=Math.max(lastLy+15,y+Math.max(hh/2,5)+4);lastLy=ly;c2+=`<line x1="${x0+aw}" y1="${(y+hh/2).toFixed(1)}" x2="${x0+aw+10}" y2="${ly-4}" stroke="#5f7f6f"/><text class="clbl" x="${x0+aw+13}" y="${ly}">${AGE_BANDS[i]} · ${fmt(f*t.alloc)} · ${pct(f)}</text>`;y+=hh})}
+  col.innerHTML=c2},
+ metricLabel:'Share',metric:shareMetric,
+ foot:()=>`<b>Pull a vertical slice.</b> The drill passes through nested rectangles; the core lists every stratum it crosses, from the surface down to a single leaf, with each layer’s exact bytes and share of its parent. ${S.core.strata==='age'?'Age strata show byte-weighted last-write bands of the selected stratum: last written, not last used.':'Switch to age strata to read the same core by last-write time.'}`},
+/* ---------------- Skyline ---------------- */
+{id:'skyline',name:'Skyline',g:1,q:'Where are millions of tiny files?',gate:{k:'coarse',text:'File counts are collected with every walk; footprints are the Tiles parcels.',needs:'reliable counts at every depth. Height overwhelms area perception, so Tiles remains the comparison view.'},
+ controls:()=>C.seg('hmode','Height = file count',[['log','log₁₀'],['linear','linear']])+C.range('ex','Exaggeration',.3,2,.1)+C.btn('rotL','⟲ Rotate')+C.btn('rotR','⟳ Rotate')+C.tog('flat','Top-down'),
+ get:k=>k==='hmode'?S.sky.hmode:k==='ex'?S.sky.ex:k==='flat'?S.sky.flat:undefined,out:k=>k==='ex'?'×'+(+S.sky.ex).toFixed(1):null,
+ ctl:(k,v)=>{if(k==='hmode')S.sky.hmode=v;if(k==='ex')S.sky.ex=+v;if(k==='rotL')S.sky.rot=(S.sky.rot+3)%4;if(k==='rotR')S.sky.rot=(S.sky.rot+1)%4;if(k==='flat')S.sky.flat=v},
+ mount:v=>{v.innerHTML='<canvas class="svgv" tabindex="0" data-arrows="own" aria-label="Isometric skyline. Parcel footprint is allocated bytes; building height is file count. Left and right arrows rotate; T toggles top-down."></canvas>';const cv=v.querySelector('canvas');
+  cv.addEventListener('click',e=>{const b=cv.getBoundingClientRect(),x=e.clientX-b.left,y=e.clientY-b.top;for(let i=SKY.polys.length-1;i>=0;i--){if(pip(x,y,SKY.polys[i].pts)){select(SKY.polys[i].node);return}}});
+  cv.addEventListener('dblclick',()=>enter(S.sel));
+  cv.addEventListener('keydown',e=>{if(e.key==='ArrowLeft'||e.key==='ArrowRight'){S.sky.rot=(S.sky.rot+(e.key==='ArrowLeft'?3:1))%4;render();e.preventDefault()}else if(e.key==='t'||e.key==='T'){S.sky.flat=!S.sky.flat;render()}})},
+ render:v=>skyDraw(v),
+ metricLabel:'Files',metric:n=>n.files==null?'—':num(n.files),
+ foot:()=>`<b>Footprint = allocated bytes (the Tiles parcels) · height = file count, ${S.sky.hmode==='log'?'log₁₀ scale':'linear scale'}.</b> Height never means more bytes. Districts are the children of ${esc(S.scope.name)}; buildings are their children. The package store and node_modules towers hold millions of small files in modest footprints.`},
+/* ---------------- Tideline ---------------- */
+{id:'tideline',name:'Tideline',g:2,q:'When did pressure rise, and what changed?',gate:{k:'history',text:'Illustrative synthetic history of eight weekly scans with one missing week.',needs:'<b>comparable retained scans</b> with scan IDs and a stable node identity. Gaps stay gaps; no trend is drawn through them.'},
+ controls:()=>C.range('i','Scan',0,NS-1,1)+C.note('Tidelines and chips also select a date'),get:k=>k==='i'?S.tide.i:undefined,out:k=>k==='i'?SNAP[S.tide.i]+(S.tide.i===GAP?' · no observation':''):null,ctl:(k,v)=>{S.tide.i=+v},
+ act:(a,el)=>{if(a==='tide'){S.tide.i=+el.dataset.i;render()}},
+ mount:v=>{v.innerHTML='<div class="tide"><svg class="beach"></svg><div class="tchips"></div><div class="tmapWrap"><div class="tilemap"></div><div class="tgap" hidden></div></div></div>'},
+ render:v=>{const i=S.tide.i,sc=S.scope,isRoot=sc===root,usedAt=j=>{const a=sc.hist[j];return a==null?null:isRoot?a+UNCH.hist[j]:a},obs=[...Array(NS).keys()].filter(j=>usedAt(j)!=null),denom=isRoot?CAPACITY:Math.max(...obs.map(usedAt))*1.1,W=v.clientWidth,X=b=>16+(W-32)*Math.min(1,b/denom),cur=usedAt(i);
+  let s=`<defs><linearGradient id="sea" x1="0" x2="1"><stop offset="0" stop-color="#15475a"/><stop offset="1" stop-color="#0a2530"/></linearGradient><linearGradient id="sand" x1="0" x2="1"><stop offset="0" stop-color="#5b5236"/><stop offset=".85" stop-color="#b9a770"/><stop offset="1" stop-color="#e7d9a4"/></linearGradient></defs><rect x="16" y="20" width="${W-32}" height="48" rx="7" fill="url(#sea)"/>`;
+  if(cur!=null)s+=`<rect x="16" y="20" width="${(X(cur)-16).toFixed(1)}" height="48" rx="7" fill="url(#sand)" opacity=".9"/>`;
+  obs.forEach((j,q)=>{const x=X(usedAt(j)).toFixed(1),on=j===i;s+=`<line class="tline ${on?'on':''}" data-act="tide" data-i="${j}" x1="${x}" x2="${x}" y1="16" y2="72"/><text class="tlab ${on?'on':''}" data-act="tide" data-i="${j}" x="${x}" y="${86+(q%2)*12}">${SNAP[j]}</text>`});
+  s+=`<text class="beachTxt" x="24" y="38">${isRoot?'USED':'TOTAL'} ${cur==null?'— no observation':fmt(cur)}</text>`;if(isRoot&&cur!=null)s+=`<text class="beachTxt" x="${W-24}" y="38" text-anchor="end">FREE ${fmt(CAPACITY-cur)}</text>`;
+  s+=`<text class="beachTxt" x="${W-24}" y="60" text-anchor="end" style="fill:#f3dea4">${SNAP[GAP]} · no observation · no tideline</text>`;
+  const svg=v.querySelector('svg.beach');svg.setAttribute('viewBox',`0 0 ${W} 112`);svg.innerHTML=s;
+  v.querySelector('.tchips').innerHTML=[...Array(NS).keys()].map(j=>{const u=usedAt(j);return `<button type="button" class="tchip" data-act="tide" data-i="${j}" aria-pressed="${j===i}" ${u==null?'disabled':''}>${SNAP[j]}<small>${u==null?'no observation':fmt(u)}</small></button>`}).join('');
+  const box=v.querySelector('.tilemap'),gap=v.querySelector('.tgap');
+  if(sc.hist[i]==null){gap.hidden=false;gap.innerHTML=`No observation on ${SNAP[i]}.<br>The scan did not run, so nothing is drawn — not an estimate, not an interpolation.`;paintTiles(box,[],null);return}
+  gap.hidden=true;paintTiles(box,squarify(measured(sc).map(n=>({node:n,w:n.hist[i]||0})),0,0,box.clientWidth,box.clientHeight),(n,r)=>({label:`<span class="tr">${SNAP[i].toUpperCase()}</span><span class="tn">${esc(n.name)}</span><span class="tv">${fmt(r.w0)}</span><span class="tv2">${i===NOW?'current scan':'→ now '+fmtS(n.alloc-r.w0)}</span>`,aria:`${n.name} on ${SNAP[i]}: ${fmt(r.w0)}; change to now ${fmtS(n.alloc-r.w0)}`}))},
+ metricLabel:'On date',metric:n=>{const v=n.hist[S.tide.i];return v==null?'no obs.':fmt(v)},
+ foot:()=>`<b>Each dated scan leaves a tideline where used space reached.</b> ${S.scope===root?'The beach is the whole 1 TiB volume; sand is used, water is free.':'The beach is this scope’s largest observed total.'} Scrub the dates to re-lay the regions at that scan; children absent then are absent now. The ${SNAP[GAP]} scan never ran, so it has no line and no map.`},
+/* ---------------- Pressure map ---------------- */
+{id:'pressure',name:'Pressure Map',g:2,q:'What is growing fastest, and what changes repeatedly?',gate:{k:'history',text:'Net growth here is computed from two synthetic snapshots. Churn is invented weekly change counts.',needs:'two comparable snapshots for net growth, and a <b>reliable change feed</b> for churn. Missing intervals stay blank.'},
+ controls:()=>C.sel('a','From',SNAP.map((l,j)=>[j,l+(j===GAP?' · no observation':''),j===GAP||j===NOW]))+C.sel('b','To',SNAP.map((l,j)=>[j,l+(j===GAP?' · no observation':''),j===GAP||j===0]))+C.seg('view','Weather',[['net','Net growth'],['churn','Churn (synthetic)']]),
+ get:k=>k==='a'?String(S.pr.a):k==='b'?String(S.pr.b):k==='view'?S.pr.view:undefined,
+ ctl:(k,v)=>{if(k==='a'){S.pr.a=+v;if(S.pr.b<=S.pr.a)S.pr.b=S.pr.a+1===GAP?GAP+1:S.pr.a+1}if(k==='b'){S.pr.b=+v;if(S.pr.a>=S.pr.b)S.pr.a=S.pr.b-1===GAP?GAP-1:S.pr.b-1}if(k==='view')S.pr.view=v},
+ mount:v=>{v.innerHTML='<div class="tilemap"></div><div class="pins"></div>'},
+ render:v=>{const A=S.pr.a,B=S.pr.b,wk=B-A,kids=measured(S.scope),maxC=Math.max(1,...kids.map(n=>n.churn||0));
+  tileLens(v,scopeItems(),n=>{if(S.pr.view==='churn'){const t=(n.churn||0)/maxC;return {color:mix('#c6a4ee','#2a3a33',.25+.75*t),extra:`<i class="stipple" style="--wx:${(.15+.7*t).toFixed(2)};--sp:${Math.round(14-10*t)}px"></i>`,label:`<span class="tr">CHURN · SYNTHETIC</span><span class="tn">${esc(n.name)}</span><span class="tv">~${num(n.churn)} changes / week</span>`}}
+   const a=n.hist[A],b=n.hist[B];if(a==null||b==null)return {cls:'dim',label:`<span class="tr">NO OBSERVATION</span><span class="tn">${esc(n.name)}</span>`};
+   if(a===0&&b>0)return {cls:'newly',color:'#e8c07a',label:`<span class="tr">NEW SINCE ${SNAP[A].toUpperCase()}</span><span class="tn">${esc(n.name)}</span><span class="tv">${fmtS(b)}</span>`};
+   const r=a?(b-a)/a/wk:0;return {color:rateColor(r),extra:`<i class="weather" style="--wx:${Math.min(.9,Math.abs(r)/.05).toFixed(2)}"></i>`,label:`<span class="tr">${SNAP[A]} → ${SNAP[B]}</span><span class="tn">${esc(n.name)}</span><span class="tv">${fmtS(b-a)}</span><span class="tv2">${(r*100>=0?'+':'')+(r*100).toFixed(1)}% per week</span>`,aria:`${n.name}: ${fmtS(b-a)} from ${SNAP[A]} to ${SNAP[B]}, ${(r*100).toFixed(1)} percent per week`}})},
+ metricLabel:'Δ A→B',metric:n=>{if(S.pr.view==='churn')return n.churn==null?'—':'~'+num(n.churn)+'/wk';const a=n.hist[S.pr.a],b=n.hist[S.pr.b];return a==null||b==null?'—':fmtS(b-a)},
+ foot:()=>S.pr.view==='net'?`<b>Weather over the same regions: colour = net growth rate per week between ${SNAP[S.pr.a]} and ${SNAP[S.pr.b]}; ring density = intensity.</b> <span style="color:#7fb6e8">■ shrinking</span> · <span style="color:#6f8f80">■ steady</span> · <span style="color:#e8c07a">■ growing</span> · <span style="color:#ee7f65">■ surging (≥ 8%/wk)</span>. Area stays allocated bytes now. Two snapshots show net change only; a folder that churned and returned to size looks calm here.`:`<b>Churn is invented for this lab.</b> A real churn lens needs a reliable change feed (a filesystem change journal); two snapshots cannot reveal it. Stipple density = changes per week.`},
+/* ---------------- Regrowth reef ---------------- */
+{id:'reef',name:'Regrowth Reef',g:2,q:'Which space will return soon?',gate:{k:'history',text:'Two synthetic cleanup events on caches, with synthetic before/after scans.',needs:'<b>dated before/after scans and a known cleanup event</b>. The reef shows observed regrowth; it does not forecast. A warm cache can be useful.'},
+ controls:()=>C.seg('ev','Cleanup event',REEF.map((n,j)=>[j,esc(n.name)])),get:k=>k==='ev'?S.reef.ev:undefined,ctl:(k,v)=>{S.reef.ev=+v;S.sel=REEF[+v]},
+ mount:()=>{},
+ render:v=>{const n=REEF[S.reef.ev],c=n.clean.at,W=v.clientWidth,H=v.clientHeight,narrow=W<640,LW=narrow?W:W*.58,vals=n.hist.filter(x=>x!=null),mx=Math.max(...vals),lh=Math.min(52,(H-(narrow?190:80))/NS),base=(narrow?H-150:H-34);
+  let s='';for(let j=0;j<NS;j++){const y=base-(j+1)*lh,val=n.hist[j],cx=LW/2;s+=`<text class="colh" x="14" y="${y+lh/2+3}">${SNAP[j]}</text>`;
+   if(val==null){s+=`<rect x="70" y="${y+3}" width="${LW-140}" height="${lh-6}" rx="${(lh-6)/2}" fill="none" stroke="#f3dea4" stroke-dasharray="4 5" opacity=".6"/><text class="csub" x="${cx}" y="${y+lh/2+3}" text-anchor="middle" style="fill:#f3dea4">no observation</text>`;continue}
+   const w=Math.max(4,val/mx*(LW-150)),bleach=j===c,col=bleach?'#e9efe6':mix('#79cfc4','#1f4a44',.35+.65*j/NS);
+   s+=`<g class="reefL" data-id="${n.id}"><rect x="${cx-w/2}" y="${y+3}" width="${w}" height="${lh-6}" rx="${Math.min((lh-6)/2,12)}" fill="${col}" ${bleach?'stroke="#fff" stroke-dasharray="2 3"':''}/><title>${SNAP[j]} · ${exact(val)}</title></g><text class="csub" x="${Math.min(LW-8,cx+w/2+8)}" y="${y+lh/2+3}">${fmt(val)}</text>`}
+  const pi=n.hist[c-1]!=null?c-1:c-2,yE=base-c*lh;s+=`<line x1="60" x2="${LW-10}" y1="${yE}" y2="${yE}" stroke="#fff3cf" stroke-width="1.5"/><text class="clbl" x="${LW-10}" y="${yE-5}" text-anchor="end" style="fill:#fff3cf">event recorded between the ${SNAP[pi]} and ${SNAP[c]} scans · ${esc(n.clean.what)} (synthetic)</text>`;
+  const pre=n.hist[pi],post=n.hist[c],now=n.alloc,cleared=pre-post,regrew=now-post,frac=cleared>0?regrew/cleared:0,days=(NOW-c)*7;
+  v.innerHTML=`<svg class="svgv" viewBox="0 0 ${W} ${H}" role="img" aria-label="Reef of ${esc(n.name)} across eight scans">${s}</svg><div class="hud" style="left:auto;right:10px;top:10px;${narrow?'top:auto;bottom:10px;left:10px':''}"><b>${esc(pathOf(n))}</b><br>BEFORE EVENT ${fmt(pre)}<br>AFTER EVENT ${fmt(post)} · CLEARED ${fmt(cleared)}<br>NOW ${fmt(now)} · REGREW ${fmt(regrew)}<br><b>${pct(frac)} of the cleared bytes returned within ${days} days</b><br>Observed, not predicted.</div>`},
+ metricLabel:'Δ last week',metric:n=>{const p=n.hist[NOW-1];return p==null||n.alloc==null?'—':fmtS(n.alloc-p)},
+ foot:()=>{const n=REEF[S.reef.ev];return `<b>Growth rings, oldest at the bottom.</b> Each ring is one scan of ${esc(n.name)}; the bleached ring is the first scan after the recorded event. Rings above it are observed regrowth. The reef never extends past the last scan, and a missing scan stays an empty ring.`}},
+/* ---------------- Packing crate ---------------- */
+{id:'crate',name:'Packing Crate',g:3,q:'What might fit elsewhere?',gate:{k:'special',text:'Crate targets and their free space are invented.',needs:'<b>facts about the target</b>: filesystem, cluster size, sparse and compression support, free space. The answer is always a range, never a guarantee.'},
+ controls:()=>C.sel('target','Target',Object.entries(TARGETS).map(([k,t])=>[k,t.label]))+C.btn('add','Place selection in crate','primary')+C.btn('empty','Empty crate'),
+ get:k=>k==='target'?S.crate.target:k==='add'?{label:inCrate(S.sel)?'Selection is in the crate':'Place selection in crate',disabled:inCrate(S.sel)||S.sel===UNCH||S.sel.alloc==null}:k==='empty'?{label:'Empty crate',disabled:!S.crate.items.length}:undefined,
+ ctl:(k,v)=>{if(k==='target')S.crate.target=v;if(k==='add'&&!inCrate(S.sel)&&S.sel!==UNCH&&S.sel.alloc!=null){S.crate.items.push(S.sel);announce(`${S.sel.name} placed in the crate plan. Nothing on disk changes.`)}if(k==='empty'){S.crate.items=[];announce('Crate plan emptied.')}},
+ act:(a,el)=>{if(a==='out'){const n=byId.get(el.dataset.n);S.crate.items=S.crate.items.filter(o=>o!==n);render()}},
+ mount:v=>{v.innerHTML='<div class="crateWrap"><div class="crateMap"><div class="tilemap"></div></div><div class="cratePanel"></div></div>'},
+ render:v=>{const box=v.querySelector('.tilemap');paintTiles(box,squarify(scopeItems(),0,0,box.clientWidth,box.clientHeight),n=>inCrate(n)?{cls:'crated',label:`<span class="tr">▣ IN CRATE</span><span class="tn">${esc(n.name)}</span><span class="tv">${ge(n)}${fmt(n.alloc)}</span>`}:null);
+  const K=crateCalc(),T=K.T,gh=240,mxv=Math.max(T.free,K.hi,1)*1.1,Y=b=>gh-10-(gh-24)*b/mxv;let g='',acc=0;
+  K.items.forEach(it=>{const L=it.logical||0;g+=`<rect x="18" y="${Y(acc+L)}" width="82" height="${Math.max(0,Y(acc)-Y(acc+L))}" fill="${colorOf(it)}" opacity=".85"/>`;acc+=L});
+  const verdict=!K.items.length?['','The crate is empty. Select a region and place it in the crate to compare it with the target.']:K.hi<=T.free?['','Range sits below the target’s free space: it would likely fit. Still not a guarantee.']:K.lo>T.free?['bad','Even the low end exceeds the target’s free space: it would not fit as measured.']:['warn','The range straddles the target’s free space: it may not fit.'];
+  g=`<svg viewBox="0 0 118 ${gh}" width="118" height="${gh}" role="img" aria-label="Crate gauge"><rect x="12" y="8" width="94" height="${gh-18}" fill="#0a1712" stroke="#3a5a49" rx="4"/>${g}${K.items.length?`<rect x="14" y="${Y(K.hi)}" width="90" height="${Math.max(1,Y(K.lo)-Y(K.hi))}" fill="url(#hatch)" stroke="#f3dea4" stroke-dasharray="3 3"/>`:''}<line x1="6" x2="112" y1="${Y(T.free)}" y2="${Y(T.free)}" stroke="#ed947a" stroke-width="2"/><text x="112" y="${Y(T.free)-4}" text-anchor="end" style="font-size:9px;fill:#ed947a">FREE</text><defs><pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="3" height="6" fill="#f3dea455"/></pattern></defs></svg>`;
+  const flags=[];if(K.big.length&&T.limit)flags.push(`<span class="flag warn">${K.big.length} listed file${K.big.length>1?'s':''} over 4 GiB cannot go to FAT32: ${K.big.slice(0,3).map(l=>esc(l.name)).join(', ')}${K.big.length>3?'…':''}</span>`);if(K.tailFiles&&T.limit)flags.push(`<span class="flag warn">${num(K.tailFiles)} tail files are not listed individually; any of them could exceed 4 GiB</span>`);
+  if(K.hyd)flags.push(`<span class="flag warn">☁ ${fmt(K.hyd)} lives only in the cloud; copying would download it first</span>`);if(K.sparse.length)flags.push(`<span class="flag ${T.sparse?'':'warn'}">${K.sparse.length} sparse image${K.sparse.length>1?'s':''}: ${fmt(K.sparse.reduce((s,l)=>s+l.alloc,0))} here, ${fmt(K.sparse.reduce((s,l)=>s+l.logical,0))} logical${T.sparse?' · target can keep them sparse':' · target cannot keep them sparse'}</span>`);
+  v.querySelector('.cratePanel').innerHTML=`<h4>${esc(T.label)}</h4><div class="eyebrow">synthetic target · ${fmt(T.free)} free</div><div class="crateGrid" style="margin-top:10px">${g}<div><dl class="kv"><dt>Items</dt><dd>${K.items.length}</dd><dt>Files</dt><dd>${num(K.n)}</dd><dt>Allocated here</dt><dd>${fmt(K.A)}</dd><dt>Logical length</dt><dd>${fmt(K.L)}</dd><dt>On target</dt><dd>${K.items.length?fmt(K.lo)+' – '+fmt(K.hi):'—'}</dd></dl><div class="verdict ${verdict[0]}">${verdict[1]}</div></div></div>${flags.join('')}<p class="cnote" style="margin:10px 0 6px">${T.compress?'Compression and deduplication depend on content: the range spans 35–100% of logical length.':`Every file rounds up to a ${fmt(T.cluster)} cluster: the range adds up to one cluster per file.`} This is a plan; nothing is copied or moved.</p>${K.items.map(it=>`<div class="crateItem"><span><span class="sw" style="background:${colorOf(it)}"></span>${esc(short(pathOf(it),46))}<br><span class="mono" style="font-size:10.5px;color:var(--muted)">L ${fmt(it.logical)} · A ${ge(it)}${fmt(it.alloc)}</span></span><button type="button" data-act="out" data-n="${it.id}">Take out</button></div>`).join('')}`},
+ metricLabel:'Crate',metric:n=>inCrate(n)?'▣ in crate':'',
+ foot:()=>`<b>Compare selected material with a target, as a range.</b> Filesystem, cluster size, sparse support and compression change allocation, so the crate shows low and high ends against the target’s free line. Taking an item out changes only this plan.`},
+/* ---------------- Metabolism ---------------- */
+{id:'metab',name:'Metabolism',g:3,q:'Where does incoming material settle?',gate:{k:'special',text:'Twelve synthetic transfer events: downloads, local writes, observed moves and inferred matches.',needs:'<b>a change journal or explicit events</b>. Matching a source to a destination is an inference unless an identity-preserving move is observed.'},
+ controls:()=>C.sel('a','After',SNAP.slice(0,NS-1).map((l,j)=>[j,l]))+C.sel('b','Up to',SNAP.map((l,j)=>[j,l,j===0]))+Object.entries(BASIS).map(([k,b])=>`<button type="button" class="cbtn" data-ctl="show:${k}" data-toggle="1" aria-pressed="true" style="border-color:${b.color}88">${b.label}</button>`).join('')+C.btn('play','Replay flows'),
+ get:k=>{if(k==='a')return String(S.metab.a);if(k==='b')return String(S.metab.b);if(k.startsWith('show:'))return S.metab.show[k.slice(5)];if(k==='play')return {label:'Replay flows',disabled:S.reduce}},
+ ctl:(k,v)=>{if(k==='a'){S.metab.a=+v;if(S.metab.b<=S.metab.a)S.metab.b=S.metab.a+1}if(k==='b'){S.metab.b=+v;if(S.metab.a>=S.metab.b)S.metab.a=S.metab.b-1}if(k.startsWith('show:'))S.metab.show[k.slice(5)]=v;if(k==='play')setTimeout(metPlay,30)},
+ act:(a,el)=>{if(a==='flow'){S.metab.flow=el.dataset.f===S.metab.flow?null:el.dataset.f;const f=FLOWS.find(x=>x.id===el.dataset.f);if(f&&S.metab.flow&&within(f.to,S.scope))S.sel=f.to;render()}},
+ mount:()=>{},
+ render:v=>{const W=v.clientWidth,H=v.clientHeight,ML=Math.min(118,W*.2),MR=Math.min(96,W*.16),rects=squarify(scopeItems(),ML,24,W-ML-MR,H-92),cen=new Map();rects.forEach(r=>cen.set(r.node,[r.x+r.w/2,r.y+r.h/2]));cen.set(S.scope,[ML+(W-ML-MR)/2,24+(H-92)/2]);
+  const ports={net:[ML-40,H*.28],proc:[ML-40,H*.58],out:[W-MR+34,H*.44]};let s='';
+  rects.forEach(r=>{s+=`<rect data-id="${r.node.id}" x="${r.x+1.5}" y="${r.y+1.5}" width="${Math.max(0,r.w-3)}" height="${Math.max(0,r.h-3)}" rx="6" fill="${colorOf(r.node)}" fill-opacity="${S.sel===r.node||isAncestor(r.node,S.sel)?.3:.13}" stroke="${colorOf(r.node)}" stroke-opacity=".5" style="cursor:pointer"/>${r.w>80&&r.h>30?`<text class="clbl" x="${r.x+9}" y="${r.y+18}">${esc(short(r.node.name,Math.floor(r.w/7.5)))}</text>`:''}`});
+  s+=`<text class="port" x="8" y="${ports.net[1]-12}">NETWORK</text><circle cx="${ports.net[0]}" cy="${ports.net[1]}" r="7" fill="#8fc2e8"/><text class="port" x="8" y="${ports.proc[1]-12}">LOCAL WRITES</text><circle cx="${ports.proc[0]}" cy="${ports.proc[1]}" r="7" fill="#c9d97a"/><text class="port" x="${W-8}" y="${ports.out[1]-12}" text-anchor="end">OUTSIDE ${esc(short(S.scope.name.toUpperCase(),12))}</text><circle cx="${ports.out[0]}" cy="${ports.out[1]}" r="7" fill="none" stroke="#cfe3d7" stroke-dasharray="2 2"/>`;
+  const fl=metFlows(),mxb=Math.max(1,...fl.map(f=>f.bytes));let skipped=0,arcs='',defs='';
+  Object.entries(BASIS).forEach(([k,b])=>{defs+=`<marker id="ah-${k}" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="4" markerHeight="4" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" fill="${b.color}"/></marker>`});
+  fl.forEach((f,i)=>{const a=metEnd(f.from),b=metEnd(f.to);const pa=a.port?ports[a.port]:cen.get(a.node),pb=b.port?ports[b.port]:cen.get(b.node);if(!pa||!pb||(a.port==='out'&&b.port==='out')){skipped++;return}
+   const bs=BASIS[f.basis],w=2+13*Math.sqrt(f.bytes/mxb),on=S.metab.flow===f.id,fade=S.metab.flow&&!on;let d;
+   if(Math.hypot(pa[0]-pb[0],pa[1]-pb[1])<4){const r=16+i%3*6;d=`M${pa[0]},${pa[1]}c${-r},${-r*1.6} ${r*2},${-r*1.6} ${r*.4},0`}else{const mx=(pa[0]+pb[0])/2,my=(pa[1]+pb[1])/2,dx=pb[0]-pa[0],dy=pb[1]-pa[1],L=Math.hypot(dx,dy),k=(i%2?1:-1)*(.18+.05*(i%3));d=`M${pa[0].toFixed(1)},${pa[1].toFixed(1)}Q${(mx-dy/L*L*k).toFixed(1)},${(my+dx/L*L*k).toFixed(1)} ${pb[0].toFixed(1)},${pb[1].toFixed(1)}`}
+   arcs+=`<path class="flow ${on?'on':''} ${fade?'faded':''}" data-act="flow" data-f="${f.id}" d="${d}" stroke="${bs.color}" stroke-width="${w.toFixed(1)}" stroke-opacity=".8" ${bs.dash?`stroke-dasharray="${bs.dash}"`:''} marker-end="url(#ah-${f.basis})"><title>${SNAP[f.t]} · ${bs.label} · ${fmt(f.bytes)} · ${esc(f.what)}</title></path>`});
+  const kids=measured(S.scope).filter(n=>n.alloc>0),nets=kids.map(n=>[n,metNet(n)]).filter(([,x])=>x!==0).sort((a,b)=>b[1]-a[1]).slice(0,6),mxn=Math.max(1,...nets.map(([,x])=>Math.abs(x)));let bars=`<text class="colh" x="${ML}" y="${H-52}">SETTLED IN WINDOW · NET BYTES IN MINUS OUT</text>`;
+  nets.forEach(([n,x],j)=>{const bw=(W-ML-MR)/Math.max(1,nets.length)-8,bx=ML+j*(bw+8),bh=Math.max(1,24*Math.abs(x)/mxn);bars+=`<rect data-id="${n.id}" x="${bx}" y="${H-12-bh}" width="${bw}" height="${bh}" fill="${x>0?colorOf(n):'#6d8f80'}" opacity=".8" style="cursor:pointer"/><text class="csub" x="${bx}" y="${H-40}">${esc(short(n.name,Math.max(6,Math.floor(bw/6.5))))} ${fmtS(x)}</text>`});
+  v.innerHTML=`<svg class="svgv" viewBox="0 0 ${W} ${H}" role="img" aria-label="Transfer flows between regions"><defs>${defs}</defs>${s}<g>${arcs}</g><g class="particles"></g>${bars}</svg>${skipped?`<div class="hud" style="top:auto;bottom:74px;left:auto;right:10px">${skipped} flow${skipped>1?'s':''} happened wholly outside this scope</div>`:''}`},
+ metricLabel:'Net inflow',metric:n=>{const x=metNet(n);return x?fmtS(x):'—'},
+ foot:()=>{const f=S.metab.flow&&FLOWS.find(x=>x.id===S.metab.flow);return f?`<b>${SNAP[f.t]} · ${BASIS[f.basis].label} · ${fmt(f.bytes)}.</b> ${esc(f.what)}. From ${f.from==='net'||f.from==='proc'?PORTS[f.from]:esc(pathOf(f.from))} to ${esc(pathOf(f.to))}.${f.basis==='inferred'?' <b>This join is an inference:</b> no identity-preserving move was observed.':''}`:`<b>Arcs are events between ${SNAP[S.metab.a]} and ${SNAP[S.metab.b]}; width = bytes.</b> Solid green arcs are observed moves that preserved file identity; dashed coral arcs are inferred matches. Events come from a journal, not scans, so the ${SNAP[GAP]} scan gap does not hide them. Click an arc for its evidence.`}},
+/* ---------------- Twin stars ---------------- */
+{id:'twins',name:'Twin Stars',g:3,q:'Which copies might be duplicates?',gate:{k:'special',text:'Six synthetic hash groups. Nothing was hashed.',needs:'<b>a separately approved, bounded content-hashing scan</b>. Hashing reads content and is expensive; hardlinks and intentional backups must be distinguished before any claim.'},
+ controls:()=>Object.entries(TWIN_CLS).map(([k,c])=>`<button type="button" class="cbtn" data-ctl="cls:${k}" data-toggle="1" aria-pressed="true" style="border-color:${c.color}99">${c.label}</button>`).join('')+C.range('min','Smallest file',0,5,.1),
+ get:k=>{if(k.startsWith('cls:'))return S.twins.cls[k.slice(4)];if(k==='min')return S.twins.min},out:k=>k==='min'?(+S.twins.min).toFixed(1)+' GiB':null,
+ ctl:(k,v)=>{if(k.startsWith('cls:'))S.twins.cls[k.slice(4)]=v;if(k==='min')S.twins.min=+v},
+ act:(a,el)=>{if(a==='grp'){S.twins.group=el.dataset.g;render()}},
+ mount:()=>{},
+ render:v=>{const W=v.clientWidth,H=v.clientHeight,rects=squarify(scopeItems(),14,14,W-28,H-78),rm=new Map();rects.forEach(r=>rm.set(r.node,r));let s='';
+  rects.forEach(r=>{s+=`<rect data-id="${r.node.id}" x="${r.x+1.5}" y="${r.y+1.5}" width="${Math.max(0,r.w-3)}" height="${Math.max(0,r.h-3)}" rx="6" fill="${colorOf(r.node)}" fill-opacity=".08" stroke="${colorOf(r.node)}" stroke-opacity=".3" style="cursor:pointer"/>${r.w>80&&r.h>28?`<text class="csub" x="${r.x+9}" y="${r.y+17}" style="fill:${colorOf(r.node)}">${esc(short(r.node.name,Math.floor(r.w/7)))}</text>`:''}`});
+  s+=`<line x1="14" x2="${W-14}" y1="${H-52}" y2="${H-52}" stroke="#2c4d3c" stroke-dasharray="3 4"/><text class="colh" x="14" y="${H-38}">OUTSIDE ${esc(S.scope.name.toUpperCase())}</text>`;
+  const gs=TWINS.filter(g=>S.twins.cls[g.cls]&&g.m[0].logical>=S.twins.min*GiB),mxs=Math.max(...TWINS.map(g=>g.m[0].logical));let outs=0,lines='',stars='';
+  const pos=m=>{if(within(m,S.scope)&&m!==S.scope){const t=topChild(m,S.scope),r=rm.get(t);if(r)return [r.x+r.w*(.18+.64*hash(m.id)),r.y+r.h*(.24+.56*hash(m.id+'y'))]}return [120+((outs++)*97)%(Math.max(140,W-160)),H-24]};
+  gs.forEach(g=>{const P=g.m.map(pos),c=TWIN_CLS[g.cls],on=S.twins.group===g.id||g.m.includes(S.sel);
+   for(let i=0;i<P.length;i++)for(let j=i+1;j<P.length;j++)lines+=`<path class="twin ${on?'on':''}" data-act="grp" data-g="${g.id}" d="M${P[i][0].toFixed(1)},${P[i][1].toFixed(1)}L${P[j][0].toFixed(1)},${P[j][1].toFixed(1)}" stroke="${c.color}" stroke-width="${g.cls==='hardlink'?3:1.8}" ${c.dash?`stroke-dasharray="${c.dash}"`:''}><title>${esc(g.title)} · ${c.label}</title></path>`;
+   g.m.forEach((m,i)=>{const r=3.5+6*Math.sqrt(m.logical/mxs);stars+=`<g class="star ${S.sel===m?'sel':''}" data-act="grp" data-g="${g.id}" data-id="${m.id}"><circle cx="${P[i][0]}" cy="${P[i][1]}" r="${r*2.6}" fill="${c.color}" opacity=".12"/><circle class="core" cx="${P[i][0]}" cy="${P[i][1]}" r="${r}" fill="${c.color}"/><title>${esc(pathOf(m))} · L ${fmt(m.logical)} · A ${fmt(m.alloc)}</title></g>`;if(on)stars+=`<text class="clbl" x="${P[i][0]+r+5}" y="${P[i][1]+4}">${esc(short(pathOf(m).split(' / ').slice(-3,-1).join(' / '),28))}</text>`})});
+  v.innerHTML=`<svg class="svgv" viewBox="0 0 ${W} ${H}" role="img" aria-label="Files with matching synthetic content hashes">${s}<g>${lines}</g><g>${stars}</g></svg>`},
+ metricLabel:'Hash matches',metric:n=>{const k=TWINS.reduce((s,g)=>s+g.m.filter(m=>within(m,n)).length,0);return k?k+' file'+(k>1?'s':''):'—'},
+ foot:()=>{const g=TWINS.find(x=>x.id===S.twins.group)||twinOf(S.sel);if(!g){const cp=TWINS.filter(x=>x.cls==='copy').reduce((s,x)=>s+(x.m.length-1)*x.m[0].logical,0),bk=TWINS.filter(x=>x.cls==='backup').reduce((s,x)=>s+(x.m.length-1)*x.m[0].logical,0);return `<b>Stars are files; a line joins files whose synthetic content hashes match.</b> Extra bytes held in independent copies: ${fmt(cp)}; in labelled backups: ${fmt(bk)}; hardlinks add none. Select a star or line to read its evidence. No copy is called disposable.`}
+  const c=TWIN_CLS[g.cls];return `<b>${esc(g.title)} · ${c.label}.</b> ${c.text} ${g.m.map(m=>`${esc(pathOf(m))} (L ${fmt(m.logical)}, A ${fmt(m.alloc)})`).join(' · ')}.${g.cls==='copy'?` If independent, ${fmt((g.m.length-1)*g.m[0].logical)} is held in extra copies.`:''}`}},
+/* ---------------- Resonance ---------------- */
+{id:'resonance',name:'Resonance',g:4,q:'Can I hear the rough composition?',gate:{k:'optional',text:'Off by default; plays only when you press Play. Uses the same measured shares as the list.',needs:'nothing new. Duration is an orientation aid, never a substitute for the list, keyboard path or exact readout.'},
+ controls:()=>C.btn('play','▶ Play composition (sound)','primary')+C.btn('stop','Stop')+C.sel('len','Length',[['4','4 s'],['8','8 s'],['16','16 s'],['32','32 s']])+C.range('vol','Volume',0,1,.05)+(S.scope===root?C.tog('noise','Uncharted as noise'):''),
+ get:k=>k==='play'?{label:S.res.playing?'■ Playing…':'▶ Play composition (sound)',disabled:S.res.playing}:k==='stop'?{label:'Stop',disabled:!S.res.playing}:k==='len'?String(S.res.len):k==='vol'?S.res.vol:k==='noise'?S.res.noise:undefined,out:k=>k==='vol'?Math.round(S.res.vol*100)+'%':null,
+ ctl:(k,v)=>{if(k==='play')resPlay();if(k==='stop')resStop(false);if(k==='len'){S.res.len=+v;resStop(true)}if(k==='vol'){S.res.vol=+v}if(k==='noise'){S.res.noise=v;resStop(true)}},
+ mount:v=>{v.innerHTML='<div class="res"><svg class="svgv" role="img" aria-label="Score of the composition"></svg><div class="phead" style="top:30px;bottom:40px"></div></div>'},
+ render:v=>{const W=v.clientWidth,H=v.clientHeight,segs=resSegments(),X=t=>20+(W-40)*t/S.res.len,rows=segs.length,rh=Math.min(30,(H-96)/Math.max(1,rows));let s=`<text class="colh" x="20" y="22">SCORE · TIME = SHARE OF ${esc(S.scope.name.toUpperCase())} · PITCH FALLS WITH RANK</text>`;
+  for(let q=0;q<=4;q++)s+=`<line x1="${X(S.res.len*q/4)}" x2="${X(S.res.len*q/4)}" y1="30" y2="${H-40}" stroke="#1f3a2c"/><text class="colh" x="${X(S.res.len*q/4)}" y="${H-26}" text-anchor="middle">${(S.res.len*q/4).toFixed(1)} s</text>`;
+  segs.forEach((g,i)=>{const x=X(g.x0),w=Math.max(1.5,X(g.x0+g.exact)-x),y=34+i*rh,col=g.noise?'#9a9a86':colorOf(g.node),play=S.res.idx===i;s+=`<g data-id="${g.node.id}" data-seg="${i}" class="${play?'playing':''}" style="cursor:pointer"><rect x="${x}" y="${y}" width="${w}" height="${rh-4}" rx="3" fill="${col}" opacity="${play?1:.7}" ${g.node.coverage==='partial'?'stroke="#fff" stroke-dasharray="2 2"':''} ${g.noise?'fill-opacity=".5"':''}/><text class="clbl" x="${x+w+6>W-160?x-6:x+w+6}" y="${y+rh/2+1}" ${x+w+6>W-160?'text-anchor="end"':''}>${esc(short(g.node.name,22))} · ${g.exact.toFixed(2)} s · ${pct(g.share)}</text></g>`});
+  const den=S.scope.children.filter(c=>c.coverage==='denied');if(den.length)s+=`<text class="csub" x="20" y="${H-8}">Rests, not heard: ${den.map(d=>'⌀ '+esc(d.name)).join(', ')} · unreadable, no measure</text>`;
+  const svg=v.querySelector('svg');svg.setAttribute('viewBox',`0 0 ${W} ${H}`);svg.innerHTML=s},
+ metricLabel:'Sounds for',metric:n=>{const g=resSegments().find(x=>x.node===n);return g?g.exact.toFixed(2)+' s':'—'},
+ foot:()=>`<b>Each region sounds for its exact share of ${S.res.len} seconds, largest first, pitch falling by rank.</b> Partial regions tremble; ${S.scope===root?'the uncharted remainder is noise; ':''}unreadable folders are silent rests. Segments shorter than 45 ms are lengthened so they can be heard; the score and list stay exact. Nothing plays until you press Play.`}
+];
+const MODE=Object.fromEntries(MODES.map(m=>[m.id,m]));
+function rateColor(r){if(r<=-.004)return mix('#7fb6e8','#6f8f80',Math.min(1,.3-r/.05));if(r<.004)return '#6f8f80';const t=Math.min(1,r/.08);return t<.5?mix('#e8c07a','#8fa27a',.4+t*1.2):mix('#ee7f65','#e8c07a',(t-.5)*2)}
+
+/* Skyline drawing */
+const SKY={polys:[]};
+function pip(x,y,p){let c=false;for(let i=0,j=p.length-1;i<p.length;j=i++){if((p[i][1]>y)!==(p[j][1]>y)&&x<(p[j][0]-p[i][0])*(y-p[i][1])/(p[j][1]-p[i][1])+p[i][0])c=!c}return c}
+function rotR(r,k){let {x,y,w,h}=r;for(let i=0;i<k;i++)[x,y,w,h]=[1-y-h,x,h,w];return {x,y,w,h}}
+function skyDraw(v){const cv=v.querySelector('canvas');const W=v.clientWidth,H=v.clientHeight;if(!W||!H)return;const dpr=Math.min(devicePixelRatio||1,2);cv.width=Math.round(W*dpr);cv.height=Math.round(H*dpr);const ctx=cv.getContext('2d');ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,W,H);
+ const districts=measured(S.scope).filter(n=>n.alloc>0),drs=squarify(districts.map(n=>({node:n,w:n.alloc})),0,0,1,1),B=[];
+ drs.forEach(d=>{const p=.007,x=d.x+p,y=d.y+p,w=d.w-2*p,h=d.h-2*p;d.in={x,y,w,h};if(w<=0||h<=0)return;if(d.node.kind==='folder'){squarify(measured(d.node).filter(c=>c.alloc>0).map(c=>({node:c,w:c.alloc})),x,y,w,h).forEach(r=>{const ip=Math.min(.0035,r.w*.14,r.h*.14);B.push({node:r.node,dist:d.node,x:r.x+ip,y:r.y+ip,w:r.w-2*ip,h:r.h-2*ip})})}else B.push({node:d.node,dist:d.node,x:x+.004,y:y+.004,w:w-.008,h:h-.008})});
+ const maxF=Math.max(1,...B.map(b=>b.node.files||0)),flat=S.sky.flat,Hmax=flat?0:Math.min(H*.42,300)*S.sky.ex,c=Math.cos(Math.PI/6),s=Math.sin(Math.PI/6);
+ const Sc=Math.max(20,Math.min((W-36)/(2*c),(H-36-Hmax)/(2*s))),ox=W/2,oy=(H-(2*s*Sc+Hmax))/2+Hmax;const P=(x,y,z)=>[ox+(x-y)*Sc*c,oy+(x+y)*Sc*s-z];
+ const zOf=f=>flat?0:(S.sky.hmode==='log'?Math.log10(f+1)/Math.log10(maxF+1):f/maxF)*Hmax;
+ const poly=(pts,fill,stroke,lw)=>{ctx.beginPath();pts.forEach(([x,y],i)=>i?ctx.lineTo(x,y):ctx.moveTo(x,y));ctx.closePath();if(fill){ctx.fillStyle=fill;ctx.fill()}if(stroke){ctx.strokeStyle=stroke;ctx.lineWidth=lw||1;ctx.stroke()}};
+ poly([P(0,0,0),P(1,0,0),P(1,1,0),P(0,1,0)],'#0b1a13','#1f3a2c');
+ drs.forEach(d=>{if(!d.in)return;const r=rotR(d.in,S.sky.rot),col=colorOf(d.node),hold=d.node===S.sel||isAncestor(d.node,S.sel);poly([P(r.x,r.y,0),P(r.x+r.w,r.y,0),P(r.x+r.w,r.y+r.h,0),P(r.x,r.y+r.h,0)],mix(col,'#07130e',hold?.34:.2),mix(col,'#07130e',.5),1)});
+ const bs=B.map(b=>({...b,...rotR(b,S.sky.rot),z:zOf(b.node.files||0)})).sort((a,b)=>(a.x+a.w/2+a.y+a.h/2)-(b.x+b.w/2+b.y+b.h/2));SKY.polys=[];
+ bs.forEach(b=>{const {x,y,w,h,z}=b,col=colorOf(b.dist===b.node?b.node:b.node.parent===b.dist?b.dist:b.node),base=b.dist===b.node?col:mix(colorOf(b.node),col,.5),sel=S.sel===b.node,hold=!sel&&(isAncestor(b.node,S.sel)||S.sel===b.dist);
+  const lit=sel?1.18:hold?1.05:1;const sh=t=>mix(base,'#07130e',Math.min(1,t*lit));
+  if(z>0.5){poly([P(x,y+h,0),P(x+w,y+h,0),P(x+w,y+h,z),P(x,y+h,z)],sh(.62),'#06110c',.6);poly([P(x+w,y,0),P(x+w,y+h,0),P(x+w,y+h,z),P(x+w,y,z)],sh(.46),'#06110c',.6)}
+  poly([P(x,y,z),P(x+w,y,z),P(x+w,y+h,z),P(x,y+h,z)],sh(.92),sel?'#ffffff':'#06110c',sel?2.2:.6);
+  if(b.node.coverage==='partial'){ctx.save();ctx.setLineDash([3,3]);poly([P(x,y,z),P(x+w,y,z),P(x+w,y+h,z),P(x,y+h,z)],null,'#ffffffaa',1);ctx.restore()}
+  SKY.polys.push({node:b.node,pts:z>0.5?[P(x,y,z),P(x+w,y,z),P(x+w,y,0),P(x+w,y+h,0),P(x,y+h,0),P(x,y+h,z)]:[P(x,y,0),P(x+w,y,0),P(x+w,y+h,0),P(x,y+h,0)]})});
+ const mono=getComputedStyle(document.body).getPropertyValue('--mono');ctx.font=`10.5px ${mono}`;ctx.textAlign='center';ctx.textBaseline='middle';
+ bs.slice().sort((a,b)=>b.z-a.z).slice(0,flat?0:6).forEach(b=>{const [tx,ty]=P(b.x+b.w/2,b.y+b.h/2,b.z);const t=`${short(b.node.name,16)} · ${num(b.node.files)} files`,tw=ctx.measureText(t).width;ctx.fillStyle='#050f0bdd';ctx.fillRect(tx-tw/2-5,ty-22,tw+10,16);ctx.fillStyle='#fff3cf';ctx.fillText(t,tx,ty-14)});
+ drs.forEach(d=>{if(!d.in||d.w*d.h<.02)return;const r=rotR(d.in,S.sky.rot),[tx,ty]=P(r.x+r.w/2,r.y+r.h/2,0),t=short(d.node.name,18),tw=ctx.measureText(t).width;ctx.fillStyle='#050f0bcc';ctx.fillRect(tx-tw/2-5,ty-8,tw+10,16);ctx.fillStyle=colorOf(d.node);ctx.fillText(t,tx,ty)})}
+
+/* Metabolism replay (runs once, then stops) */
+function metPlay(){cancelAnimationFrame(MET.raf);if(S.reduce){announce('Reduced motion: flows stay still; the arcs already show each event.');return}const paths=[...view.querySelectorAll('path.flow')],g=view.querySelector('g.particles');if(!paths.length||!g)return;g.innerHTML='';
+ const lens=paths.map(p=>p.getTotalLength()),dots=paths.map(p=>{const c=document.createElementNS(svgNS,'circle');c.setAttribute('r',4);c.setAttribute('class','particle');c.setAttribute('fill',p.getAttribute('stroke'));g.append(c);return c}),t0=performance.now(),dur=2000;
+ const f=t=>{const k=Math.min(1,(t-t0)/dur),e=k<.5?2*k*k:1-Math.pow(-2*k+2,2)/2;paths.forEach((p,i)=>{const pt=p.getPointAtLength(e*lens[i]);dots[i].setAttribute('cx',pt.x);dots[i].setAttribute('cy',pt.y)});if(k<1)MET.raf=requestAnimationFrame(f);else{MET.raf=0;g.innerHTML=''}};MET.raf=requestAnimationFrame(f)}
+
+/* =====================================================================
+   Chrome: mode nav, ledger, descent, list, inspector
+   ===================================================================== */
+function renderNav(){const nav=$('#modeNav');nav.innerHTML=GROUPS.map((gname,gi)=>`<div class="mgroup"><h3>${gname}</h3>${MODES.map((m,i)=>[m,i]).filter(([m])=>m.g===gi).map(([m,i])=>`<button type="button" class="mbtn" data-mode="${m.id}" aria-pressed="${S.mode===m.id}" style="--gc:${GATE[m.gate.k].color}"><span class="mi">${pad2(i+1)}</span><span class="mn">${m.name}</span><span class="gd" title="${GATE[m.gate.k].label}"></span><span class="mq">${m.q}</span></button>`).join('')}</div>`).join('')}
+function renderLedger(){const bar=$('#ledgerBar');bar.innerHTML=`<button type="button" class="lb-att" data-go="root" style="width:${root.alloc/CAPACITY*100}%" aria-label="Attributed by the walk: at least ${fmt(root.alloc)}. Go to the volume."></button><button type="button" class="lb-unch" data-row="uncharted" aria-pressed="${S.sel===UNCH}" style="width:${UNCH.alloc/CAPACITY*100}%" aria-label="Uncharted: ${fmt(UNCH.alloc)} used but not attributed. Select to read why."></button><button type="button" class="lb-free" tabindex="-1" aria-hidden="true" style="width:${FREE/CAPACITY*100}%"></button>`;
+ $('#ledgerLegend').innerHTML=`<span><i class="sw" style="background:#7fe0a6"></i><b>≥ ${fmt(root.alloc)}</b>&nbsp;attributed by the walk</span><span><i class="sw fogsw"></i><b>${fmt(UNCH.alloc)}</b>&nbsp;uncharted: used, not attributed</span><span><i class="sw" style="background:#2a4a3a"></i><b>${fmt(FREE)}</b>&nbsp;free</span><span style="color:var(--muted)">Scan 25 Sep 2026 · synthetic · the uncharted gap is not cleanup</span>`;
+ $('#ledgerFree').innerHTML=`<strong>${(FREE/GiB).toFixed(1)}</strong><span>GiB free of 1,024</span>`}
+function renderDescent(){const chain=ancestry(S.scope);$('#descent').innerHTML=chain.map((a,k)=>{const cur=a===S.scope,next=chain[k+1]||(S.sel!==a&&S.sel!==UNCH&&isAncestor(a,S.sel)?topChild(S.sel,a):null);let bar='<span class="cb"></span>';
+ if(next&&next.alloc!=null&&a.alloc){let off=0;for(const s of measured(a)){if(s===next)break;off+=s.alloc}bar=`<span class="cb"><i style="left:${off/a.alloc*100}%;width:${Math.max(2,next.alloc/a.alloc*100)}%;background:${colorOf(next)}"></i></span>`}
+ return `<button type="button" class="crumb" data-go="${a.id}" ${cur?'aria-current="location"':''} aria-label="${cur?'Current scope':'Ascend to'} ${esc(a.name)}${next?`; ${esc(next.name)} is ${pct(next.alloc/a.alloc)} of it`:''}"><span class="cl mono">LEVEL ${k}</span><span class="cn">${esc(a.name)}</span>${bar}<span class="cv mono">${next?esc(short(next.name,13))+' '+pct(next.alloc/a.alloc):ge(a)+fmt(a.alloc)}</span></button>`}).join('<span class="csep" aria-hidden="true">›</span>')}
+function renderList(){const sc=S.scope,m=MODE[S.mode],rows=ranked(sc),mx=Math.max(1,...rows.map(r=>r.alloc||0)),holder=S.sel===sc||S.sel===UNCH?null:topChild(S.sel,sc);
+ let h=`<div class="rankHead"><div><div class="eyebrow">Ranked · exact · ${rows.length} children</div><h3>${esc(sc.name)}</h3></div><div class="rankTot mono">${ge(sc)}${fmt(sc.alloc)}<small>${exact(sc.alloc)}</small></div></div><div class="rankCols mono"><span>#</span><span>Name</span><span>Allocated</span><span>${esc(m.metricLabel||'Share')}</span><span></span></div><div class="rows">`;
+ rows.forEach((n,i)=>{const sel=S.sel===n,holds=holder===n&&!sel,share=n.alloc!=null&&sc.alloc?n.alloc/sc.alloc:null;
+  h+=`<div class="row ${sel?'sel':''} ${holds?'holds':''} k-${n.kind}"><button type="button" class="rowMain" data-row="${n.id}" aria-current="${sel?'true':'false'}" tabindex="${sel||(holds&&!rows.includes(S.sel))?0:-1}" aria-label="${pad2(i+1)} ${esc(n.name)}, ${n.alloc==null?'unreadable, no measure':ge(n)+fmt(n.alloc)+', '+pct(share)}${holds?', contains the selection':''}"><span class="rk mono">${n.alloc==null?'··':pad2(i+1)}</span><span class="rn"><span class="rname"><span class="sw" style="background:${colorOf(n)}"></span>${esc(n.name)}</span><span class="rbar"><i style="width:${n.alloc==null?0:Math.max(.6,n.alloc/mx*100)}%;background:${colorOf(n)}"></i></span></span><span class="rv mono">${n.alloc==null?'unreadable':ge(n)+fmt(n.alloc)}</span><span class="rm mono">${m.metric?m.metric(n):shareMetric(n)}</span></button>${enterable(n)?`<button type="button" class="rowEnter" data-enter="${n.id}" tabindex="-1" aria-label="Enter ${esc(n.name)}">↘</button>`:'<span class="rowEnter none" aria-hidden="true"></span>'}</div>`});
+ if(sc===root)h+=`<div class="row ${S.sel===UNCH?'sel':''}"><button type="button" class="rowMain" data-row="uncharted" tabindex="${S.sel===UNCH?0:-1}" aria-label="Uncharted, ${fmt(UNCH.alloc)}, used but not attributed; not a folder"><span class="rk mono">··</span><span class="rn"><span class="rname"><span class="sw fogsw"></span>Uncharted</span><span class="rsub">used, not attributed · not a folder</span></span><span class="rv mono">${fmt(UNCH.alloc)}</span><span class="rm mono">${pct(UNCH.alloc/USED)} used</span></button><span class="rowEnter none"></span></div>`;
+ const sum=rows.reduce((s,n)=>s+(n.alloc||0),0),ok=sum===sc.alloc;h+=`</div><div class="recon mono ${ok?'ok':''}"><b>${ok?'✓ Rows reconcile exactly':'✗ Rows do not reconcile'}</b> · Σ ${exact(sum)}${rows.some(r=>r.coverage==='denied')?'<br>Unreadable children have no measure; the total is a lower bound (≥).':''}${rows.some(r=>r.kind==='tail')?'<br>A tail row aggregates unlisted smaller files; it has no Enter.':''}</div>`;
+ listEl.innerHTML=h;
+ if(!listEl.querySelector('.rowMain[tabindex="0"]')){const f=listEl.querySelector('.rowMain');if(f)f.tabIndex=0}}
+function citationHTML(){const c=S.cite;if(!c)return '';
+ const r=c.result,base=`lab-walk-A / ${esc(c.node.id)} / ${esc(c.node.name)}`;
+ let result='';
+ if(r){const status=r.kind==='expired'?'Unrecoverable: the mock scope handle expired. The pinned reading stays visible.':r.kind==='coverage'?`Incomparable: walk ${r.id} covered 60% of this scope, below the pinned walk’s ${Math.round(c.coverage*100)}%. No byte delta is shown.`:r.kind==='same'?`Same measured allocation on mock walk ${r.id}. This does not prove the files are identical.`:`Mock walk ${r.id} measured ${fmt(r.bytes)} at the same ${Math.round(c.coverage*100)}% coverage: net difference ${fmtS(r.bytes-c.bytes)}. This does not identify a cause.`;
+  result=`<div class="citeResult ${r.kind==='coverage'||r.kind==='expired'?'incomparable':''}" role="status"><strong>${r.kind==='coverage'?'Coverage mismatch':r.kind==='expired'?'Handle expired':r.kind==='same'?'Same allocation':'Changed allocation'}</strong><br>${status}</div>`}
+ return `<div class="citeBox"><div class="eyebrow">Pinned agent citation · synthetic</div><p><strong>${base}</strong><br>${ge(c.node)}${fmt(c.bytes)} allocated · ${Math.round(c.coverage*100)}% mock coverage · metadata only</p><p>The pin holds the original observation while a new walk answers separately. Every walk and outcome here is simulated.</p><div class="citeActions"><button type="button" data-cmd="pinned">Show pinned region</button><button type="button" data-cmd="rewalk">Walk again · next mock outcome</button></div>${result}<p class="mono">Mock outcomes cycle: changed · lower coverage · expired handle · same allocation.</p></div>`}
+function renderInspector(){const n=S.sel;let h='';
+ if(n===UNCH){h=`<div class="eyebrow">Selection · volume fact</div><h3 class="iName">Uncharted</h3><div class="iPath mono">Volume · not a location</div><div class="iBig">${fmt(n.alloc)}</div><div class="iExact mono">${exact(n.alloc)}</div><p class="iNote">Used bytes this walk did not attribute to any folder: unread areas, filesystem metadata, shadow copies and whatever the walk skipped. <b>It is not a folder, has no Enter, and is not junk.</b> Used ${fmt(USED)} − attributed ${fmt(root.alloc)} = ${fmt(n.alloc)}.</p>${spark(n.hist)}<div class="ageLeg"><span>synthetic history</span><span>gap = no observation</span></div>`}
+ else{const par=n.parent,isScope=n===S.scope,kind=n.kind==='file'?'File':n.kind==='tail'?'Tail aggregate':n.kind==='denied'?'Unreadable':n.coverage==='partial'?'Folder · partial':'Folder';
+  const fl=[...new Set([...(n.flags||[]),...(hasFlag(n,'placeholder')&&!n.flags.includes('placeholder')?['inside placeholder area']:[])])];
+  h=`<div class="eyebrow">${isScope?'Current scope':'Selection'} · ${kind}</div><h3 class="iName">${esc(n.name)}</h3><div class="iPath mono">${esc(pathOf(n))}</div>`;
+  if(n.alloc==null)h+=`<div class="iBig" style="color:var(--muted)">no measure</div><div class="iExact mono">unreadable · no area in any lens</div>`;
+  else{h+=`<div class="iBig">${ge(n)}${fmt(n.alloc)}</div><div class="iExact mono">${ge(n)}${exact(n.alloc)} allocated</div><div class="iRule"></div><dl class="facts"><dt>Logical length</dt><dd>${fmt(n.logical)}</dd><dt>Files</dt><dd>${num(n.files)}</dd><dt>Coverage</dt><dd>${n.coverage==='partial'?'partial · lower bound':'complete for this walk'}</dd>${!isScope&&within(n,S.scope)?`<dt>Share of ${esc(short(S.scope.name,16))}</dt><dd>${pct(n.alloc/S.scope.alloc)}</dd>`:''}${par&&(isScope||par!==S.scope)?`<dt>Share of ${esc(short(par.name,16))}</dt><dd>${pct(n.alloc/par.alloc)}</dd>`:''}<dt>Median last write</dt><dd>${fmtDays(medianAge(n.age))} · byte-weighted</dd><dt>Newest single file</dt><dd>${fmtDays(n.newest)}</dd>${fl.length?`<dt>Flags</dt><dd>${fl.map(f=>`<span class="flag">${esc(f)}</span>`).join('')}</dd>`:''}</dl>`;
+   if(n.age)h+=`<div class="ageBar" aria-label="Byte-weighted last-write age">${n.age.map((f,i)=>`<i style="flex:${f} 1 0;background:${AGE_COLORS[i]}" title="${AGE_BANDS[i]} ${pct(f)}"></i>`).join('')}</div><div class="ageLeg"><span>newest</span><span>last-write age by bytes</span><span>oldest</span></div>`;
+   h+=spark(n.hist)+`<div class="ageLeg"><span>${SNAP[0]}</span><span>synthetic history · gap = no observation</span><span>${SNAP[NOW]}</span></div>`}
+  if(n.note)h+=`<p class="iNote">${esc(n.note)}</p>`;
+  if(n.kind==='file'||n.kind==='tail'||n.kind==='denied')h+=`<div class="plaque"><div class="eyebrow">Evidence plaque</div>${n.kind==='file'?'A file is a leaf. It opens this plaque and never another world. Metadata only: no content was read. Last write is not last use, and size or name never makes it safe to remove.':n.kind==='tail'?`${num(n.files)} smaller files that the walk measured in total but did not list. Paging through a tail needs a drill handle the API does not offer yet.`:'The walk was refused here. No bytes, no age, no area: its parent shows ≥.'}</div>`}
+ const canEnter=enterable(n)&&n!==S.scope;
+ h+=`<div class="iActions">${canEnter?`<button type="button" class="primary" data-enter="${n.id}">Enter ${esc(short(n.name,18))} ↘</button>`:''}${S.scope.parent?`<button type="button" data-cmd="up">↖ Up to ${esc(short(S.scope.parent.name,14))}</button>`:''}${S.mode==='crate'&&n!==UNCH&&n.alloc!=null?`<button type="button" data-cmd="crate">${S.crate.items.includes(n)?'Take out of crate':inCrate(n)?'Inside a crated folder':'Place in crate'}</button>`:''}${n.alloc!=null?'<button type="button" data-cmd="pin">Pin this reading</button>':''}</div>`;
+ h+=citationHTML();
+ inspEl.innerHTML=h;
+ const cb=inspEl.querySelector('[data-cmd="crate"]');if(cb&&inCrate(n)&&!S.crate.items.includes(n))cb.disabled=true}
+
+/* =====================================================================
+   Render orchestration
+   ===================================================================== */
+let lastKey='';
+function renderStage(opt){const m=MODE[S.mode];m.render(view,opt);$('#stageFoot').innerHTML=m.foot?m.foot():''}
+function render(opt={}){const m=MODE[S.mode],key=S.mode+'|'+S.scope.id;const kind=opt.from===undefined?focusKind():opt.from;
+ if(key!==lastKey){view.innerHTML='';view.className='view';if(opt.dir&&!S.reduce){void view.offsetWidth;view.classList.add('dive-'+opt.dir)}m.mount&&m.mount(view);ctlEl.innerHTML=m.controls?m.controls():'';lastKey=key;
+  $('#modeTitle').innerHTML=`<span class="mono">${pad2(MODES.indexOf(m)+1)} · ${GROUPS[m.g].toUpperCase()}</span>${m.name}`;$('#modeQ').innerHTML=`Answers: <b>${m.q}</b>`;
+  const gt=GATE[m.gate.k];const gEl=$('#gate');gEl.style.setProperty('--gc',gt.color);gEl.innerHTML=`<span class="gk">Evidence gate · ${gt.label}</span>${m.gate.text}<span class="gn">Before a real feature: ${m.gate.needs} Values shown here are synthetic.</span>`;
+  document.querySelectorAll('.mbtn').forEach(b=>b.setAttribute('aria-pressed',b.dataset.mode===S.mode?'true':'false'))}
+ renderStage(opt);renderDescent();renderList();renderInspector();syncControls();
+ $('.lb-unch')&&$('.lb-unch').setAttribute('aria-pressed',S.sel===UNCH?'true':'false');
+ const h=`#lens=${S.mode}&scope=${encodeURIComponent(S.scope.id)}&sel=${encodeURIComponent(S.sel.id)}`;if(location.hash!==h)try{history.replaceState(null,'',h)}catch(e){}
+ refocus(kind)}
+function setMode(id){if(!MODE[id]||id===S.mode)return;stopLive();PL.orient.set(S.scope.id,{yaw:PL.yaw,pitch:PL.pitch});S.mode=id;render();const m=MODE[id];announce(`${m.name} lens. Answers: ${m.q}`)}
+
+/* =====================================================================
+   Events
+   ===================================================================== */
+document.addEventListener('click',e=>{
+ const g=e.target.closest('[data-go]');if(g){const a=byId.get(g.dataset.go),s=g.dataset.gosel?byId.get(g.dataset.gosel):null;if(!a)return;if(a===S.scope){if(s)select(s)}else go(a,s,'out');return}
+ const md=e.target.closest('[data-mode]');if(md){setMode(md.dataset.mode);return}
+ const en=e.target.closest('[data-enter]');if(en){enter(byId.get(en.dataset.enter));return}
+ const r=e.target.closest('[data-row]');if(r){select(byId.get(r.dataset.row),{from:r.classList.contains('rowMain')?'row':null});return}
+ const cmd=e.target.closest('[data-cmd]');if(cmd){if(cmd.dataset.cmd==='up')ascend();if(cmd.dataset.cmd==='crate'){const n=S.sel;if(S.crate.items.includes(n))S.crate.items=S.crate.items.filter(o=>o!==n);else if(!inCrate(n))S.crate.items.push(n);render()}
+  if(cmd.dataset.cmd==='pin'&&S.sel.alloc!=null){S.cite={node:S.sel,bytes:S.sel.alloc,coverage:S.sel.coverage==='partial'?.76:1,attempt:0,result:null};render();announce(`Pinned synthetic reading for ${S.sel.name}.`)}
+  if(cmd.dataset.cmd==='pinned'&&S.cite){const n=S.cite.node;if(n!==S.scope&&n.parent)go(n.parent,n,'out');else select(n)}
+  if(cmd.dataset.cmd==='rewalk'&&S.cite){const c=S.cite;c.attempt++;const kind=['changed','coverage','expired','same'][(c.attempt-1)%4];c.result={kind,id:`lab-walk-${String.fromCharCode(65+c.attempt)}`,bytes:kind==='changed'?Math.round(c.bytes*1.08):c.bytes};render();announce(`Synthetic re-walk: ${kind==='coverage'?'incomparable coverage':kind==='expired'?'handle expired':kind==='changed'?'allocation changed':'same allocation'}.`)}return}
+ if(stage.contains(e.target)){const a=e.target.closest('[data-act]');if(a){const m=MODE[S.mode];if(m.act)m.act(a.dataset.act,a);if(a.dataset.id&&a.dataset.act==='grp'){S.sel=byId.get(a.dataset.id);render()}return}
+  const t=e.target.closest('[data-id]');if(t){const n=byId.get(t.dataset.id);if(n)select(n,{from:t.classList.contains('tile')?'tile':null})}}});
+stage.addEventListener('dblclick',e=>{const t=e.target.closest('[data-id]');if(t){const n=byId.get(t.dataset.id);if(n)enter(n)}});
+ctlEl.addEventListener('click',e=>{const b=e.target.closest('button[data-ctl]');if(!b)return;const m=MODE[S.mode];let v=b.dataset.val;if(b.dataset.toggle)v=!m.get(b.dataset.ctl);m.ctl(b.dataset.ctl,v,b);render()});
+ctlEl.addEventListener('input',e=>{const t=e.target;if(t.tagName!=='INPUT'||!t.dataset.ctl)return;MODE[S.mode].ctl(t.dataset.ctl,t.value,t);render()});
+ctlEl.addEventListener('change',e=>{const t=e.target;if(t.tagName!=='SELECT'||!t.dataset.ctl)return;MODE[S.mode].ctl(t.dataset.ctl,t.value,t);render()});
+document.addEventListener('keydown',e=>{const t=e.target,tag=t.tagName;if(e.defaultPrevented||e.metaKey||e.ctrlKey||e.altKey)return;if(['INPUT','SELECT','TEXTAREA'].includes(tag)||(t.closest&&t.closest('dialog')))return;
+ if(e.key==='?'){e.preventDefault();$('#help').showModal();return}
+ const own=t.dataset&&t.dataset.arrows==='own',k=e.key;
+ if(!own&&(k==='ArrowDown'||k==='j')){e.preventDefault();step(1)}
+ else if(!own&&(k==='ArrowUp'||k==='k')){e.preventDefault();step(-1)}
+ else if(k==='Enter'||(!own&&k==='ArrowRight')){if(tag==='BUTTON'&&!t.classList.contains('rowMain')&&!t.classList.contains('tile'))return;if(tag==='A')return;e.preventDefault();const tid=t.dataset&&(t.dataset.row||t.dataset.id);enter(tid&&byId.get(tid)||S.sel)}
+ else if(k==='Backspace'||k==='Escape'||(!own&&k==='ArrowLeft')){if(S.scope.parent){e.preventDefault();ascend()}}
+ else if(k==='Home'){e.preventDefault();go(root,null,'out')}
+ else if(k==='['||k===']'){e.preventDefault();const i=MODES.findIndex(m=>m.id===S.mode);setMode(MODES[(i+(k===']'?1:MODES.length-1))%MODES.length].id)}});
+$('#helpBtn').addEventListener('click',()=>$('#help').showModal());
+const motionBtn=$('#motionBtn');function applyMotion(){document.documentElement.classList.toggle('rm',S.reduce);motionBtn.setAttribute('aria-pressed',S.reduce?'true':'false');motionBtn.textContent=S.reduce?'Motion reduced':'Reduce motion'}
+motionBtn.addEventListener('click',()=>{S.reduce=!S.reduce;applyMotion();if(S.reduce)stopLive();render();announce(S.reduce?'Motion reduced: state changes are immediate.':'Motion restored.')});
+RMQ.addEventListener&&RMQ.addEventListener('change',e=>{S.reduce=e.matches;applyMotion();render()});
+let rsz=0;new ResizeObserver(()=>{if(rsz)return;rsz=requestAnimationFrame(()=>{rsz=0;renderStage()})}).observe(stage);
+document.addEventListener('visibilitychange',()=>{if(document.hidden)stopLive()});
+window.addEventListener('hashchange',()=>{const p=new URLSearchParams(location.hash.slice(1)),sc=byId.get(p.get('scope')),sl=byId.get(p.get('sel')),ln=p.get('lens');if(ln&&MODE[ln]&&ln!==S.mode){stopLive();S.mode=ln}if(sc&&sc!==S.scope&&sc.kind==='folder'){stopLive();S.scope=sc}if(sl&&(within(sl,S.scope)||sl===UNCH))S.sel=sl;render()});
+
+/* boot */
+(function boot(){const p=new URLSearchParams(location.hash.slice(1)),ln=p.get('lens'),sc=byId.get(p.get('scope')),sl=byId.get(p.get('sel'));if(ln&&MODE[ln])S.mode=ln;if(sc&&sc.kind==='folder')S.scope=sc;if(sl&&(within(sl,S.scope)||(sl===UNCH&&S.scope===root)))S.sel=sl;else S.sel=ranked(S.scope)[0]||S.scope;
+ applyMotion();renderNav();renderLedger();render()})();
+})();
+</script>
+</body>
+</html>

@@ -10,6 +10,8 @@ The volume ledger is separate from the scanned hierarchy. `volume_used_bytes - a
 
 The current collector already provides per-group allocated/logical bytes, file and folder counts, hardlink repeats, placeholder and compressed/sparse counts, byte-weighted last-write age bands, coverage status, largest-file leads and volume context. Its `scan_id` is ephemeral and `space_page` retains **immediate rows of one walk** for 30 minutes. A child `scope_id` takes a new walk with a new scan ID. The two observations can disagree through hardlink attribution and filesystem change; no cross-level reconciliation or growth claim is licensed yet.
 
+**Never fold two walk IDs into one measured total.** A child collected later or with narrower coverage must remain a separate observation beside its parent, even if their names or directory identities agree. A retained hierarchy endpoint should reject a mixed-walk aggregation and return the distinct IDs, times and coverages. A comparison can return a byte delta only after the scope, volume, attribution method, identity and coverage checks below pass. This prevents an apparently exact parent total from silently absorbing a partial child collected at another time.
+
 ## Snapshot V2
 
 The retained snapshot should have these independent records:
@@ -44,6 +46,9 @@ An action receipt should bind an explicit user action marker to observations bef
 | Metabolism, churn weather | Trusted change journal or explicit source/destination events with evidence of move identity | No flow arrows or churn rate |
 | Packing Crate | Target drive capacity, filesystem, cluster size and expected compression/sparse handling | Scenario range, never a fit guarantee |
 | Twin Stars | Explicitly chosen bounded content-hash job, with byte-read cost and no cloud hydration by default | No duplicate verdict from names, sizes or timestamps |
+| Echo lines | Retained per-file exact size and last-write timestamp pairs from at least two distinct folders | Do not draw a connection from age bands. A same-size, same-time match is a weak metadata echo, never content identity or a savings estimate |
 | Resonance | The same measured shares as the ranked list, initiated by the user | Silent; no autoplay or hidden exact values |
+
+An agent citation should hold an observation ID, scope/node identity, observed value, method and coverage. **Pin and re-walk** opens that held reading in the navigator and takes a fresh, separately named observation of the same scope on request. It keeps the cited reading visible if the handle has expired or the new walk fails. A lower-coverage walk is explicitly incomparable; a comparable net change remains an observation, not proof of cause. The [synthetic lab](space-atlas-lab/index.html) exercises changed, lower-coverage, expired-handle and same-value outcomes without reading a disk.
 
 All lenses share scope, selection, ancestor path, exact ranked values, coverage and observation time. A view switch never starts a scan. An Enter action on a folder must either navigate within one retained observation or clearly announce that it is taking a fresh walk. A file is terminal evidence, not a doorway to an invented world. The live dashboard follows the second rule today.

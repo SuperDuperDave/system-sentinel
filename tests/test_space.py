@@ -194,7 +194,7 @@ def test_authenticated_api_exposes_a_private_exact_page_without_a_second_walk():
     raw = payload([group("top_level_files")] + [group(name=f"Private {i}", files=1, allocated=100 - i) for i in range(60)])
     bridge = FakeBridge(result=BridgeResult("ok", items=[raw], took_ms=5),
                         by_marker={"$env:COMPUTERNAME": identity_result("TESTBOX", "tester")})
-    with TestClient(create_app(State(bridge=bridge, token="test-space-token"))) as client:
+    with TestClient(create_app(State(bridge=bridge, token="test-space-token"), mcp=False)) as client:
         assert client.get("/api/readings/space_page?page_id=missing").status_code == 401
         auth = {"Authorization": "Bearer test-space-token"}
         home = client.get("/api/readings/space", headers=auth).json()

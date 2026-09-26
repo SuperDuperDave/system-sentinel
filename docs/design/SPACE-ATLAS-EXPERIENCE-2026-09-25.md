@@ -1,6 +1,6 @@
 # Space Atlas: the navigable world
 
-Status: product direction approved by David after his critique and two high-effort Opus 5.5 design passes, Buddy's API critique, and browser review of the [interactive concept](space-atlas-prototype/index.html). David wants every idea in this catalogue pursued as the product grows. The concept uses invented values. The dashboard now has real Windows-backed top-level and scoped measurements, exact continuation pages and a shared tile/planet navigator, but no retained hierarchy snapshot across levels yet.
+Status: product direction approved by David after his critique and two high-effort Opus 5.5 design passes, Buddy's API critique, and browser review of the [interactive concept](space-atlas-prototype/index.html). The [interaction lab](space-atlas-lab/index.html) prototypes all thirteen further ideas with invented data and a shared recursive hierarchy. The dashboard now has real Windows-backed top-level and scoped measurements, exact continuation pages and a shared tile/planet navigator, but no retained hierarchy snapshot across levels yet.
 
 ## The decision
 
@@ -67,6 +67,8 @@ On a phone, the ranked list and breadcrumb must remain usable without a gesture.
 ## API as the source of truth
 
 The [data contract](SPACE-ATLAS-DATA-CONTRACT.md) defines the observation, comparison and evidence gates each lens needs.
+
+Buddy's independent pass sharpened the archaeology path: an age-band core can be a vertical byte-proportional stratum; same-size, same-timestamp **echo lines** may show weak metadata resemblance only after exact per-file timestamps are retained; and deposition weather waits for comparable saved walks. A pinned agent citation should open its original region beside a deliberate fresh walk, retaining the old reading through an expired handle or failed comparison. The [interaction lab](space-atlas-lab/index.html) simulates the pin and four re-walk outcomes. Its Core Sample, Twin Stars and Pressure Map show the related visual grammars, while the echo and real weather gates remain design requirements.
 
 The current `space` reading is already catalogued through the HTTP API and MCP. It offers bounded walks, immediate folder groups, logical and allocated bytes, coverage, hardlink repeat counts, placeholder/compression counts, byte-weighted last-write age bands, a volume reconciliation, up to 20 metadata-only largest files, and opaque short-lived child handles. Names and relative file paths are opt-in; no caller-supplied path is accepted. The largest-file list is a lead list, not a deletion list. Last-write age does not establish last use.
 

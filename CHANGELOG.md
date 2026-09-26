@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.10.0] - 2026-09-25
+
+### Added
+- Space Atlas is an on-demand disk navigator with proportional tiles and an equal-area, rotatable planet. Both use the same measured allocation and let a person select a region, descend into a folder, inspect its evidence and return through the ancestor trail. The planet has a full-surface key and a ranked list so hidden regions remain legible.
+- The authenticated `space` reading and MCP tool return a bounded metadata-only walk with allocated and logical bytes, coverage, a volume reconciliation ledger, last-write age bands and opaque child scope handles. `space_page` continues omitted top-level rows from a retained scan without a fresh disk walk. The API names partial results and unmeasured areas explicitly.
+- A synthetic interaction lab explores thirteen further Space Atlas concepts through a shared recursive hierarchy. Each lens states the additional evidence needed before it could represent a real machine.
+
+### Limits
+- Each scoped `space` request is a new observation. Its figures must not be added to or subtracted from another request as if they came from one snapshot. A bounded or denied walk reports lower bounds; the uncharted volume remainder is not a folder or a cleanup recommendation. Last write is not last use. The concept lab's history, transfers and duplicate relationships are invented examples, not live readings.
+
 ## [1.9.30] - 2026-09-25
 
 ### Improved
