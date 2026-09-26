@@ -83,6 +83,21 @@ summary line are the last things visible). Status and trace took priority, as in
 `fixture-server.py` finds the repository root by walking up from its own path (three levels, as
 committed); `SENTINEL_REPO_ROOT` overrides that if the script is copied somewhere else.
 
+**Every view, both widths.** `fixtures/capture-views.cjs` renders any view or named state at
+1440x900 and 390x844 and saves one PNG per shot and width, reporting each page's `scrollWidth`.
+It is the harness for interface work; the five published images above keep their own script.
+
+```
+NODE_PATH=/some/scratch/dir/node_modules TOKEN_FILE=/some/scratch/dir/token PORT=8021 \
+  OUT=/some/scratch/dir/shots FULL=1 node docs/screens/fixtures/capture-views.cjs [shot ...]
+```
+
+`--list` names the shots; add a state to its table rather than writing another script. Either
+`playwright` or `playwright-core` on the module path works, and `CHROMIUM` names a cached
+browser executable. The fixture server also answers `crash` from `tests/fixtures/crash-records.json`,
+the machine readings from the payloads in `tests/test_system.py`, and six generically named
+processes, so Crashes, Machine and Performance render made-up data.
+
 The in-place cited-record interaction has a separate synthetic browser check. With the fixture
 server and Playwright module path above running, use:
 
