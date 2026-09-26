@@ -165,3 +165,32 @@ def test_screen_fixture_keeps_a_report_with_its_two_returned_records(monkeypatch
     assert report["RecordId"] == 7001
     assert report["report"]["records"] == [7000, 7001]
     assert [row["RecordId"] for row in reading.section("records").data][:2] == [7000, 7100]
+
+
+def test_screen_fixture_composes_the_synthetic_stops_through_the_crash_reading():
+    path = Path(__file__).parents[1] / "docs" / "screens" / "fixtures" / "fixture-server.py"
+    spec = importlib.util.spec_from_file_location("sentinel_screen_fixture", path)
+    assert spec and spec.loader
+    fixture = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(fixture)
+    bridge = fixture.FixtureBridge()
+
+    newest = asyncio.run(take("crash", bridge, {"count": 5}))
+    assert newest.outcome == "ok" and not newest.warnings
+    assert len(newest.section("stops").data) == 5
+    assert newest.section("coverage").data
+
+    forward = asyncio.run(take("crash", bridge, {"count": 5, "moment": "2026-09-09T09:00:00Z"}))
+    assert forward.outcome == "ok"
+    assert all(stop["started_at"] >= "2026-09-09T09:00:00Z" for stop in forward.section("stops").data if stop["started_at"])
+
+
+def test_screen_fixture_answers_the_machine_and_process_readings_with_synthetic_parts():
+    path = Path(__file__).parents[1] / "docs" / "screens" / "fixtures" / "fixture-server.py"
+    spec = importlib.util.spec_from_file_location("sentinel_screen_fixture", path)
+    assert spec and spec.loader
+    fixture = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(fixture)
+    bridge = fixture.FixtureBridge()
+    for name in ("system", "hardware", "hardware.cpu", "hardware.gpu", "hardware.board", "hardware.storage", "hardware.network", "processes"):
+        assert asyncio.run(take(name, bridge, {})).outcome == "ok", name

@@ -68,3 +68,4 @@ _sessions/
 
 # Multithread's enrolled, machine-local ledger and identity
 .relay/
+/.audit/buddy-bridge/

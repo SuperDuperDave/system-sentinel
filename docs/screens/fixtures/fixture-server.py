@@ -10,6 +10,10 @@ Answers:
     exercise fatal previous-session and unavailable-header presentation
   - the System log (``events``, ``record``): docs/screens/fixtures/system-log.json, filtered
     and paged the way Get-WinEvent would be
+  - the crash collector (``crash``): tests/fixtures/crash-records.json, five synthetic sessions
+    with stops, reports, dump files and the record before each start
+  - the machine readings (``system``, ``hardware`` and its five domains): the synthetic payloads
+    in tests/test_system.py; ``processes``: six generically named synthetic processes
   - nearby Application faults: tests/fixtures/fault-records.json, placed near the older restart
     Set SENTINEL_FIXTURE_CROWDED_FAULTS=1 to add a synthetic post-restart crash loop for
     direction and cap checks without changing the ordinary screenshot fixture.
@@ -56,9 +60,12 @@ sys.path.insert(0, str(REPO))
 from sentinel.app import State, create_app  # noqa: E402
 from sentinel.bridge import BridgeResult  # noqa: E402
 from sentinel.readings.event_coverage import known_stamp_key  # noqa: E402
+from sentinel.readings.processes import PROCESS_SCRIPT  # noqa: E402
 
 WHEA_FIXTURE = REPO / "tests" / "fixtures" / "whea-records.json"
 FAULT_FIXTURE = REPO / "tests" / "fixtures" / "fault-records.json"
+CRASH_FIXTURE = REPO / "tests" / "fixtures" / "crash-records.json"
+DUMP_ROOTS = {"minidump": r"C:\Windows\Minidump", "memory": r"C:\Windows\MEMORY.DMP", "live_kernel": r"C:\Windows\LiveKernelReports"}
 SYSTEM_LOG_FIXTURE = HERE / "system-log.json"
 WHEA_ANCHOR = time.time()  # exact re-reads must name the same synthetic event timestamp
 
@@ -389,6 +396,78 @@ def answer_whea_reports(script: str) -> BridgeResult:
     return BridgeResult("ok", items=[{"window_start": start, "window_end": end, "queried_at": _powershell_stamp(queried), "source": source}], took_ms=24)
 
 
+def answer_crash(script: str) -> BridgeResult:
+    """The crash collector's one object from tests/fixtures/crash-records.json: five synthetic
+    sessions with stops, reports, dumps and the record before each start, composed by the real
+    ``crash`` reading. A moment take reads both logs forward from it, oldest first."""
+    doc = json.loads(CRASH_FIXTURE.read_text(encoding="utf-8"))
+    system_cap = int(re.search(r"\$system = @\(Get-WinEvent .*?-MaxEvents (\d+)", script).group(1))
+    reports_cap = int(re.search(r"\$reports = @\(Get-WinEvent .*?-MaxEvents (\d+)", script).group(1))
+    oldest_first = "-Oldest" in script
+    moment = re.search(r"TimeCreated\[@SystemTime&gt;='([^'$]+)'\]", script)
+
+    def rows(name: str, cap: int) -> list[dict[str, Any]]:
+        kept = [row for row in doc[name] if not moment or row["TimeCreated"] >= moment.group(1)]
+        return sorted(kept, key=lambda row: row["TimeCreated"], reverse=not oldest_first)[:cap]
+
+    def source(returned: list[dict[str, Any]], cap: int, log: str, oldest: str) -> dict[str, Any]:
+        return {"outcome": "ok" if returned else "empty", "returned": len(returned), "limit": cap,
+                "bound_reached": len(returned) == cap, "error": None, "log": log, "log_enabled": True,
+                "log_mode": "Circular", "log_state": "ok", "log_error": None,
+                "log_oldest": oldest, "oldest_state": "ok", "oldest_error": None}
+
+    system, reports = rows("system", system_cap), rows("reports", reports_cap)
+    starts = {row["RecordId"]: row["TimeCreated"] for row in system}
+    before = [row for row in doc["before"] if row["Anchor"] in starts]
+    locations = [{"id": identity, "path": root, "recursive": identity == "live_kernel",
+                  "present": identity != "memory", "outcome": "empty", "returned": 0,
+                  "error_count": 0, "errors": [], "files": []} for identity, root in DUMP_ROOTS.items()]
+    for file in doc["dumps"]:
+        folder = file["path"].rsplit("\\", 1)[0]
+        home = next(loc for loc in locations if file["path"] == loc["path"] or folder == loc["path"]
+                    or (loc["recursive"] and file["path"].startswith(loc["path"] + "\\")))
+        home["files"].append({key: file[key] for key in ("name", "path", "bytes", "modified")})
+        home.update(present=True, outcome="ok", returned=len(home["files"]))
+    return BridgeResult("ok", items=[{
+        "system": system, "reports": reports, "dump_inventory": {"locations": locations}, "before": before, "warnings": [],
+        "collection": {
+            "system": source(system, system_cap, "System", "2026-09-02T07:00:05.1230000Z"),
+            "reports": source(reports, reports_cap, "Application", "2026-06-01T00:00:00.0000000Z"),
+            "before": [{"anchor": row["Anchor"], "at": starts[row["Anchor"]], "outcome": "ok", "returned": 1, "error": None}
+                       for row in before],
+        },
+    }], took_ms=180)
+
+
+def machine_answers() -> dict[str, Any]:
+    """The machine readings answer with the synthetic payloads their own unit tests assert
+    against (tests/test_system.py), so the Machine view renders a whole, made-up computer."""
+    from sentinel.readings import system as machine
+    from tests import test_system as example
+
+    return {
+        machine.SYSTEM_SCRIPT: example.SNAPSHOT, machine.HARDWARE_SCRIPT: example.HARDWARE,
+        machine.CPU_SCRIPT: example.CPU, machine.GPU_SCRIPT: example.GPU, machine.BOARD_SCRIPT: example.BOARD,
+        machine.STORAGE_SCRIPT: example.STORAGE, machine.NETWORK_SCRIPT: example.NETWORK,
+    }
+
+
+MACHINE = machine_answers()
+PROCESS_ROWS = [  # generic names, as tests/test_processes.py uses; no real program or path
+    ("editor", 41.5, 812_000_000, 2_400_000), ("browser", 18.2, 1_460_000_000, 310_000),
+    ("compiler", 96.0, 640_000_000, 9_800_000), ("indexer", 3.1, 120_000_000, 1_200_000),
+    ("sync-client", 1.4, 210_000_000, 420_000), ("terminal", 0.6, 64_000_000, 0),
+]
+
+
+def answer_processes() -> BridgeResult:
+    rows = [{"pid": 1200 + index * 4, "name": name, "cpu_core_percent": cpu, "private_working_set_bytes": memory,
+             "private_bytes": memory, "io_bytes_per_sec": io, "io_read_bytes_per_sec": io, "io_write_bytes_per_sec": 0,
+             "handles": 300 + index * 40, "threads": 12 + index * 3} for index, (name, cpu, memory, io) in enumerate(PROCESS_ROWS)]
+    return BridgeResult("ok", items=[{"at": _powershell_stamp(time.time()), "logical_processors": 16,
+                                      "total_processes": len(rows), "processes": rows, "warnings": []}], took_ms=412)
+
+
 class FixtureBridge:
     exe = "fixture"
     available = True
@@ -396,6 +475,12 @@ class FixtureBridge:
     def run(self, script: str, *, timeout: float = 60, depth: int = 6) -> BridgeResult:
         if "$env:COMPUTERNAME" in script:
             return BridgeResult("ok", items=[{"host": FIXTURE_HOST, "user": FIXTURE_USER, "ps": "5.1", "os": "10.0"}], took_ms=3)
+        if "dump_inventory = $dump_inventory" in script and "$announced" in script:
+            return answer_crash(script)
+        if script in MACHINE:
+            return BridgeResult("ok", items=[MACHINE[script]], took_ms=140)
+        if script == PROCESS_SCRIPT:
+            return answer_processes()
         if "foreach ($log in" in script:
             # The stream's cursor probe: neither view under capture watches the live stream, but
             # it starts on every page and would otherwise show "failed" forever. Anchoring both
