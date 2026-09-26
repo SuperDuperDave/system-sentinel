@@ -2,8 +2,8 @@ import { ReactNode } from 'react';
 import { EventRecord } from '../api';
 import { part } from '../Sections';
 import { useApp } from '../store';
-import { Mark, Track, TrackId, stopTimes, useTracks } from '../timeline';
-import { PRESETS, fmt, presetRange, span } from '../time';
+import { Mark, Track, TrackId, coverageOf, stopTimes, useTracks } from '../timeline';
+import { PRESETS, Range, fmt, presetRange, span } from '../time';
 import { Chart } from '../chart/Chart';
 import { DayList } from '../chart/DayList';
 import { Inspector } from '../chart/Inspector';
@@ -30,7 +30,7 @@ export function Stops() {
     <AxisPage
       title="Crashes"
       question="When did the machine stop without shutting down, and which programs failed while it ran."
-      summary={<p className={summaryStyles.single}>{crashSentences(stops, faults)}</p>}
+      summary={<p className={summaryStyles.single}>{crashSentences(stops, faults, range)}</p>}
       chart={phone ? null : <Chart range={range} tracks={tracks} label="Stops and faults on one time axis" />}
       inspector={<Inspector tracks={tracks} range={range} sheet={phone} detail={(mark) => <MarkEvidence mark={mark} track={tracks.find((t) => t.id === mark.track) ?? null} />} />}
       list={<>
@@ -43,11 +43,13 @@ export function Stops() {
   );
 }
 
-function crashSentences(stops: Track, faults: Track): string {
+function crashSentences(stops: Track, faults: Track, range: Range): string {
   const out: string[] = [];
   if (stops.reach.state === 'failed') out.push('Unplanned stops could not be read.');
   else if (stops.reach.state === 'read') {
-    out.push(stops.marks.length ? `${cap(count(stops.marks.length, ['unplanned stop', 'unplanned stops']))} in this range.` : 'No unplanned stop in this range.');
+    const from = stops.reach.spans[0]?.[0];
+    const scope = coverageOf(stops, range.from, range.to, range) === 'read' || from === undefined ? '' : `, in the part read (from ${fmt.date(from)})`;
+    out.push(stops.marks.length ? `${cap(count(stops.marks.length, ['unplanned stop', 'unplanned stops']))} in this range${scope}.` : `No unplanned stop in this range${scope}.`);
   }
   if (faults.reach.state === 'failed') out.push('Program faults could not be read.');
   else if (faults.reach.state === 'read') out.push(`${cap(count(faults.total ?? 0, ['program fault', 'program faults']))} filed in what was read.`);

@@ -13,7 +13,8 @@
 import { EventRecord, Reading, observed } from './api';
 import { part } from './Sections';
 import { Taken, useReading } from './useReading';
-import { Range, bucketSeconds, iso, rangeHours } from './time';
+import { useState } from 'react';
+import { Range, bucketSeconds, iso, rangeHours, startOfDay } from './time';
 import type { ViewId } from './store';
 import type { Fault, Stop } from './views/Crashes';
 import { appOf, exceptionOf, moduleOf } from './views/Crashes';
@@ -33,6 +34,8 @@ export interface Bin {
   count: number | null;
   /** Critical, error, warning, information: only for the System log. */
   levels?: [number, number, number, number];
+  /** Reports whose own header says the error happened in an earlier Windows session. */
+  previous?: number;
 }
 
 export type Tone = 'stop' | 'hardware' | 'ink';
@@ -40,7 +43,7 @@ export type Tone = 'stop' | 'hardware' | 'ink';
 export interface Mark {
   id: string;
   track: TrackId;
-  /** Where the mark sits: the earliest of its evidence times. */
+  /** The mark's one address: for a stop, Windows' estimate when there is one; otherwise its time. */
   at: number;
   /** Every evidence time the mark carries, in order; a stop has up to three and none is dropped. */
   times: { label: string; at: number }[];
@@ -70,6 +73,8 @@ export interface Track {
   total: number | null;
   noun: [string, string];
   samples?: { at: number; value: number | null }[];
+  /** An inferred lead the reading states about the live window, shown as a lead and never as a count. */
+  lead?: { state: string; reason: string } | null;
 }
 
 type Taking = Taken<unknown>;
@@ -83,23 +88,32 @@ const LEVEL_INDEX: Record<number, 0 | 1 | 2 | 3> = { 1: 0, 2: 1, 3: 2, 4: 3, 0: 
 export function useTracks(range: Range, wanted: TrackId[]): Track[] {
   const live = range.preset !== null;
   const hours = rangeHours(range);
-  const bucket = bucketSeconds(range);
+  const [now] = useState(() => Date.now());
+  // Hardware buckets are asked for in hours once a range is two days or longer, then summed into
+  // columns that start at local midnight, so a day's count is that day's. One extra bucket makes
+  // the reading's bucket-aligned window reach the start of the range.
+  const apiBucket = range.to - range.from >= 2 * DAY ? 3600 : bucketSeconds(range);
+  const bucketHours = Math.ceil((range.to - range.from + apiBucket * 1000) / HOUR);
   const before: Record<string, string> = live ? {} : { before: iso(range.to) };
   const on = (id: TrackId) => wanted.includes(id);
   const hold = { hold: 'same-params' as const };
 
   const stops = useReading('crash', { count: 20 }, on('stops'), hold);
-  const hardware = useReading('storms', { hours, bucket_seconds: bucket, ...before }, on('hardware'), hold);
-  const kernel = useReading('whea_reports', { hours, bucket_seconds: bucket, ...before }, on('kernel'), hold);
+  const hardware = useReading('storms', { hours: bucketHours, bucket_seconds: apiBucket, ...before }, on('hardware'), hold);
+  // The live lead is computed on minute buckets; asking for it on the timeline's wide buckets would
+  // change what "burst" means, so it is a separate, default-shaped reading, and only for a live range.
+  const lead = useReading('storms', { hours: 24, bucket_seconds: 60 }, live && on('hardware'), hold);
+  const kernel = useReading('whea_reports', { hours: bucketHours, bucket_seconds: apiBucket, ...before }, on('kernel'), hold);
   const faults = useReading('faults', { count: 500, since: iso(range.from), ...before }, on('faults'), hold);
   const log = useReading('events', { log: 'System', levels: [], count: 2000, since: iso(range.from), ...before }, on('log'), hold);
   const changes = useReading('changes', { hours: Math.min(2160, hours), count: 100, ...before }, on('changes'), hold);
   const performance = useReading('performance_history', { hours: Math.min(48, hours), ...(live ? {} : { end: iso(range.to).replace('Z', '+00:00') }) }, on('performance'), hold);
-  const reliability = useReading('reliability', { days: Math.min(366, Math.ceil((range.to - range.from) / DAY)) }, on('reliability'), hold);
+  // Reliability reads back from now; a stretch in the past needs the days up to it as well.
+  const reliability = useReading('reliability', { days: Math.min(366, Math.max(1, Math.ceil((Math.max(now, range.to) - range.from) / DAY))) }, on('reliability'), hold);
 
   const all: Record<TrackId, () => Track> = {
     stops: () => stopTrack(stops, range),
-    hardware: () => bucketTrack(hardware, range, 'hardware', 'system'),
+    hardware: () => ({ ...bucketTrack(hardware, range, 'hardware', 'system'), lead: leadOf(lead) }),
     kernel: () => bucketTrack(kernel, range, 'kernel', 'kernel_whea'),
     faults: () => faultTrack(faults, range),
     log: () => logTrack(log, range),
@@ -127,11 +141,30 @@ function notRead(taken: Taking): Reach | null {
   return null;
 }
 
-/** A reading's reach clipped to the range, from its coverage section when it has one. */
-function spanReach(from: number | null, to: number | null, range: Range, note: string | null): Reach {
-  const start = Math.max(range.from, from ?? range.from);
+/**
+ * A reading's reach clipped to the range. A null start is "Windows did not say how far back this
+ * reaches", never "from the beginning": the reach then starts at the oldest row the reading returned,
+ * which it certainly reached, or is empty when there is no such row.
+ */
+function spanReach(from: number | null, to: number | null, range: Range, note: string | null, oldestReturned: number | null = null): Reach {
+  let notes = note;
+  if (from === null) {
+    const unknown = oldestReturned === null
+      ? 'Windows did not report how far back this source reaches, so no stretch of it is vouched for.'
+      : 'Windows did not report how far back this source reaches; the reach shown starts at the oldest row returned.';
+    notes = note ? `${note} ${unknown}` : unknown;
+    if (oldestReturned === null) return { state: 'read', spans: [], note: notes };
+    from = oldestReturned;
+  }
+  const start = Math.max(range.from, from);
   const end = Math.min(range.to, to ?? range.to);
-  return { state: 'read', spans: end > start ? [[start, end]] : [], note };
+  return { state: 'read', spans: end > start ? [[start, end]] : [], note: notes };
+}
+
+function leadOf(taken: Taking): Track['lead'] {
+  if (!observed(taken.reading)) return null;
+  const status = part<{ state?: string; reason?: string }>(taken.reading, 'status');
+  return status?.state && status.reason ? { state: status.state, reason: status.reason } : null;
 }
 
 interface Coverage { covered_from?: string | null; covered_until?: string | null; retained_from?: string | null; complete?: boolean | null }
@@ -141,9 +174,11 @@ function capNote(collection: Collection | null, noun: string): string | null {
   return collection?.truncated ? `Only the newest ${collection.limit?.toLocaleString() ?? ''} ${noun} were returned; older ones in this range were not read.` : null;
 }
 
+/** Display columns: the range's bucket width, starting from local midnight so days split cleanly. */
 function bins(range: Range): Bin[] {
   const width = bucketSeconds(range) * 1000;
-  const first = Math.floor(range.from / width) * width;
+  const midnight = startOfDay(range.from);
+  const first = midnight + Math.floor((range.from - midnight) / width) * width;
   const out: Bin[] = [];
   for (let t = first; t < range.to; t += width) out.push({ from: t, to: t + width, count: 0 });
   return out;
@@ -191,7 +226,8 @@ function stopTrack(taken: Taking, range: Range): Track {
     from = Math.max(from ?? earliest, earliest);
     note = `Only the newest ${count} stops were returned; older ones were not read.`;
   }
-  const reach = spanReach(from, when(reading.asked_at), range, note);
+  const oldest = stops.length ? Math.min(...stops.flatMap((stop) => stopTimes(stop).map((t) => t.at))) : null;
+  const reach = spanReach(from, when(reading.asked_at), range, note, oldest);
   const marks = stops.map((stop, index): Mark | null => {
     const times = stopTimes(stop);
     if (!times.length || !times.some((t) => inRange(t.at, range))) return null;
@@ -199,7 +235,9 @@ function stopTrack(taken: Taking, range: Range): Track {
     const down = stop.down_seconds != null ? `down ${stop.down_seconds < 90 ? `${stop.down_seconds} s` : `${Math.round(stop.down_seconds / 60)} min`}` : null;
     return {
       id: `stop:${stop.records.start ?? stop.records.power_41 ?? index}:${stop.started_at ?? stop.reported_at}`,
-      track: 'stops', at: Math.min(...times.map((t) => t.at)), times, tone: 'stop', stop,
+      // The mark's one address is Windows' own estimate of the stop when it has one; the other times
+      // stay drawn beside it as the bounds they are.
+      track: 'stops', at: times.find((t) => t.label === "Windows' stop estimate")?.at ?? times[0].at, times, tone: 'stop', stop,
       title: 'Unplanned stop',
       line: [bug ? `bug check ${bug}` : stop.no_bugcheck_recorded ? 'no bug check recorded' : null, down, stop.dump ? 'a dump on disk' : null].filter(Boolean).join(' · '),
     };
@@ -226,12 +264,17 @@ export function stopTimes(stop: Stop): { label: string; at: number }[] {
   return out;
 }
 
-interface Buckets { from: string; bucket_seconds: number; totals: (number | null)[] }
+interface Buckets {
+  from: string;
+  bucket_seconds: number;
+  totals: (number | null)[];
+  returned?: { index: number[]; count: number[]; previous_session?: number[] };
+}
 
 function bucketTrack(taken: Taking, range: Range, id: 'hardware' | 'kernel', coverageKey: string): Track {
   const meta = id === 'hardware'
     ? { label: 'Hardware errors', source: 'System log, WHEA-Logger' }
-    : { label: 'Hardware reports', source: 'Kernel-WHEA channel' };
+    : { label: 'Kernel-WHEA reports', source: 'A separate channel; filed when Windows writes them' };
   const common = { ...base(id, taken), ...meta, view: 'errors' as ViewId, kind: 'events' as const, tone: 'hardware' as const, noun: ['report', 'reports'] as [string, string] };
   const missing = notRead(taken);
   if (missing) return { ...common, reach: missing, bins: [], marks: [], total: null };
@@ -241,10 +284,26 @@ function bucketTrack(taken: Taking, range: Range, id: 'hardware' | 'kernel', cov
   const reach = spanReach(when(coverage?.covered_from), when(coverage?.covered_until), range, null);
   const start = when(buckets?.from) ?? range.from;
   const width = (buckets?.bucket_seconds ?? bucketSeconds(range)) * 1000;
-  const list: Bin[] = (buckets?.totals ?? []).map((count, i) => ({ from: start + i * width, to: start + (i + 1) * width, count }))
-    .filter((b) => b.to > range.from && b.from < range.to);
-  const masked = maskBins(list, reach);
-  return { ...common, reach, bins: masked, marks: [], total: sum(masked) };
+  const previous = new Map<number, number>();
+  buckets?.returned?.index.forEach((index, i) => previous.set(index, buckets.returned?.previous_session?.[i] ?? 0));
+  // Sum the reading's buckets into the display columns. One unknown bucket makes its column unknown.
+  const list = bins(range).map((b) => ({ ...b, count: 0 as number | null, previous: 0, seen: false }));
+  (buckets?.totals ?? []).forEach((count, i) => {
+    const from = start + i * width;
+    const column = list.find((b) => from >= b.from && from < b.to);
+    if (!column) return;
+    column.seen = true;
+    column.count = count === null || column.count === null ? null : column.count + count;
+    column.previous += previous.get(i) ?? 0;
+  });
+  const placed: Bin[] = list.map(({ seen, ...b }) => (seen ? b : { ...b, count: null }));
+  const masked = maskBins(placed, reach);
+  return { ...common, reach, bins: masked, marks: [], total: inside(masked, range) };
+}
+
+/** Counted columns that start inside the range; a column that began before it is not summed. */
+function inside(list: Bin[], range: Range): number {
+  return sum(list.filter((b) => b.from >= range.from && b.from < range.to));
 }
 
 function faultTrack(taken: Taking, range: Range): Track {
@@ -257,9 +316,10 @@ function faultTrack(taken: Taking, range: Range): Track {
   const coverage = part<Coverage>(reading, 'coverage');
   const collection = part<Collection>(reading, 'collection');
   const note = capNote(collection, 'faults');
+  const oldest = records.length ? Math.min(...records.map((r) => Date.parse(r.TimeCreated))) : null;
   let from = when(coverage?.covered_from);
-  if (collection?.truncated && records.length) from = Math.max(from ?? 0, Math.min(...records.map((r) => Date.parse(r.TimeCreated))));
-  const reach = spanReach(from, when(coverage?.covered_until) ?? when(reading.asked_at), range, note);
+  if (collection?.truncated && oldest !== null) from = Math.max(from ?? 0, oldest);
+  const reach = spanReach(from, when(coverage?.covered_until) ?? when(reading.asked_at), range, note, oldest);
   const timeOf = new Map(records.map((r) => [`${r.Log ?? 'Application'}:${r.RecordId}`, Date.parse(r.TimeCreated)]));
   const marks: Mark[] = [];
   for (const fault of decoded) {
@@ -282,9 +342,10 @@ function logTrack(taken: Taking, range: Range): Track {
   const records = part<EventRecord[]>(reading, 'records') ?? [];
   const coverage = part<Coverage>(reading, 'coverage');
   const collection = part<Collection>(reading, 'collection');
+  const oldest = records.length ? Math.min(...records.map((r) => Date.parse(r.TimeCreated))) : null;
   let from = when(coverage?.covered_from);
-  if (collection?.truncated && records.length) from = Math.max(from ?? 0, Math.min(...records.map((r) => Date.parse(r.TimeCreated))));
-  const reach = spanReach(from, when(coverage?.covered_until) ?? when(reading.asked_at), range, capNote(collection, 'records'));
+  if (collection?.truncated && oldest !== null) from = Math.max(from ?? 0, oldest);
+  const reach = spanReach(from, when(coverage?.covered_until) ?? when(reading.asked_at), range, capNote(collection, 'records'), oldest);
   const list = bins(range);
   const marks: Mark[] = [];
   let total = 0;
@@ -319,9 +380,16 @@ function changeTrack(taken: Taking, range: Range): Track {
   if (missing) return { ...meta, reach: missing, bins: [], marks: [], total: null };
   const reading = taken.reading as Reading;
   const changes = part<Change[]>(reading, 'changes') ?? [];
-  const coverage = part<Coverage>(reading, 'coverage');
-  const reach = spanReach(when(coverage?.covered_from) ?? range.from, when(coverage?.covered_until) ?? when(reading.asked_at), range,
-    coverage?.complete === false ? 'Windows did not return every change in this range; the reach shows what was read.' : null);
+  // Three sources, each with its own reach: the track vouches only for the stretch all three read.
+  const bySource = Object.values(part<Record<string, Coverage>>(reading, 'coverage') ?? {});
+  const starts = bySource.map((c) => when(c.covered_from));
+  const ends = bySource.map((c) => when(c.covered_until));
+  const from = bySource.length && starts.every((t) => t !== null) ? Math.max(...(starts as number[])) : null;
+  const until = bySource.length && ends.every((t) => t !== null) ? Math.min(...(ends as number[])) : when(reading.asked_at);
+  const times = changes.map((c) => when(c.at)).filter((t): t is number => t !== null);
+  const reach = spanReach(from, until, range,
+    bySource.some((c) => c.complete === false) ? 'A source did not return every change in its window; the reach shows what all three read.' : null,
+    times.length ? Math.min(...times) : null);
   const marks = changes.map((change): Mark | null => {
     const at = when(change.at);
     if (!inRange(at, range)) return null;
@@ -362,15 +430,15 @@ function reliabilityTrack(taken: Taking, range: Range): Track {
   if (missing) return { ...meta, reach: missing, bins: [], marks: [], total: null };
   const reading = taken.reading as Reading;
   const rollup = part<{ days: ReliabilityDay[] }>(reading, 'days');
-  const asked = when(reading.asked_at) ?? range.to;
-  const days = typeof reading.params.days === 'number' ? reading.params.days : 30;
+  const window = part<{ window_start?: string | null; window_end?: string | null }>(reading, 'collection');
   const list: Bin[] = (rollup?.days ?? []).map((d) => {
     const from = Date.parse(`${d.day}T00:00:00Z`);
     return { from, to: from + DAY, count: d.records ? Object.values(d.records).reduce((a, b) => a + b, 0) : null };
   }).filter((b) => b.to > range.from && b.from < range.to);
-  const reach = spanReach(asked - days * DAY, asked, range, null);
+  const reach = spanReach(when(window?.window_start), when(window?.window_end) ?? when(reading.asked_at), range,
+    'Windows keeps this record by UTC day, so a day here starts at UTC midnight.');
   const masked = maskBins(list, reach);
-  return { ...meta, reach, bins: masked, marks: [], total: sum(masked) };
+  return { ...meta, reach, bins: masked, marks: [], total: inside(masked, range) };
 }
 
 // ------------------------------------------------------------------ reading the tracks
@@ -383,16 +451,44 @@ export function firstLine(text: string | null | undefined): string {
   return text ? text.split('\n')[0].trim() : 'No message text';
 }
 
+/**
+ * The one rule for "read" used by the chart, the captions, the day list and the inspector: a
+ * stretch was read when no unread gap in it, and no bucket of unknown coverage, is as long as one
+ * of the range's buckets, the smallest thing the chart can show. Anything longer is drawn and said.
+ */
+export function unreadGaps(track: Track, from: number, to: number, range: Range): [number, number][] {
+  if (track.reach.state !== 'read') return [[from, to]];
+  const resolution = bucketSeconds(range) * 1000;
+  const holes: [number, number][] = [];
+  let at = from;
+  for (const [s, e] of [...track.reach.spans].sort((a, b) => a[0] - b[0])) {
+    if (s > at) holes.push([at, Math.min(s, to)]);
+    at = Math.max(at, e);
+  }
+  if (at < to) holes.push([at, to]);
+  for (const bin of track.bins) if (bin.count === null && bin.to > from && bin.from < to) holes.push([Math.max(bin.from, from), Math.min(bin.to, to)]);
+  holes.sort((a, b) => a[0] - b[0]);
+  const merged: [number, number][] = [];
+  for (const hole of holes) {
+    const last = merged[merged.length - 1];
+    if (last && hole[0] <= last[1]) last[1] = Math.max(last[1], hole[1]);
+    else merged.push([...hole]);
+  }
+  return merged.filter(([s, e]) => e - s >= Math.min(resolution, to - from));
+}
+
+/** read: the whole stretch; part: some of it; none: nothing in it can be said from this source. */
+export function coverageOf(track: Track, from: number, to: number, range: Range): 'read' | 'part' | 'none' {
+  if (track.reach.state !== 'read') return 'none';
+  const holes = unreadGaps(track, from, to, range);
+  if (!holes.length) return 'read';
+  const missing = holes.reduce((n, [s, e]) => n + (e - s), 0);
+  return missing >= to - from - 1 ? 'none' : 'part';
+}
+
 /** Whether a moment falls inside the stretches a track read. */
 export function covers(track: Track, at: number): boolean {
   return track.reach.state === 'read' && track.reach.spans.some(([s, e]) => at >= s && at <= e);
-}
-
-/** The part of [from, to] a track read, as a fraction from 0 to 1. */
-export function coveredShare(track: Track, from: number, to: number): number {
-  if (track.reach.state !== 'read' || to <= from) return 0;
-  const covered = track.reach.spans.reduce((n, [s, e]) => n + Math.max(0, Math.min(e, to) - Math.max(s, from)), 0);
-  return covered / (to - from);
 }
 
 /** What a track returned in a stretch: marks, and the counted buckets that overlap it. */

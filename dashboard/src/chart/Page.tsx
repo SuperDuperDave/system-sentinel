@@ -1,5 +1,6 @@
 import { ReactNode, useSyncExternalStore } from 'react';
 import { PRESETS, fixedRange, fmt, presetRange, rangeTitle } from '../time';
+import type { Range } from '../time';
 import { useApp } from '../store';
 import styles from './Page.module.css';
 
@@ -57,13 +58,21 @@ function RangeBar() {
         <button className={styles.step} disabled={range.preset !== null} onClick={toLater} aria-label="Later by half the range">
           Later <span aria-hidden="true">›</span>
         </button>
-        {range.preset ? null : <button className={styles.step} onClick={() => setRange(presetRange('7d'))}>Back to now</button>}
+        {range.preset
+          ? <button className={styles.step} onClick={() => setRange(presetRange(range.preset!))}>Read again</button>
+          : <button className={styles.step} onClick={() => setRange(presetRange(nearestPreset(range)))}>Back to now</button>}
       </div>
       <p className={styles.rangeWords} aria-live="polite">
         {range.preset ? <>Showing {rangeTitle(range)}, to <span className="readout">{fmt.when(range.to)}</span></> : <>Showing <span className="readout">{fmt.when(range.from)}</span> to <span className="readout">{fmt.when(range.to)}</span></>}
       </p>
     </div>
   );
+}
+
+/** The live range closest in length to a stretch, so "back to now" keeps the zoom a person chose. */
+function nearestPreset(range: Range) {
+  const width = range.to - range.from;
+  return PRESETS.reduce((best, p) => (Math.abs(Math.log(p.ms / width)) < Math.abs(Math.log(best.ms / width)) ? p : best)).id;
 }
 
 const PHONE = '(max-width: 719px)';

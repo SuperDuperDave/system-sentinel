@@ -1,7 +1,7 @@
 import { Range, dayStarts, fmt, startOfDay } from '../time';
-import { Mark, Track, coveredShare } from '../timeline';
+import { Mark, Track, coverageOf } from '../timeline';
 import { useApp } from '../store';
-import { count, list } from './words';
+import { count, list, lower } from './words';
 import styles from './DayList.module.css';
 
 /**
@@ -17,7 +17,13 @@ type Item =
 
 interface Day { from: number; to: number; items: Item[]; unread: string[]; partial: string[] }
 
-export function DayList({ tracks, range, heading = 'Day by day' }: { tracks: Track[]; range: Range; heading?: string }) {
+export function DayList({ tracks, range, heading = 'Day by day', unreadNote = true }: {
+  tracks: Track[];
+  range: Range;
+  heading?: string;
+  /** Off where the page's own sentences already say which sources were not read at all. */
+  unreadNote?: boolean;
+}) {
   const select = useApp((s) => s.select);
   const selection = useApp((s) => s.selection);
   const chosen = selection?.kind === 'mark' ? selection.id : null;
@@ -29,7 +35,7 @@ export function DayList({ tracks, range, heading = 'Day by day' }: { tracks: Tra
   return (
     <section className={styles.days} aria-labelledby="days-heading">
       <h2 id="days-heading" className={styles.heading}>{heading}</h2>
-      {failed.length || unmeasured.length ? (
+      {unreadNote && (failed.length || unmeasured.length) ? (
         <p className={styles.always}>
           <span className={styles.hatch} aria-hidden="true" />
           <span>
@@ -96,7 +102,7 @@ function shortLabel(label: string): string {
 
 function quietWords(row: Folded, tracks: Track[]): string {
   const read = tracks.filter((t) => t.reach.state === 'read' && t.kind === 'events' && !row.unread.includes(t.label));
-  return read.length ? `Nothing returned by ${list(read.map((t) => t.label.toLowerCase()))}` : 'Nothing was read';
+  return read.length ? `Nothing returned by ${list(read.map((t) => lower(t.label)))}` : 'Nothing was read';
 }
 
 function build(tracks: Track[], range: Range): Day[] {
@@ -112,9 +118,9 @@ function build(tracks: Track[], range: Range): Day[] {
     for (const track of tracks) {
       if (track.reach.state !== 'read') continue;
       if (track.kind === 'samples' && !track.reach.spans.length) continue;
-      const share = coveredShare(track, from, to);
-      if (share === 0) { unread.push(track.label); continue; }
-      if (share < 0.995) partial.push(track.label);
+      const covered = coverageOf(track, from, to, range);
+      if (covered === 'none') { unread.push(track.label); continue; }
+      if (covered === 'part') partial.push(track.label);
       const marks = track.marks.filter((m) => m.at >= from && m.at < to);
       if (track.id === 'faults' && marks.length > 4) {
         const apps = new Map<string, number>();

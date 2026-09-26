@@ -33,8 +33,8 @@ export const MAX_SPAN = 30 * DAY;
 
 export function presetRange(preset: Preset, now = Date.now()): Range {
   const ms = PRESETS.find((p) => p.id === preset)!.ms;
-  // Round the live end up to the next minute so the same choice made twice asks the same question.
-  const to = Math.ceil(now / 60_000) * 60_000;
+  // The live end is now, to the second: never ahead of the readings, which end at their query time.
+  const to = Math.floor(now / 1000) * 1000;
   return { preset, from: to - ms, to };
 }
 

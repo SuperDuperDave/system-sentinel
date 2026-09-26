@@ -1,5 +1,5 @@
 import { Range, fmt, startOfDay } from '../time';
-import { Track } from '../timeline';
+import { Track, coverageOf, unreadGaps } from '../timeline';
 import { useApp } from '../store';
 
 /**
@@ -24,12 +24,14 @@ export function reachWords(track: Track, range: Range, short = false): string {
   if (!reach.spans.length) return track.kind === 'samples' ? (short ? 'Nothing measured' : 'Nothing measured in this range') : 'Not read in this range';
   const from = Math.min(...reach.spans.map((s) => s[0]));
   const to = Math.max(...reach.spans.map((s) => s[1]));
-  const slack = (range.to - range.from) / (short ? 100 : 500);
-  const whole = from - range.from < slack && range.to - to < Math.max(120_000, slack);
+  const holes = unreadGaps(track, range.from, range.to, range);
+  const whole = holes.length === 0;
+  const inner = holes.filter(([s, e]) => s > from && e < to).length;
   const total = track.total ?? 0;
   const got = track.kind === 'samples' ? count(total, track.noun) : total ? count(total, track.noun) : `no ${track.noun[1]}`;
-  if (short) return whole ? `${got}, whole range read` : `${got}, read from ${sameDay(from, to) ? fmt.minute(from) : fmt.date(from)}`;
-  const where = whole ? 'Read across the whole range' : `Read from ${fmt.when(from)} to ${fmt.when(to)} only`;
+  if (short) return whole ? `${got}, whole range read` : from > range.from ? `${got}, read from ${sameDay(from, to) ? fmt.minute(from) : fmt.date(from)}` : `${got}, part read`;
+  const where = whole ? 'Read across the whole range'
+    : `Read from ${fmt.when(from)} to ${fmt.when(to)}${inner ? `, with ${count(inner, ['unread stretch', 'unread stretches'])} inside` : ' only'}`;
   return `${where}: ${got}.${reach.note ? ` ${reach.note}` : ''}`;
 }
 
@@ -56,37 +58,45 @@ export function summary(tracks: Track[], range: Range): Line[] {
   const stops = by.stops;
   if (stops?.reach.state === 'read') {
     const all = stopsOnRecord(stops);
+    const readFrom = stops.reach.spans.length ? Math.min(...stops.reach.spans.map((s) => s[0])) : range.to;
+    const scope = coverageOf(stops, range.from, range.to, range) === 'read' ? '' : `, in the part read (from ${fmt.date(readFrom)})`;
     if (stops.marks.length) {
       const newest = stops.marks.reduce((a, b) => (b.at > a.at ? b : a));
-      push('stop', `${capital(count(stops.marks.length, ['unplanned stop', 'unplanned stops']))}, the latest on ${fmt.when(newest.at)}.`);
+      push('stop', `${capital(count(stops.marks.length, ['unplanned stop', 'unplanned stops']))}${scope}, the latest on ${fmt.when(newest.at)}.`);
     } else if (all.length) {
       const newest = Math.max(...all);
-      push('stop', `No unplanned stop in this range. The latest on record is ${fmt.day(newest)}, ${Math.round((range.to - newest) / 86_400_000)} days before it.`);
+      push('stop', `No unplanned stop in this range${scope}. The latest on record is ${fmt.day(newest)}, before it.`);
     } else {
       push('stop', 'No unplanned stop was returned.');
     }
   } else if (stops?.reach.state === 'failed') push('unread', 'Unplanned stops could not be read.');
 
   const hardware = by.hardware;
-  if (hardware?.reach.state === 'read' && hardware.total) {
+  if (hardware?.lead && hardware.lead.state !== 'quiet') push('hardware', `A live lead, inferred from the last minutes of the System log: ${hardware.lead.reason}.`);
+  if (hardware?.reach.state === 'read') {
     const days = busyDays(hardware);
-    push('hardware', `${capital(count(hardware.total, ['hardware error report', 'hardware error reports']))} in the System log, ${days.length === 1 ? `all on ${fmt.day(days[0][0])}` : `most on ${fmt.day(days[0][0])}`}.`);
+    const kernel = by.kernel;
+    const kernelWords = kernel?.reach.state === 'read' ? ` The Kernel-WHEA channel, read separately, returned ${count(kernel.total ?? 0, ['report', 'reports'])}.` : '';
+    push('hardware', hardware.total
+      ? `${capital(count(hardware.total, ['hardware error report', 'hardware error reports']))} in the System log, ${days.length === 1 ? `all on ${fmt.day(days[0][0])}` : `most on ${fmt.day(days[0][0])}`}.${kernelWords}`
+      : `No hardware error report in the System log.${kernelWords || ' That does not clear the separate Kernel-WHEA channel.'}`);
   }
   const faults = by.faults;
   if (faults?.reach.state === 'read' && faults.total) {
     const days = busyDays(faults);
-    push('ink', `${capital(count(faults.total, ['program fault', 'program faults']))} filed, ${days.length === 1 ? `all on ${fmt.day(days[0][0])}` : `most on ${fmt.day(days[0][0])}`}.`);
+    const capped = faults.reach.note?.startsWith('Only the newest') ? ' (the newest 500 read)' : '';
+    push('ink', `${capital(count(faults.total, ['program fault', 'program faults']))} filed in what was read${capped}, ${days.length === 1 ? `all on ${fmt.day(days[0][0])}` : `most on ${fmt.day(days[0][0])}`}.`);
   }
   const log = by.log;
   if (log?.reach.state === 'read') {
     const critical = log.marks.length;
     const first = log.reach.spans[0]?.[0];
-    const partial = first !== undefined && first - range.from > (range.to - range.from) / 500;
+    const partial = first !== undefined && coverageOf(log, range.from, range.to, range) !== 'read';
     push('ink', `${capital(count(log.total ?? 0, ['System log record', 'System log records']))} returned${critical ? `, ${critical} of them critical` : ''}${partial ? `. The log reaches back only to ${fmt.when(first)}` : ''}.`);
   }
 
-  const unread = tracks.filter((t) => t.reach.state === 'failed').map((t) => t.label.toLowerCase());
-  const unmeasured = tracks.filter((t) => t.kind === 'samples' && t.reach.state === 'read' && !t.reach.spans.length).map((t) => t.label.toLowerCase());
+  const unread = tracks.filter((t) => t.reach.state === 'failed').map((t) => lower(t.label));
+  const unmeasured = tracks.filter((t) => t.kind === 'samples' && t.reach.state === 'read' && !t.reach.spans.length).map((t) => lower(t.label));
   const parts = [unread.length ? `${list(unread)} could not be read` : '', unmeasured.length ? `${list(unmeasured)} has no stored samples` : ''].filter(Boolean);
   if (parts.length) push('unread', `${capital(parts.join('; '))}.`);
   return out;
@@ -112,4 +122,10 @@ export function list(items: string[]): string {
 
 export function capital(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+/** A label inside a sentence: lower-case its first word unless that word is a name (Kernel-WHEA, System). */
+export function lower(label: string): string {
+  const first = label.split(' ')[0];
+  return /[A-Z].*[A-Z]|^System$/.test(first) ? label : label.charAt(0).toLowerCase() + label.slice(1);
 }

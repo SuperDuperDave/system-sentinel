@@ -96,7 +96,10 @@ function Shell() {
   const View = VIEW_COMPONENTS[view];
   const activeView = VIEWS.find((item) => item.id === view) ?? VIEWS[0];
   const mobileNavigation = useRef<HTMLDetailsElement>(null);
-  const previousNavigation = useRef(`${view}\u0000${moment ?? ''}`);
+  // On the time axis a moment is a pick, not a place: picking one must not scroll or move focus.
+  // Elsewhere a moment still frames the view, so it counts as navigation there.
+  const place = `${view}\u0000${ON_THE_AXIS.includes(view) ? '' : moment ?? ''}`;
+  const previousNavigation = useRef(place);
   const closeMobileNavigation = () => { if (mobileNavigation.current) mobileNavigation.current.open = false; };
 
   useEffect(() => {
@@ -112,7 +115,7 @@ function Shell() {
 
   // Restore the view's saved viewport before paint. A new view or moment starts at its title.
   useLayoutEffect(() => {
-    const current = `${view}\u0000${moment ?? ''}`;
+    const current = place;
     if (previousNavigation.current === current) return;
     const formerView = previousNavigation.current.split('\u0000')[0];
     previousNavigation.current = current;
@@ -143,7 +146,7 @@ function Shell() {
       title.tabIndex = -1;
       title.focus({ preventScroll: true });
     }
-  }, [view, moment]);
+  }, [view, place]);
 
   // A copied section link may name a row created only after its reading answers. Wait for that
   // element, then let the browser land on it; ordinary in-page anchor clicks stay native.

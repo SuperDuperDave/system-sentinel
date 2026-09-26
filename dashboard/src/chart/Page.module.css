@@ -27,7 +27,7 @@
 }
 .preset {
   min-width: 52px;
-  min-height: 40px;
+  min-height: 44px;
   padding: 0 10px;
   border-radius: 8px;
   font: 600 13.5px/1 var(--font-text);
@@ -66,6 +66,8 @@
 }
 
 @media (max-width: 719px) {
+  /* Room under the list for the lowered sheet, so the last row is never behind it. */
+  .page { padding-bottom: 72px; }
   .title { font-size: 24px; }
   .presets { width: 100%; }
   .preset { flex: 1; min-width: 0; min-height: 44px; }

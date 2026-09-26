@@ -175,6 +175,13 @@ interface AppState {
   selection: Selection | null;
   /** Pick out a moment, mark or stretch without moving the chart or changing the view. */
   select: (selection: Selection | null) => void;
+  /**
+   * On a phone the pick is a sheet over the list. An action in the sheet that moves the list or the
+   * view lowers it to a bar, so the result is visible and the pick is one tap away.
+   */
+  sheetOpen: boolean;
+  lowerSheet: () => void;
+  raiseSheet: () => void;
 }
 
 const initial = navigationFromAddress();
@@ -217,7 +224,13 @@ export const useApp = create<AppState>((set, get) => ({
   restoreAddress: () => set((state) => ({ ...navigationFromAddress(), viewScroll: { ...state.viewScroll, [state.view]: window.scrollY } })),
   range: initial.range,
   setRange: (range) => {
-    set({ range });
+    // A pick that the new range no longer contains is let go rather than described off the chart.
+    const { selection } = get();
+    const at = selection && selection.kind !== 'stretch' ? Date.parse(selection.at) : null;
+    const outside = selection && (selection.kind === 'stretch'
+      ? selection.to <= range.from || selection.from >= range.to
+      : at === null || at < range.from || at > range.to);
+    set(outside ? { range, selection: null, moment: null } : { range });
     writeAddress(get().view, get().moment);
   },
   refreshRange: () => {
@@ -227,7 +240,10 @@ export const useApp = create<AppState>((set, get) => ({
   selection: initial.selection,
   select: (selection) => {
     const at = selection && selection.kind !== 'stretch' ? qualifiedMoment(selection.at) : null;
-    set({ selection, moment: at, recordOrigin: null, recordReturnKey: null });
+    set({ selection, moment: at, recordOrigin: null, recordReturnKey: null, sheetOpen: true });
     writeAddress(get().view, at, null, true);
   },
+  sheetOpen: true,
+  lowerSheet: () => set({ sheetOpen: false }),
+  raiseSheet: () => set({ sheetOpen: true }),
 }));

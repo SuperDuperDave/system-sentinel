@@ -26,7 +26,7 @@ export function Timeline() {
       summary={<Summary lines={summary(tracks, range)} />}
       chart={phone ? null : <Chart range={range} tracks={tracks} label="Every source on one time axis" />}
       inspector={<Inspector tracks={tracks} range={range} sheet={phone} detail={(mark) => mark.stop ? <StopFacts stop={mark.stop} /> : null} />}
-      list={<DayList tracks={tracks} range={range} />}
+      list={<DayList tracks={tracks} range={range} unreadNote={false} />}
     />
   );
 }

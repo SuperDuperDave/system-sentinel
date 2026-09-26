@@ -1,6 +1,6 @@
 import { ReactNode, useEffect, useRef } from 'react';
-import { Range, fixedRange, fmt, nearWindow, span } from '../time';
-import { Mark, Track, coveredShare, within } from '../timeline';
+import { Range, bucketSeconds, fixedRange, fmt, nearWindow, span } from '../time';
+import { Mark, Track, coverageOf, within } from '../timeline';
 import { Selection, useApp } from '../store';
 import { count, reachWords } from './words';
 import styles from './Inspector.module.css';
@@ -25,13 +25,25 @@ export function Inspector({ tracks, range, resolve, detail, sheet = false }: {
 }) {
   const selection = useApp((s) => s.selection);
   const select = useApp((s) => s.select);
+  const sheetOpen = useApp((s) => s.sheetOpen);
   const heading = useRef<HTMLHeadingElement>(null);
   const mark = selection?.kind === 'mark' ? tracks.flatMap((t) => t.marks).find((m) => m.id === selection.id) ?? resolve?.(selection.id) ?? null : null;
   const key = selection ? JSON.stringify(selection) : '';
 
   // A new pick moves focus to the sheet only on a phone, where the sheet covers the list; on a desk
   // the chart keeps focus so the arrows keep working.
-  useEffect(() => { if (sheet && key) heading.current?.focus(); }, [key, sheet]);
+  // The sheet returns focus to whatever opened it when it closes.
+  const opener = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (!sheet) return;
+    if (key) {
+      if (!opener.current && document.activeElement instanceof HTMLElement) opener.current = document.activeElement;
+      heading.current?.focus();
+    } else if (opener.current) {
+      opener.current.focus({ preventScroll: true });
+      opener.current = null;
+    }
+  }, [key, sheet]);
   // The phone's sheet closes with Escape, like any sheet over content.
   useEffect(() => {
     if (!sheet || !key) return;
@@ -41,9 +53,11 @@ export function Inspector({ tracks, range, resolve, detail, sheet = false }: {
   }, [sheet, key, select]);
 
   if (sheet && !selection) return null;
+  if (sheet && selection && !sheetOpen) return <SheetBar selection={selection} />;
 
   return (
-    <aside className={`${styles.inspector} ${sheet ? styles.sheet : ''}`} aria-label="Inspector">
+    <aside className={`${styles.inspector} ${sheet ? styles.sheet : ''}`} aria-label="Inspector" role={sheet ? 'dialog' : undefined} aria-modal={sheet ? false : undefined}>
+      <Coverage tracks={tracks} />
       {selection ? (
         <div className={styles.top}>
           <span className={styles.kicker}>{selection.kind === 'stretch' ? 'Picked stretch' : mark ? 'Picked mark' : 'Picked moment'}</span>
@@ -54,6 +68,41 @@ export function Inspector({ tracks, range, resolve, detail, sheet = false }: {
         : selection.kind === 'stretch' ? <Stretch selection={selection} tracks={tracks} heading={heading} />
           : <Moment at={Date.parse(selection.at)} mark={mark} tracks={tracks} range={range} heading={heading} detail={detail} />}
     </aside>
+  );
+}
+
+/** The lowered sheet: what is picked, one tap from showing it again. */
+function SheetBar({ selection }: { selection: Selection }) {
+  const raise = useApp((s) => s.raiseSheet);
+  const select = useApp((s) => s.select);
+  const words = selection.kind === 'stretch' ? `${fmt.when(selection.from)} to ${fmt.when(selection.to)}` : fmt.whenExact(Date.parse(selection.at));
+  return (
+    <div className={styles.bar} role="region" aria-label="Picked on the chart">
+      <button className={styles.barShow} onClick={raise}><span className={styles.kicker}>Picked</span> <span className="readout">{words}</span></button>
+      <button className={styles.close} onClick={() => select(null)}>Clear</button>
+    </div>
+  );
+}
+
+/**
+ * One line that stays at the top of the sheet whatever is picked: how much of the range each
+ * source read. Reading anything below it without this line would be reading without the reach.
+ */
+function Coverage({ tracks }: { tracks: Track[] }) {
+  const range = useApp((s) => s.range);
+  const state = (t: Track) => coverageOf(t, range.from, range.to, range);
+  const whole = tracks.filter((t) => state(t) === 'read');
+  const some = tracks.filter((t) => state(t) === 'part');
+  const none = tracks.filter((t) => state(t) === 'none' && t.reach.state !== 'waiting');
+  return (
+    <p className={styles.coverage}>
+      <span className={styles.coverageHatch} aria-hidden="true" />
+      <span>
+        {whole.length} of {tracks.length} sources read the whole range
+        {some.length ? `; ${some.map((t) => t.label).join(', ')} only part of it` : ''}
+        {none.length ? `; ${none.map((t) => t.label).join(', ')} none of it` : ''}.
+      </span>
+    </p>
   );
 }
 
@@ -82,8 +131,9 @@ function Ledger({ tracks, range, heading }: { tracks: Track[]; range: Range; hea
 function Moment({ at, mark, tracks, range, heading, detail }: {
   at: number; mark: Mark | null; tracks: Track[]; range: Range; heading: React.RefObject<HTMLHeadingElement | null>; detail?: (mark: Mark) => ReactNode;
 }) {
-  const setView = useApp((s) => s.setView);
-  const setRange = useApp((s) => s.setRange);
+  const lower = useApp((s) => s.lowerSheet);
+  const setView = (next: Parameters<ReturnType<typeof useApp.getState>['setView']>[0]) => { lower(); useApp.getState().setView(next); };
+  const setRange = (next: Range) => { lower(); useApp.getState().setRange(next); };
   const view = useApp((s) => s.view);
   const near = nearWindow(range);
   const lo = mark ? Math.min(...mark.times.map((t) => t.at)) : at;
@@ -120,13 +170,20 @@ function Moment({ at, mark, tracks, range, heading, detail }: {
 
       {mark && detail ? <div className={styles.detail}>{detail(mark)}</div> : null}
 
-      <Near tracks={tracks} from={lo - near} to={hi + near} title={`Near ${mark ? 'it' : 'this moment'}: ${span(near)} either side`} exclude={mark?.id} />
+      {/* The window snaps outward to whole buckets, so the question asked and the counts answered cover the same stretch. */}
+      <Near tracks={tracks} from={snap(lo - near, range, Math.floor)} to={snap(hi + near, range, Math.ceil)} title={`Near ${mark ? 'it' : 'this moment'}: about ${span(near)} either side`} exclude={mark?.id} />
     </>
   );
 }
 
+function snap(at: number, range: Range, round: (n: number) => number): number {
+  const width = bucketSeconds(range) * 1000;
+  return round(at / width) * width;
+}
+
 function Stretch({ selection, tracks, heading }: { selection: Extract<Selection, { kind: 'stretch' }>; tracks: Track[]; heading: React.RefObject<HTMLHeadingElement | null> }) {
-  const setRange = useApp((s) => s.setRange);
+  const lower = useApp((s) => s.lowerSheet);
+  const setRange = (next: Range) => { lower(); useApp.getState().setRange(next); };
   return (
     <>
       <h2 ref={heading} tabIndex={-1} className={`${styles.title} readout`}>{span(selection.to - selection.from)}</h2>
@@ -142,34 +199,35 @@ function Stretch({ selection, tracks, heading }: { selection: Extract<Selection,
 /** Each source, and what it returned between two times, or that it did not read there. */
 function Near({ tracks, from, to, title, exclude }: { tracks: Track[]; from: number; to: number; title: string; exclude?: string }) {
   const select = useApp((s) => s.select);
+  const range = useApp((s) => s.range);
   return (
     <section className={styles.near} aria-label={title}>
       <h3 className={styles.nearTitle}>{title}</h3>
       <p className={styles.note}>Near in time is not a cause. These are what each source returned between <span className="readout">{fmt.minute(from)}</span> and <span className="readout">{fmt.minute(to)}</span>{fmt.day(from) !== fmt.day(to) ? ` (${fmt.day(from)} to ${fmt.day(to)})` : ''}.</p>
       <ul className={styles.nearList}>
         {tracks.map((track) => {
-          const share = coveredShare(track, from, to);
-          if (track.reach.state !== 'read' || share === 0) {
+          const covered = coverageOf(track, from, to, range);
+          if (track.reach.state !== 'read' || covered === 'none') {
             return (
               <li key={track.id} className={`${styles.nearRow} ${styles.unread}`}>
                 <span className={styles.nearName}>{track.label}</span>
-                <span className={styles.nearValue}>{track.reach.state === 'waiting' ? 'Reading…' : track.reach.state === 'failed' ? 'Not read: the reading did not answer' : track.kind === 'samples' ? 'Not measured here' : 'Not read here'}</span>
+                <span className={styles.nearValue}>{track.reach.state === 'waiting' ? 'Reading…' : `${track.kind === 'samples' ? 'Not measured here' : 'Not read here'}. ${reachWords(track, range)}`}</span>
               </li>
             );
           }
           const found = within(track, from, to);
           const marks = found.marks.filter((m) => m.id !== exclude);
-          const partial = share < 0.999;
+          const partial = covered === 'part';
           let value: string;
           if (track.kind === 'samples') {
             const values = (track.samples ?? []).filter((s) => s.at >= from && s.at <= to && s.value !== null).map((s) => s.value as number);
             value = values.length ? `${Math.min(...values)} to ${Math.max(...values)}% over ${count(values.length, track.noun)}` : 'No samples here';
           } else if (track.bins.length && found.count !== null) {
             const levels = found.levels ? levelWords(found.levels) : '';
-            value = found.count ? `${count(found.count, track.noun)}${levels ? `: ${levels}` : ''}` : `No ${track.noun[1]}`;
+            value = found.count ? `${count(found.count, track.noun)}${levels ? `: ${levels}` : ''}` : `None returned${partial ? '' : ', and this whole window was read'}`;
             // Counts come in whole buckets, so say which stretch they cover when it is wider than the question.
             if (found.binFrom < from || found.binTo > to) value += `, in the buckets from ${fmt.minute(found.binFrom)} to ${fmt.minute(found.binTo)}`;
-          } else value = marks.length ? count(marks.length, track.noun) : `No ${track.noun[1]}`;
+          } else value = marks.length ? count(marks.length, track.noun) : `None returned${partial ? '' : ', and this whole window was read'}`;
           return (
             <li key={track.id} className={styles.nearRow}>
               <span className={styles.nearName}>{track.label}</span>

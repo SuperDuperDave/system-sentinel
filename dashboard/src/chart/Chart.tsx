@@ -1,6 +1,6 @@
 import { KeyboardEvent, PointerEvent, useMemo, useRef, useState } from 'react';
 import { Range, bucketSeconds, fmt, span, ticks } from '../time';
-import { Mark, Track } from '../timeline';
+import { Mark, Track, unreadGaps } from '../timeline';
 import { Selection, useApp } from '../store';
 import { ReachCaption } from './words';
 import styles from './Chart.module.css';
@@ -29,6 +29,13 @@ export function Chart({ range, tracks, label }: { range: Range; tracks: Track[];
   const grid = useMemo(() => ticks(range), [range]);
   const step = bucketSeconds(range) * 1000;
   const marks = useMemo(() => tracks.flatMap((t) => t.marks).sort((a, b) => a.at - b.at), [tracks]);
+  // Rows that count the same thing share one scale (both hardware rows count reports); every scale
+  // has a floor of ten, so one report is a short bar and not a full-height one.
+  const scales = useMemo(() => {
+    const out: Record<string, number> = {};
+    for (const track of tracks) out[track.tone] = Math.max(out[track.tone] ?? 10, ...track.bins.map((b) => b.count ?? 0));
+    return out;
+  }, [tracks]);
 
   const timeAt = (clientX: number) => {
     const box = overlay.current!.getBoundingClientRect();
@@ -122,7 +129,7 @@ export function Chart({ range, tracks, label }: { range: Range; tracks: Track[];
         </div>
 
         {tracks.map((track, index) => (
-          <Row key={track.id} track={track} range={range} row={index + 2} x={x} markId={markId} />
+          <Row key={track.id} track={track} range={range} row={index + 2} x={x} markId={markId} scale={scales[track.tone]} />
         ))}
 
         <div
@@ -140,6 +147,7 @@ export function Chart({ range, tracks, label }: { range: Range; tracks: Track[];
           onPointerMove={move}
           onPointerUp={up}
           onPointerLeave={() => setHover(null)}
+          onPointerCancel={() => setDrag(null)}
           onKeyDown={key}
           onBlur={() => setCursor(null)}
         >
@@ -167,19 +175,24 @@ function selectedAt(selection: Selection | null): number | null {
   return Number.isFinite(t) ? t : null;
 }
 
-function Row({ track, range, row, x, markId }: { track: Track; range: Range; row: number; x: (at: number) => string; markId: string | null }) {
+function Row({ track, range, row, x, markId, scale }: { track: Track; range: Range; row: number; x: (at: number) => string; markId: string | null; scale: number }) {
   const setView = useApp((s) => s.setView);
   const width = range.to - range.from;
-  const gaps = notReadGaps(track, range);
-  const max = Math.max(1, ...track.bins.map((b) => b.count ?? 0));
+  const gaps = unreadGaps(track, range.from, range.to, range);
+  const max = track.id === 'log' ? Math.max(10, ...track.bins.map((b) => b.count ?? 0)) : scale;
   return (
     <>
-      <div className={styles.label} style={{ gridRow: row }}>
-        {track.view ? (
-          <button className={styles.labelName} onClick={() => setView(track.view!)}>{track.label}</button>
-        ) : <span className={styles.labelName}>{track.label}</span>}
-        <ReachCaption track={track} className={styles.labelCaption} short />
-      </div>
+      {track.view ? (
+        <button className={`${styles.label} ${styles.labelLink}`} style={{ gridRow: row }} onClick={() => setView(track.view!)} aria-label={`${track.label}: open its view`}>
+          <span className={styles.labelName}>{track.label}</span>
+          <ReachCaption track={track} className={styles.labelCaption} short />
+        </button>
+      ) : (
+        <div className={styles.label} style={{ gridRow: row }}>
+          <span className={styles.labelName}>{track.label}</span>
+          <ReachCaption track={track} className={styles.labelCaption} short />
+        </div>
+      )}
       <div className={`${styles.plot} ${styles[`tone_${track.tone}`]}`} style={{ gridRow: row }} data-track={track.id} aria-hidden="true">
         {track.reach.state === 'failed' ? (
           <span className={styles.failed}><span className={styles.failedText}>Could not be read</span></span>
@@ -188,15 +201,20 @@ function Row({ track, range, row, x, markId }: { track: Track; range: Range; row
         ) : (
           <>
             <span className={styles.baseline} />
-            {gaps.map(([from, to]) => <span key={from} className={styles.notRead} style={{ left: x(from), width: `${((to - from) / width) * 100}%` }} />)}
+            {gaps.map(([from, to]) => (
+              <span key={from} className={styles.notRead} style={{ left: x(from), width: `${((to - from) / width) * 100}%` }}>
+                {(to - from) / width > 0.14 ? <span className={styles.notReadWords}>{track.kind === 'samples' ? 'not measured' : 'not read'}</span> : null}
+              </span>
+            ))}
             {track.bins.map((bin) => bin.count ? (
               <span key={bin.from} className={styles.bar} style={{ left: x(Math.max(bin.from, range.from)), width: `max(2px, calc(${((Math.min(bin.to, range.to) - Math.max(bin.from, range.from)) / width) * 100}% - 1px))`, height: `max(2px, ${(bin.count / max) * 100}%)` }}>
                 {bin.levels ? <Levels levels={bin.levels} /> : null}
+                {bin.previous ? <span className={styles.previous} style={{ height: `${(bin.previous / bin.count) * 100}%` }} title="Filed about an earlier Windows session" /> : null}
               </span>
             ) : null)}
             {track.samples?.length ? <Samples samples={track.samples} range={range} /> : null}
             {track.marks.map((mark) => <MarkGlyph key={mark.id} mark={mark} x={x} width={width} range={range} chosen={mark.id === markId} />)}
-            {track.bins.length ? <span className={`${styles.scale} readout`}>{max}</span> : null}
+            {track.bins.length ? <span className={`${styles.scale} readout`}>{max} per {binWords(track)}</span> : null}
           </>
         )}
       </div>
@@ -204,18 +222,9 @@ function Row({ track, range, row, x, markId }: { track: Track; range: Range; row
   );
 }
 
-/** The stretches of the range a track did not read. */
-export function notReadGaps(track: Track, range: Range): [number, number][] {
-  if (track.reach.state !== 'read') return [[range.from, range.to]];
-  const spans = [...track.reach.spans].sort((a, b) => a[0] - b[0]);
-  const out: [number, number][] = [];
-  let at = range.from;
-  for (const [s, e] of spans) {
-    if (s > at) out.push([at, Math.min(s, range.to)]);
-    at = Math.max(at, e);
-  }
-  if (at < range.to) out.push([at, range.to]);
-  return out.filter(([s, e]) => e - s > (range.to - range.from) / 2000);
+function binWords(track: Track): string {
+  const ms = track.bins[0] ? track.bins[0].to - track.bins[0].from : 0;
+  return ms >= 86_400_000 ? 'day' : span(ms);
 }
 
 function Levels({ levels }: { levels: [number, number, number, number] }) {
@@ -234,9 +243,12 @@ function MarkGlyph({ mark, x, width, range, chosen }: { mark: Mark; x: (at: numb
   if (mark.track === 'stops') {
     const lo = Math.min(...mark.times.map((t) => t.at));
     const hi = Math.max(...mark.times.map((t) => t.at));
+    const estimate = mark.times.find((t) => t.label === "Windows' stop estimate")?.at;
     return (
       <span className={`${styles.stop} ${chosen ? styles.markChosen : ''}`}>
-        <span className={styles.stopSpan} style={{ left: x(Math.max(lo, range.from)), width: `max(3px, ${((Math.min(hi, range.to) - Math.max(lo, range.from)) / width) * 100}%)` }} />
+        {/* Before Windows' estimate the stop's time is uncertain; from the estimate to the next start the machine was down. */}
+        {estimate !== undefined && estimate > lo ? <span className={styles.stopUncertain} style={{ left: x(Math.max(lo, range.from)), width: `${((Math.min(estimate, range.to) - Math.max(lo, range.from)) / width) * 100}%` }} /> : null}
+        <span className={styles.stopSpan} style={{ left: x(Math.max(estimate ?? lo, range.from)), width: `max(3px, ${((Math.min(hi, range.to) - Math.max(estimate ?? lo, range.from)) / width) * 100}%)` }} />
         {times.map((t) => <span key={t.label} className={`${styles.stopTime} ${styles[`stopTime_${t.label === 'Next start' || t.label === 'Restart announced' ? 'start' : t.label === 'Last System record' ? 'last' : 'estimate'}`]}`} style={{ left: x(t.at) }} />)}
       </span>
     );
@@ -251,9 +263,10 @@ function Legend({ tracks }: { tracks: Track[] }) {
     <span className={styles.legend}>
       <span className={styles.legendItem}><span className={styles.swatchRead} />Read, nothing returned</span>
       <span className={styles.legendItem}><span className={styles.swatchNotRead} />Not read</span>
-      {hasStops ? <span className={styles.legendItem}><span className={styles.swatchStop} />Stop: last record, Windows' estimate, next start</span> : null}
+      {hasStops ? <span className={styles.legendItem}><span className={styles.swatchStop} />Stop: dotted from the last record to Windows' estimate, solid while down until the next start</span> : null}
+      {tracks.some((t) => t.tone === 'hardware') ? <span className={styles.legendItem}><span className={styles.swatchPrevious} />Hollow: a report about an earlier Windows session</span> : null}
       {hasLog ? <span className={styles.legendItem}><span className={styles.swatchLevels} />Log: critical and error, warning, information</span> : null}
-      <span className={styles.legendItem}>Bar heights are per row; the number at a row's right is its tallest bar</span>
+      <span className={styles.legendItem}>The number at a row's right is its scale's top. Both hardware rows share one scale; other rows do not compare.</span>
     </span>
   );
 }

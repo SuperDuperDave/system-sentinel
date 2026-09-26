@@ -37,14 +37,17 @@ export function SystemLog() {
   // inspects that row and leaves the frame where it is.
   const [anchor, setAnchor] = useState<number | null>(() => anchorOf(selection));
   const [seen, setSeen] = useState(selection);
+  // How far the frame reaches each way; a new anchor starts a new frame.
+  const [depth, setDepth] = useState({ before: AROUND, after: AROUND });
   if (selection !== seen) {
     setSeen(selection);
-    if (!selection) setAnchor(null);
-    else if (selection.kind !== 'stretch' && !(selection.kind === 'mark' && selection.id.startsWith('rec:'))) setAnchor(anchorOf(selection));
+    const next = !selection ? null
+      : selection.kind !== 'stretch' && !(selection.kind === 'mark' && selection.id.startsWith('rec:')) ? anchorOf(selection) : anchor;
+    if (next !== anchor) { setAnchor(next); setDepth({ before: AROUND, after: AROUND }); }
   }
 
-  const before = useReading<EventRecord[]>('record', { before: anchor ? iso(anchor) : '', count: AROUND * 4 }, anchor !== null, { hold: 'same-params' });
-  const after = useReading<EventRecord[]>('events', { log: 'System', levels: [], count: AROUND * 4, since: anchor ? iso(anchor) : '', order: 'oldest' }, anchor !== null, { hold: 'same-params' });
+  const before = useReading<EventRecord[]>('record', { before: anchor ? iso(anchor) : '', count: depth.before }, anchor !== null, { hold: 'same-params' });
+  const after = useReading<EventRecord[]>('events', { log: 'System', levels: [], count: depth.after, since: anchor ? iso(anchor) : '', order: 'oldest' }, anchor !== null, { hold: 'same-params' });
   const known = [...(part<EventRecord[]>(log.taken.reading, 'records') ?? []), ...(part<EventRecord[]>(before.reading, 'records') ?? []), ...(part<EventRecord[]>(after.reading, 'records') ?? [])];
 
   const resolve = (id: string): Mark | null => {
@@ -63,7 +66,8 @@ export function SystemLog() {
       inspector={<Inspector tracks={tracks} range={range} sheet={phone} resolve={resolve}
         detail={(mark) => mark.record ? <RecordFields record={mark.record} envelope={envelopeOf(mark.record)} /> : null} />}
       list={anchor !== null
-        ? <Around at={anchor} before={part<EventRecord[]>(before.reading, 'records')} after={part<EventRecord[]>(after.reading, 'records')}
+        ? <Around key={anchor} at={anchor} before={part<EventRecord[]>(before.reading, 'records')} after={part<EventRecord[]>(after.reading, 'records')}
+            depth={depth} onDeeper={(side) => setDepth((d) => ({ ...d, [side]: Math.min(2000, d[side] * 2) }))}
             state={observed(before.reading) && observed(after.reading) ? 'read' : before.state === 'lost' || after.state === 'lost' || (before.state === 'done' && after.state === 'done') ? 'failed' : 'taking'}
             onClear={() => { setAnchor(null); }} />
         : <InRange track={log} />}
@@ -111,12 +115,18 @@ function InRange({ track }: { track: Track }) {
   );
 }
 
-function Around({ at, before, after, state, onClear }: { at: number; before: EventRecord[] | null; after: EventRecord[] | null; state: 'taking' | 'read' | 'failed'; onClear: () => void }) {
+function Around({ at, before, after, state, depth, onDeeper, onClear }: {
+  at: number;
+  before: EventRecord[] | null;
+  after: EventRecord[] | null;
+  state: 'taking' | 'read' | 'failed';
+  depth: { before: number; after: number };
+  onDeeper: (side: 'before' | 'after') => void;
+  onClear: () => void;
+}) {
   const select = useApp((s) => s.select);
-  const [earlier, setEarlier] = useState(AROUND);
-  const [later, setLater] = useState(AROUND);
-  const past = (before ?? []).slice(-earlier);
-  const next = (after ?? []).slice(0, later);
+  const past = before ?? [];
+  const next = after ?? [];
   return (
     <section aria-labelledby="around-heading">
       <div className={styles.aroundHead}>
@@ -125,11 +135,12 @@ function Around({ at, before, after, state, onClear }: { at: number; before: Eve
       </div>
       {state === 'taking' ? <p className={styles.quiet}>Reading…</p> : null}
       {state === 'failed' ? <p className={styles.quiet}>Windows did not answer for the records around this moment.</p> : null}
-      {(before?.length ?? 0) > earlier ? <button className={styles.more} onClick={() => setEarlier((n) => n + AROUND)}>Earlier records</button> : null}
+      {/* A full page means the log may hold more on that side; asking again doubles the reach, up to 2,000. */}
+      {past.length >= depth.before && depth.before < 2000 ? <button className={styles.more} onClick={() => onDeeper('before')}>Earlier records</button> : null}
       <Rows records={past} />
       <p className={styles.momentRule}><span className="readout">{fmt.second(at)}</span> the picked moment</p>
       <Rows records={next} />
-      {(after?.length ?? 0) > later ? <button className={styles.more} onClick={() => setLater((n) => n + AROUND)}>Later records</button> : null}
+      {next.length >= depth.after && depth.after < 2000 ? <button className={styles.more} onClick={() => onDeeper('after')}>Later records</button> : null}
       {state === 'read' && next.length === 0 ? <p className={styles.quiet}>No record after this moment was returned.</p> : null}
     </section>
   );
@@ -198,7 +209,7 @@ function RecordFields({ record, envelope }: { record: EventRecord; envelope: Rea
         <pre className="readout">{JSON.stringify(record, null, 2)}</pre>
       </details>
       <div className={styles.fieldActions}>
-        <button className={styles.more} onClick={() => select({ kind: 'moment', at: record.TimeCreated })}>The records around this one</button>
+        <button className={styles.more} onClick={() => { select({ kind: 'moment', at: record.TimeCreated }); useApp.getState().lowerSheet(); }}>The records around this one</button>
         {envelope ? <AddToStack item={{ kind: 'selection', envelope, ids: [record.RecordId] }} label="Stack this record" /> : null}
       </div>
     </div>
