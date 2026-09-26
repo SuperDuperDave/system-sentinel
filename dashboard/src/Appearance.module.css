@@ -1,0 +1,12 @@
+.group { display: inline-flex; gap: 2px; padding: 3px; border-radius: 10px; background: var(--deep); }
+.choice {
+  min-height: 36px;
+  min-width: 52px;
+  padding: 0 10px;
+  border-radius: 7px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.choice:hover { color: var(--ink); }
+.choice[aria-pressed='true'] { background: var(--surface-raised); color: var(--ink); box-shadow: var(--shadow); }
+@media (pointer: coarse) { .choice { min-height: 44px; } }

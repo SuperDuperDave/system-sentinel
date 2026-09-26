@@ -5,7 +5,7 @@ import { Lockup, Mark } from './Mark';
 import { NavIcon } from './NavIcon';
 import { Live } from './Live';
 import { canRestoreCrashView, clearHeldReadings, hasHeldReading } from './useReading';
-import { useApp, VIEWS, ViewGroup, ViewId } from './store';
+import { useApp, VIEWS, ViewId } from './store';
 import { Record } from './views/Record';
 import { Errors } from './views/Errors';
 import { Crashes } from './views/Crashes';
@@ -16,9 +16,15 @@ import { Diagnostics } from './views/Diagnostics';
 import { Signals } from './views/Signals';
 import { Stack } from './views/Stack';
 import { Agents } from './views/Agents';
+import { Home } from './views/Home';
+import { CaseView } from './views/Case';
+import { Appearance } from './Appearance';
+import { useCase, useCaseList } from './useCases';
 import styles from './App.module.css';
 
 const VIEW_COMPONENTS: { [K in ViewId]: () => ReactElement } = {
+  home: Home,
+  case: CaseView,
   record: Record,
   errors: Errors,
   crashes: Crashes,
@@ -30,7 +36,6 @@ const VIEW_COMPONENTS: { [K in ViewId]: () => ReactElement } = {
   stack: Stack,
   agents: Agents,
 };
-const NAV_GROUPS: ViewGroup[] = ['Evidence', 'Interpret', 'Carry'];
 
 export function App() {
   const session = useApp((s) => s.session);
@@ -88,13 +93,14 @@ function ConnectionUnavailable() {
 function Shell() {
   const view = useApp((s) => s.view);
   const moment = useApp((s) => s.moment);
+  const caseId = useApp((s) => s.caseId);
   const setView = useApp((s) => s.setView);
   const restoreAddress = useApp((s) => s.restoreAddress);
   const [devices, setDevices] = useState(false);
   const View = VIEW_COMPONENTS[view];
   const activeView = VIEWS.find((item) => item.id === view) ?? VIEWS[0];
   const mobileNavigation = useRef<HTMLDetailsElement>(null);
-  const previousNavigation = useRef(`${view}\u0000${moment ?? ''}`);
+  const previousNavigation = useRef(`${view}\u0000${moment ?? ''}\u0000${view === 'case' ? caseId : ''}`);
   const closeMobileNavigation = () => { if (mobileNavigation.current) mobileNavigation.current.open = false; };
 
   useEffect(() => {
@@ -110,7 +116,7 @@ function Shell() {
 
   // Restore the view's saved viewport before paint. A new view or moment starts at its title.
   useLayoutEffect(() => {
-    const current = `${view}\u0000${moment ?? ''}`;
+    const current = `${view}\u0000${moment ?? ''}\u0000${view === 'case' ? caseId : ''}`;
     if (previousNavigation.current === current) return;
     const formerView = previousNavigation.current.split('\u0000')[0];
     previousNavigation.current = current;
@@ -141,7 +147,7 @@ function Shell() {
       title.tabIndex = -1;
       title.focus({ preventScroll: true });
     }
-  }, [view, moment]);
+  }, [view, moment, caseId]);
 
   // A copied section link may name a row created only after its reading answers. Wait for that
   // element, then let the browser land on it; ordinary in-page anchor clicks stay native.
@@ -173,54 +179,121 @@ function Shell() {
     history.replaceState(null, '', window.location.pathname + window.location.search);
   }, []);
 
+  const lens = caseId && view !== 'case' && view !== 'home';
+
   return (
     <div className={styles.shell}>
-      <a className={styles.skipLink} href="#content">Skip to the reading</a>
-      <header className={styles.header}>
+      <a className={styles.skipLink} href="#content">Skip to the page</a>
+      <aside className={styles.rail}>
+        <div className={styles.railHead}><Lockup /></div>
+        <nav className={styles.nav} aria-label="Views">
+          <NavChoices view={view} onChoose={setView} onDevices={() => setDevices(true)} />
+        </nav>
+        <div className={styles.railFoot}>
+          <Live />
+          <Appearance />
+        </div>
+      </aside>
+      <header className={styles.phoneBar}>
         <Lockup />
         <Live />
       </header>
-      <div className={styles.trace} aria-hidden="true" />
-      <nav className={styles.nav} aria-label="Views">
-        <NavChoices view={view} onChoose={setView} onDevices={() => setDevices(true)} />
-      </nav>
       <nav className={styles.mobileNav} aria-label="Views">
         <details ref={mobileNavigation}>
           <summary className={styles.mobileSummary}>
             <span className={styles.mobileCurrent}>
               <NavIcon name={activeView.id} />
-              <span><span className={`${styles.mobileEyebrow} label`}>Current view</span><span className={styles.mobileTitle}>{activeView.label}</span></span>
+              <span className={styles.mobileTitle}>{view === 'case' ? 'Case' : activeView.label}</span>
             </span>
-            <span className={styles.mobileToggle}>All views <span className={styles.mobileChevron} aria-hidden="true" /></span>
+            <span className={styles.mobileToggle}>Menu <span className={styles.mobileChevron} aria-hidden="true" /></span>
           </summary>
           <div className={styles.mobileChoices}>
-            <NavChoices view={view} onChoose={(next) => { closeMobileNavigation(); setView(next); }} onDevices={() => { closeMobileNavigation(); setDevices(true); }} />
+            <NavChoices view={view} onChoose={(next) => { closeMobileNavigation(); setView(next); }} onDevices={() => { closeMobileNavigation(); setDevices(true); }} onCase={closeMobileNavigation} />
+            <Appearance />
           </div>
         </details>
       </nav>
-      <main id="content" className={styles.main} tabIndex={-1}><View /></main>
+      <main id="content" className={styles.main} tabIndex={-1}>
+        {lens ? <CaseBar id={caseId} /> : null}
+        <div className={lens ? styles.lens : undefined}><View /></div>
+      </main>
       <Devices open={devices} onClose={() => setDevices(false)} />
     </div>
   );
 }
 
-function NavChoices({ view, onChoose, onDevices }: { view: ViewId; onChoose: (next: ViewId) => void; onDevices: () => void }) {
+/**
+ * Where "Add" puts things while a person reads for evidence. It holds orientation (which case)
+ * and the way back, and nothing else, so it can stay in view while the reading scrolls.
+ */
+function CaseBar({ id }: { id: string }) {
+  const openCase = useApp((s) => s.openCase);
+  const releaseCase = useApp((s) => s.releaseCase);
+  const heldTitle = useApp((s) => s.caseTitle);
+  const holdCase = useApp((s) => s.holdCase);
+  const loaded = useCase(heldTitle ? null : id);
+  useEffect(() => { if (loaded.state === 'ok') holdCase(id, loaded.value.title); }, [loaded, id, holdCase]);
+  const title = heldTitle ?? (loaded.state === 'ok' ? loaded.value.title : loaded.state === 'loading' ? 'Opening the case…' : 'A case this server did not return');
+  return (
+    <div className={styles.caseBar} role="region" aria-label="Case in hand">
+      <span className={styles.caseBarWhat}>
+        <span className="label">Adding evidence to</span>
+        <span className={styles.caseBarTitle}>{title}</span>
+      </span>
+      <span className={styles.caseBarActions}>
+        <button className={styles.caseBarBack} onClick={() => openCase(id)}>Back to the case</button>
+        <button className={styles.caseBarRelease} onClick={releaseCase}>Set it down</button>
+      </span>
+    </div>
+  );
+}
+
+const READING_ORDER: ViewId[] = ['crashes', 'record', 'errors', 'signals', 'machine', 'performance', 'space', 'diagnostics'];
+
+function NavChoices({ view, onChoose, onDevices, onCase }: { view: ViewId; onChoose: (next: ViewId) => void; onDevices: () => void; onCase?: () => void }) {
+  const cases = useCaseList();
+  const caseId = useApp((s) => s.caseId);
+  const openCase = useApp((s) => s.openCase);
+  const open = cases.state === 'ok' ? cases.value.filter((c) => c.state === 'open') : [];
+  const item = (id: ViewId) => {
+    const meta = VIEWS.find((v) => v.id === id)!;
+    return (
+      <button key={id} className={`${styles.navItem} ${id === view ? styles.navActive : ''}`} onClick={() => onChoose(id)} aria-current={id === view ? 'page' : undefined}>
+        <NavIcon name={id} />
+        <span>{meta.label}</span>
+      </button>
+    );
+  };
   return <>
-    {NAV_GROUPS.map((group) => (
-      <div className={styles.navGroup} key={group}>
-        <span className={`${styles.navGroupLabel} label`}>{group}</span>
-        {VIEWS.filter((item) => item.group === group).map((item) => (
-          <button key={item.id} className={`${styles.navItem} ${item.id === view ? styles.navActive : ''}`} onClick={() => onChoose(item.id)} aria-current={item.id === view ? 'page' : undefined}>
-            <NavIcon name={item.id} />
-            <span>{item.label}</span>
+    <div className={styles.navGroup}>{item('home')}</div>
+    <div className={styles.navGroup}>
+      <span className={styles.navGroupLabel}>Open cases</span>
+      {open.map((c) => {
+        const current = view === 'case' && caseId === c.id;
+        return (
+          <button key={c.id} className={`${styles.navCase} ${current ? styles.navActive : ''}`} onClick={() => { onCase?.(); openCase(c.id); }} aria-current={current ? 'page' : undefined}>
+            <span className={styles.navCaseTitle}>{c.title}</span>
+            {caseId === c.id && view !== 'case' ? <span className={styles.navCaseHeld}>In hand: “Add” puts evidence here</span> : null}
+            {c.pending.length ? <span className={styles.navCaseReview}>{c.pending.length} to review</span> : null}
           </button>
-        ))}
-      </div>
-    ))}
-    <button className={`${styles.navItem} ${styles.navAside}`} onClick={onDevices} aria-haspopup="dialog">
-      <NavIcon name="device" />
-      <span>Sign in another device</span>
-    </button>
+        );
+      })}
+      {cases.state === 'ok' && !open.length ? <span className={styles.navNone}>None open</span> : null}
+      {cases.state === 'unavailable' ? <span className={styles.navNone}>This server has no case routes</span> : null}
+    </div>
+    <div className={styles.navGroup}>
+      <span className={styles.navGroupLabel}>Readings</span>
+      {READING_ORDER.map(item)}
+    </div>
+    <div className={styles.navGroup}>
+      <span className={styles.navGroupLabel}>Agent</span>
+      {item('agents')}
+      {item('stack')}
+      <button className={styles.navItem} onClick={onDevices} aria-haspopup="dialog">
+        <NavIcon name="device" />
+        <span>Sign in another device</span>
+      </button>
+    </div>
   </>;
 }
 

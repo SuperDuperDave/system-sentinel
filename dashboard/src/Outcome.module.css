@@ -1,6 +1,7 @@
 .block { margin: 0 0 20px; }
 .line {
   margin: 0;
+  font-size: 13.5px;
   color: var(--muted);
   display: flex;
   flex-wrap: wrap;
@@ -13,12 +14,15 @@
 .sep { flex: 1 0 8px; }
 .actions { display: inline-flex; gap: 0.9em; white-space: nowrap; margin-left: auto; }
 .action {
-  color: var(--ink);
-  border-bottom: 1px solid var(--rule);
-  padding: 0 0 1px;
+  min-height: 36px;
+  color: var(--body);
+  text-decoration: underline;
+  text-decoration-color: var(--rule);
+  text-underline-offset: 4px;
   white-space: nowrap;
 }
-.action:hover { border-color: var(--muted); }
+.action:hover { color: var(--ink); text-decoration-color: var(--muted); }
+@media (pointer: coarse) { .action { min-height: 44px; } }
 .action:disabled, .action[aria-disabled='true'] { color: var(--muted); cursor: default; }
 .warnings { list-style: none; margin: 4px 0 0; padding: 0; }
 .warning {
@@ -59,3 +63,7 @@
   stroke: currentColor;
   vertical-align: -1px;
 }
+/* Level travels as shape and hue together: never hue alone, never a dot's size alone. */
+.glyph[data-kind='critical'], .glyph[data-kind='error'] { color: var(--stop); }
+.glyph[data-kind='warning'] { color: var(--attention); }
+.glyph[data-kind='info'] { color: var(--muted); }

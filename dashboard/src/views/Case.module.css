@@ -1,0 +1,240 @@
+/* A case file. The page is the case; exhibits sit on sheets along the case's own time spine;
+   proposals wait in the margin behind a dashed edge, which is the one outline that carries a
+   meaning here: not evidence yet. Everything else is grouped by space and surface. */
+
+.case { display: flex; flex-direction: column; gap: 34px; }
+.live { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+
+/* Header */
+.head { display: flex; flex-direction: column; gap: 14px; max-width: 820px; }
+.kicker { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin: 0; font-size: 13.5px; color: var(--muted); }
+.stateOpen, .stateClosed { display: inline-flex; align-items: center; gap: 7px; font-weight: 600; color: var(--ink); }
+.stateOpen::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--phosphor); }
+.stateClosed::before { content: ''; width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid var(--muted); }
+.title { margin: 0; font-size: clamp(34px, 4.6vw, 52px); line-height: 1.04; font-weight: 400; overflow-wrap: anywhere; }
+.lede { max-width: 62ch; color: var(--body); }
+.closedNote { margin: 0; font: italic 400 18px/1.45 var(--font-title); color: var(--body); }
+.jump { align-self: flex-start; min-height: 44px; display: inline-flex; align-items: center; gap: 8px; color: var(--attention); font-size: 15px; text-underline-offset: 4px; }
+.jump::before { content: ''; width: 9px; height: 9px; border: 1.5px dashed currentColor; border-radius: 50%; }
+
+.rename { display: flex; flex-direction: column; gap: 8px; }
+.titleInput {
+  width: 100%;
+  font-size: clamp(28px, 4vw, 44px);
+  line-height: 1.1;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--sheet);
+  box-shadow: inset 0 0 0 1px var(--rule);
+}
+
+/* The person's own words: an editable field, so the one functional edge it carries is honest. */
+.notes { display: flex; flex-direction: column; gap: 6px; }
+.notesLabel { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; font-size: 14px; font-weight: 600; color: var(--ink); }
+.notesLabel span { font-weight: 400; font-size: 13px; color: var(--muted); }
+.notesText, .textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 84px;
+  padding: 12px 14px;
+  border: 0;
+  border-radius: 10px;
+  font: 400 16px/1.55 var(--font-text);
+  color: var(--ink);
+  background: var(--sheet);
+  box-shadow: inset 0 0 0 1px var(--rule);
+}
+.notesText:focus, .textarea:focus { outline: 2px solid var(--phosphor); outline-offset: 1px; }
+.textarea { min-height: 64px; }
+.notesText { field-sizing: content; max-height: 40vh; }
+
+.actions { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 10px; }
+.row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.closeForm, .declineForm { display: flex; flex-direction: column; gap: 8px; max-width: 560px; }
+.problem { margin: 0; color: var(--body); font-size: 14px; }
+
+.primary, .secondary, .quietButton, .go {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  border-radius: 8px;
+  font: 500 14.5px/1.2 var(--font-text);
+  cursor: pointer;
+  list-style: none;
+}
+.primary::-webkit-details-marker, .secondary::-webkit-details-marker { display: none; }
+.primary { padding: 0 18px; background: var(--ink); color: var(--field); }
+.primary:disabled { opacity: 0.45; cursor: default; }
+.secondary { padding: 0 16px; color: var(--ink); box-shadow: inset 0 0 0 1px var(--rule); }
+.secondary:hover { box-shadow: inset 0 0 0 1px var(--muted); }
+.secondary:disabled { color: var(--muted); cursor: default; }
+.quietButton, .go { padding: 0; justify-content: flex-start; font-weight: 400; color: var(--body); text-decoration: underline; text-decoration-color: var(--rule); text-underline-offset: 4px; }
+.quietButton:hover, .go:hover { color: var(--ink); text-decoration-color: var(--muted); }
+.go { font-size: 14px; white-space: nowrap; }
+
+.addEvidence, .handoff { max-width: 100%; }
+.addEvidence[open] > summary, .handoff[open] > summary { box-shadow: inset 0 0 0 2px var(--phosphor); }
+.lensPanel, .handoffPanel {
+  margin-top: 8px;
+  width: min(520px, calc(100vw - 2 * var(--gutter)));
+  padding: 14px;
+  border-radius: 12px;
+  background: var(--sheet);
+  box-shadow: inset 0 0 0 1px var(--rule), var(--shadow);
+}
+.handoffPanel { width: min(720px, calc(100vw - 2 * var(--gutter))); display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
+.lensNote { margin: 0 0 8px; font-size: 14px; color: var(--body); }
+.lensList { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: minmax(0, 1fr); }
+.lens { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; width: 100%; min-height: 44px; padding: 8px 10px; border-radius: 8px; text-align: left; color: var(--ink); font-weight: 500; }
+.lens:hover { background: var(--rule-soft); }
+.lensOffers { font-weight: 400; font-size: 13.5px; color: var(--muted); }
+.handoffText { width: 100%; max-height: 360px; overflow: auto; margin: 0; padding: 12px; border-radius: 8px; background: var(--inspection-well); color: var(--body); white-space: pre-wrap; font-size: 12.5px; }
+
+/* The two columns: the case's evidence, and the margin. */
+.grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 36px; align-items: start; }
+.h2 { margin: 0 0 16px; font: 500 22px/1.2 var(--font-title); color: var(--ink); }
+.h3 { margin: 14px 0 6px; font: 600 13.5px/1.3 var(--font-text); color: var(--body); }
+.quiet { margin: 0; color: var(--muted); font-size: 14.5px; }
+
+/* The timeline: a spine with the day on it; the gap between two moments said in words. */
+.timeline { position: relative; margin: 0; padding: 0 0 0 26px; list-style: none; }
+.timeline::before { content: ''; position: absolute; left: 6px; top: 8px; bottom: 8px; width: 2px; border-radius: 1px; background: var(--rule); }
+.entry { position: relative; padding-bottom: 16px; }
+.day { position: relative; margin: 6px 0 10px; font: 600 14.5px/1.3 var(--font-text); color: var(--ink); }
+.day span { font-weight: 400; color: var(--muted); }
+.timeline .day::before { content: ''; position: absolute; left: -26px; top: 3px; width: 14px; height: 14px; border-radius: 50%; background: var(--field); box-shadow: inset 0 0 0 2px var(--ink); }
+.gap { margin: -4px 0 10px; font-size: 13px; font-style: italic; color: var(--muted); }
+.at { display: flex; align-items: baseline; gap: 8px; margin: 0 0 6px; font-size: 13px; color: var(--ink); }
+.atWord { font: 400 12.5px var(--font-text); color: var(--muted); }
+.tagMissing { padding: 0 6px; border-radius: 4px; color: var(--ink); }
+.consequence { margin: 4px 0 8px; font-size: 13.5px; color: var(--body); }
+
+.exhibit {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px 20px 14px;
+  border-radius: 12px;
+  background: var(--sheet);
+  box-shadow: var(--shadow);
+  outline-offset: 3px;
+}
+.timeline .exhibit::before { content: ''; position: absolute; left: -24px; top: 24px; width: 10px; height: 10px; border-radius: 50%; background: var(--muted); }
+.exhibitClaim { background: var(--margin); box-shadow: inset 0 0 0 1px var(--rule-soft); margin-left: 18px; }
+.timeline .exhibitClaim::before { left: -42px; background: var(--field); box-shadow: inset 0 0 0 1.5px var(--muted); }
+
+/* The exhibit tag: a paper tag with a punched hole, naming the reading, its class and when it was taken. */
+.tag {
+  align-self: flex-start;
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  max-width: 100%;
+  margin: 0;
+  padding: 4px 12px 4px 8px;
+  border-radius: 4px 999px 999px 4px;
+  background: var(--tag);
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.tag .readout { font-size: 12px; color: var(--body); }
+.tagHole { width: 7px; height: 7px; border-radius: 50%; background: var(--sheet); box-shadow: inset 0 0 0 1px var(--rule); flex: none; }
+.tagN { font-weight: 600; color: var(--ink); }
+
+.exhibitTitle { display: flex; align-items: baseline; gap: 10px; margin: 0; font: 600 17.5px/1.35 var(--font-text); color: var(--ink); overflow-wrap: anywhere; }
+.stopMark { flex: none; width: 10px; height: 10px; background: var(--stop); transform: translateY(-1px) rotate(45deg); border-radius: 1px; }
+.exhibitClaimText { margin: 0; font: italic 400 19px/1.45 var(--font-title); color: var(--ink); }
+.exhibitClaimText::before { content: '“'; }
+.exhibitClaimText::after { content: '”'; }
+.claimNote { margin: 0; font-size: 13.5px; color: var(--muted); }
+
+.facts { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; margin: 0; }
+.fact { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; }
+.fact dt { font-size: 13px; color: var(--muted); }
+.fact dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.exact { font-size: 13.5px; color: var(--ink); }
+.prose { font-size: 15px; color: var(--body); }
+.absent { font-size: 14.5px; font-style: italic; color: var(--muted); }
+
+.exhibitFoot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0 16px; padding-top: 2px; }
+.route { font-size: 13px; color: var(--muted); }
+
+.cites { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 2px; }
+.cite { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 12px; align-items: center; padding: 6px 0; }
+.cite + .cite { box-shadow: 0 -1px 0 var(--rule-soft); }
+.citeLabel { grid-column: 1; font-size: 14.5px; color: var(--ink); }
+.citeRef { grid-column: 1; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.cite .go { grid-column: 2; grid-row: 1 / span 2; }
+
+/* Accepted: one settle, then stillness. Reduced Motion removes the motion, focus and the announcement remain. */
+.settled { animation: settle 1.6s ease-out 1; }
+@keyframes settle {
+  0% { box-shadow: 0 0 0 3px var(--phosphor), var(--shadow); background: color-mix(in srgb, var(--phosphor) 14%, var(--sheet)); transform: translateY(-6px); }
+  30% { transform: none; }
+  100% { box-shadow: var(--shadow); background: var(--sheet); }
+}
+
+/* The margin: a change of surface where what is not yet evidence waits. */
+.margin { display: flex; flex-direction: column; gap: 30px; padding: 20px; border-radius: 16px; background: var(--margin); }
+.proposal {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 16px;
+  border: 1.5px dashed var(--proposal-edge);
+  border-radius: 12px;
+}
+.proposal + .proposal { margin-top: 14px; }
+.proposalRoute { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 13px; color: var(--muted); }
+.pendingMark { width: 9px; height: 9px; border: 1.5px dashed var(--attention); border-radius: 50%; flex: none; }
+.proposalClaim { margin: 4px 0 0; font: italic 400 18px/1.45 var(--font-title); color: var(--ink); }
+.proposalClaim::before { content: '“'; }
+.proposalClaim::after { content: '”'; }
+
+.reads { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
+.read { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; font-size: 14px; }
+.read > .readout { color: var(--ink); }
+.readOk { color: var(--body); }
+.readMissing { padding: 0 6px; border-radius: 4px; color: var(--ink); box-shadow: inset 0 0 0 1px var(--unobserved); }
+.readWhen { color: var(--muted); font-size: 13px; }
+.inputs { flex-basis: 100%; font-size: 13px; color: var(--muted); }
+.inputs .readout { font-size: 12px; color: var(--body); }
+.warnWord { color: var(--attention); }
+.provenance { margin: 10px 0 0; font-size: 13px; color: var(--muted); }
+
+.check { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.checks { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; font-size: 13.5px; }
+.checks li { display: flex; flex-wrap: wrap; gap: 2px 8px; }
+.checkWord { font-weight: 600; }
+.checkDetail { flex-basis: 100%; color: var(--muted); font-size: 12.5px; }
+.check_found .checkWord { color: var(--phosphor); }
+.check_missing .checkWord { color: var(--stop); }
+.check_unobserved .checkWord, .check_unchecked .checkWord, .check_checking .checkWord { color: var(--muted); }
+
+.record { display: flex; flex-direction: column; gap: 4px; }
+.ledger { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; }
+.ledgerEntry { display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 0 10px; padding: 7px 0; font-size: 14px; }
+.ledgerEntry + .ledgerEntry { box-shadow: 0 -1px 0 var(--rule-soft); }
+.ledgerWhat { color: var(--body); }
+.ledgerWhen { grid-column: 2; font-size: 12.5px; color: var(--muted); }
+.routeApi, .routeDashboard { grid-row: 1 / span 2; align-self: start; justify-self: start; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 500; }
+.routeDashboard { background: var(--surface-raised); color: var(--ink); box-shadow: inset 0 0 0 1px var(--rule); }
+.routeApi { color: var(--ink); border: 1.5px dashed var(--proposal-edge); }
+.declined { margin-top: 8px; }
+.declined summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; font-size: 14px; color: var(--body); }
+.declinedItem { padding: 8px 0 12px; }
+.declinedClaim { margin: 0; font: italic 400 16px/1.45 var(--font-title); color: var(--muted); text-decoration: line-through; text-decoration-color: var(--rule); }
+.declinedReason { margin: 6px 0 0; font-size: 14px; color: var(--body); }
+
+@media (min-width: 700px) {
+  .fact { grid-template-columns: 200px minmax(0, 1fr); gap: 16px; }
+  .lensList { grid-template-columns: 1fr 1fr; }
+}
+@media (min-width: 1180px) {
+  .grid { grid-template-columns: minmax(0, 1fr) 400px; gap: 40px; }
+  .margin { position: sticky; top: 24px; max-height: calc(100dvh - 48px); overflow-y: auto; }
+}

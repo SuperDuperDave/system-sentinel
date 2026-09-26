@@ -1,10 +1,13 @@
 import { create } from 'zustand';
 import type { Reading } from './api';
 
-export type ViewId = 'record' | 'errors' | 'crashes' | 'machine' | 'performance' | 'space' | 'diagnostics' | 'signals' | 'stack' | 'agents';
+export type ViewId = 'home' | 'case' | 'record' | 'errors' | 'crashes' | 'machine' | 'performance' | 'space' | 'diagnostics' | 'signals' | 'stack' | 'agents';
 
-/** The views, in the order the nav shows them. The studio page copies these names; change them there too. */
-export type ViewGroup = 'Evidence' | 'Interpret' | 'Carry';
+/**
+ * Direction C's rail: home and the case sit above the readings, which become lenses a case adds
+ * evidence through. The studio page copies these names; change them there too.
+ */
+export type ViewGroup = 'Cases' | 'Readings' | 'Agent';
 
 interface PerformanceViewState {
   hours: number;
@@ -69,26 +72,33 @@ export interface SpaceViewState { levels: SpaceLevel[]; mode: SpaceMode }
 const INITIAL_SPACE_VIEW: SpaceViewState = { levels: [], mode: 'tiles' };
 
 export const VIEWS: { id: ViewId; label: string; group: ViewGroup }[] = [
-  { id: 'record', label: 'Record', group: 'Evidence' },
-  { id: 'errors', label: 'Hardware errors', group: 'Evidence' },
-  { id: 'crashes', label: 'Crashes', group: 'Evidence' },
-  { id: 'machine', label: 'Machine', group: 'Evidence' },
-  { id: 'performance', label: 'Performance', group: 'Evidence' },
-  { id: 'space', label: 'Space', group: 'Evidence' },
-  { id: 'diagnostics', label: 'Diagnostics', group: 'Interpret' },
-  { id: 'signals', label: 'Signals', group: 'Interpret' },
-  { id: 'stack', label: 'Stack', group: 'Carry' },
-  { id: 'agents', label: 'Agents', group: 'Carry' },
+  { id: 'home', label: 'Home', group: 'Cases' },
+  { id: 'case', label: 'Case', group: 'Cases' },
+  { id: 'crashes', label: 'Crashes', group: 'Readings' },
+  { id: 'record', label: 'System log', group: 'Readings' },
+  { id: 'errors', label: 'Hardware errors', group: 'Readings' },
+  { id: 'signals', label: 'Leads', group: 'Readings' },
+  { id: 'machine', label: 'Machine', group: 'Readings' },
+  { id: 'performance', label: 'Performance', group: 'Readings' },
+  { id: 'space', label: 'Space', group: 'Readings' },
+  { id: 'diagnostics', label: 'Diagnostics', group: 'Readings' },
+  { id: 'agents', label: 'Connect an agent', group: 'Agent' },
+  { id: 'stack', label: 'Stack (before cases)', group: 'Agent' },
 ];
 
+const CASE_ID = /^[A-Za-z0-9_-]{1,64}$/;
+
 /** The address carries the visible view and a held investigation moment, never a credential. */
-function navigationFromAddress(): { view: ViewId; moment: string | null } {
+function navigationFromAddress(): { view: ViewId; moment: string | null; caseId: string | null } {
   const query = new URLSearchParams(window.location.search);
   const requested = query.get('view');
-  const view = VIEWS.find((item) => item.id === requested)?.id ?? 'record';
+  const asked = query.get('case');
+  const caseId = asked && CASE_ID.test(asked) ? asked : null;
+  const named = VIEWS.find((item) => item.id === requested)?.id ?? 'home';
+  const view = named === 'case' && !caseId ? 'home' : named;
   const candidate = query.get('moment');
   const moment = candidate && candidate.length <= 64 && /^\d{4}-\d{2}-\d{2}T/.test(candidate) ? qualifiedMoment(candidate) : null;
-  return { view, moment };
+  return { view, moment, caseId };
 }
 
 function qualifiedMoment(value: string): string | null {
@@ -102,8 +112,11 @@ function qualifiedMoment(value: string): string | null {
 
 function writeAddress(view: ViewId, moment: string | null, state: object | null = null) {
   const url = new URL(window.location.href);
-  if (view === 'record') url.searchParams.delete('view');
+  if (view === 'home') url.searchParams.delete('view');
   else url.searchParams.set('view', view);
+  const caseId = useApp.getState().caseId;
+  if (caseId) url.searchParams.set('case', caseId);
+  else url.searchParams.delete('case');
   if (moment) url.searchParams.set('moment', moment);
   else url.searchParams.delete('moment');
   url.hash = '';
@@ -116,6 +129,22 @@ interface AppState {
   setSession: (s: AppState['session']) => void;
   view: ViewId;
   setView: (v: ViewId) => void;
+  /**
+   * The case being worked. It stays in the address while the person goes to a reading for more
+   * evidence, so every lens knows where "Add" puts things and a reload keeps the thread.
+   */
+  caseId: string | null;
+  /** The held case's title, as its last answer named it, for the bar and the add control. */
+  caseTitle: string | null;
+  /** Hold a case without leaving this view: adding to a case from a lens makes it the one in hand. */
+  holdCase: (id: string, title: string) => void;
+  /** Open a case, or with null set the current one down and go home. */
+  openCase: (id: string | null) => void;
+  /** Keep working in this view but stop adding to the case. */
+  releaseCase: () => void;
+  /** Bumped after any case changes, so the rail, home and the case read the server again. */
+  casesVersion: number;
+  bumpCases: () => void;
   /** The last viewport position of each view in this tab, captured before navigation unmounts it. */
   viewScroll: Partial<Record<ViewId, number>>;
   /**
@@ -155,6 +184,24 @@ export const useApp = create<AppState>((set, get) => ({
   session: 'unknown',
   setSession: (session) => set({ session }),
   view: initial.view,
+  caseId: initial.caseId,
+  caseTitle: null,
+  holdCase: (id, title) => {
+    const changed = id !== get().caseId;
+    set({ caseId: id, caseTitle: title });
+    if (changed) writeAddress(get().view, get().moment);
+  },
+  openCase: (id) => {
+    const view: ViewId = id ? 'case' : 'home';
+    set((state) => ({ caseId: id, caseTitle: id === state.caseId ? state.caseTitle : null, view, viewScroll: { ...state.viewScroll, [state.view]: window.scrollY } }));
+    writeAddress(view, get().moment);
+  },
+  casesVersion: 0,
+  bumpCases: () => set((state) => ({ casesVersion: state.casesVersion + 1 })),
+  releaseCase: () => {
+    set({ caseId: null, caseTitle: null });
+    writeAddress(get().view, get().moment);
+  },
   viewScroll: {},
   setView: (view) => {
     if (view === get().view) return;

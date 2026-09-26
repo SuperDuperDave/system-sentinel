@@ -1,5 +1,5 @@
 import { CSSProperties, KeyboardEvent, PointerEvent, ReactNode, RefObject, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { AddToStack } from '../AddToStack';
+import { AddEvidence } from '../AddEvidence';
 import { Unauthorized, observed, take, type Cls, type Reading } from '../api';
 import { OutcomeLine, clock } from '../Outcome';
 import { Facts, Head, SectionHead, Segmented, Tree, basisOf, part, size } from '../Sections';
@@ -251,7 +251,7 @@ export function Space() {
           <WalkPath levels={levels} onGo={goTo} />
           <div className={styles.outcome}>
             <OutcomeLine taken={levelTaken(level, params, rescan)} noun="rows" singular="row" emptyText="Nothing in this folder" />
-            {level.reading ? <AddToStack item={{ kind: 'reading', envelope: level.reading }} label="Stack this walk (with folder names)" /> : null}
+            {level.reading ? <AddEvidence item={{ kind: 'reading', envelope: level.reading }} label="Stack this walk (with folder names)" /> : null}
           </div>
           {depth > 0 ? <Separate level={level} parent={levels[depth - 1]} /> : null}
           {!level.reading && !level.asking && !level.failure && !level.problem ? (

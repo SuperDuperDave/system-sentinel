@@ -1,5 +1,5 @@
 import { Fragment, Ref, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { AddToStack } from '../AddToStack';
+import { AddEvidence } from '../AddEvidence';
 import { EventRecord, Reading, type RecordId, observed, section } from '../api';
 import { clock, Glyph, OutcomeLine, firstLine } from '../Outcome';
 import { Segmented, byDay, day, part } from '../Sections';
@@ -69,7 +69,7 @@ function Log() {
   return (
     <section>
       <div className={styles.head}>
-        <h1 className={`${styles.title} display`}>Record</h1>
+        <h1 className={`${styles.title} display`}>System log</h1>
         <button className={styles.filterToggle} onClick={() => setFiltersOpen((open) => !open)} aria-expanded={filtersOpen} aria-controls="record-controls">
           <span className="readout">Window</span>
           <span className={styles.filterValue}>{levels === 'errors' ? 'Critical and error' : 'Every level'} · {boot ? `This Windows session · up to ${BOOT_COUNT}` : `Last ${count}`}</span>
@@ -98,9 +98,9 @@ function Log() {
               goes rather than sitting there meaning nothing, and returns with the value it had. */}
           {boot ? null : <Segmented value={count} onChange={setCount} options={COUNTS.map((c) => ({ value: c, label: `last ${c}` }))} label="How many" />}
         </div>
-        {taken.reading ? <AddToStack item={{ kind: 'reading', envelope: taken.reading }} label="Stack this reading" /> : null}
+        {taken.reading ? <AddEvidence item={{ kind: 'reading', envelope: taken.reading }} label="Stack this reading" /> : null}
       </div>
-      <p className={styles.intro}>What did Windows record? Browse System log entries by time and source. Open a row for its full message, raw fields and the records before it. An entry alone does not establish a cause.</p>
+      <p className={styles.intro}><strong>What did Windows record?</strong> Entries by time and source. Open a row for its full message, raw fields and the records before it; add it to a case from there. An entry alone does not establish a cause.</p>
       <OutcomeLine
         taken={taken}
         noun={boot ? 'records since the reported Windows session start' : 'records'}
@@ -145,7 +145,7 @@ function Frame({ moment }: { moment: string }) {
             Back to the log
           </button>
           {before.held ? (
-            <AddToStack item={{ kind: 'reading', envelope: before.held, title: `The record before ${moment}` }} label="Stack this reading" />
+            <AddEvidence item={{ kind: 'reading', envelope: before.held, title: `The record before ${moment}` }} label="Stack this reading" />
           ) : null}
         </div>
       </div>
@@ -202,7 +202,7 @@ function After({ moment }: { moment: string }) {
     <div className={styles.momentMarker}><span className="readout">Selected moment · {moment}</span></div>
     <div className={styles.afterHead}>
       <div><p className="label">The System log · every level</p><h2 id="record-after-title" tabIndex={-1} className="display">At or after this moment</h2></div>
-      {held && observed(held) ? <AddToStack item={{ kind: 'reading', envelope: held, title: `The record at or after ${moment}` }} label={stale ? 'Stack this held reading' : 'Stack this reading'} /> : null}
+      {held && observed(held) ? <AddEvidence item={{ kind: 'reading', envelope: held, title: `The record at or after ${moment}` }} label={stale ? 'Stack this held reading' : 'Stack this reading'} /> : null}
     </div>
     <p className={styles.afterIntro}>The first returned System records timestamped from this instant. A restart can write its own record here. Clock changes can move records across this boundary. A nearby record is a lead to inspect, not proof of a cause.</p>
     <OutcomeLine taken={taken} noun="records" singular="record" emptyText="No retained System records returned at or after this moment" />
@@ -287,7 +287,7 @@ function FaultSide({ moment, since, before, order, asked }: {
     {stale ? <p className={`${styles.nearbyReach} readout`} role="status">Showing the reading taken at {clock.format(new Date(shown.asked_at))}; {taken.state === 'taking' ? 'another take is in progress.' : 'the last completed take did not observe the machine.'}</p> : null}
     {stale && shown.warnings.length ? <ul className={`${styles.nearbyWarnings} readout`} aria-label="Limits of the held reading">{shown.warnings.map((warning, index) => <li key={index}>{firstLine(warning)}</li>)}</ul> : null}
     {reach ? <p className={`${styles.nearbyReach} readout`}>{nearbyReachText(reach, source, before, 'Application log')}{futureEnd ? ` · requested end is after the machine's query time` : ''}</p> : null}
-    {shown && observed(shown) ? <AddToStack item={{ kind: 'reading', envelope: shown, title: `Fault reports ${earlier ? 'before' : 'at or after'} ${moment}` }} label={stale ? 'Stack this held reading' : 'Stack this reading'} /> : null}
+    {shown && observed(shown) ? <AddEvidence item={{ kind: 'reading', envelope: shown, title: `Fault reports ${earlier ? 'before' : 'at or after'} ${moment}` }} label={stale ? 'Stack this held reading' : 'Stack this reading'} /> : null}
     {placed.length ? <>
       <p className={`${styles.nearbyCount} readout`}>{decoded.length} interpreted {decoded.length === 1 ? 'fault' : 'faults'} from {raw.length} returned {raw.length === 1 ? 'record' : 'records'}. A live kernel report can span several records.</p>
       <ol className={styles.nearbyList}>{placed.slice(0, limit).map((fault) => {
@@ -376,7 +376,7 @@ function KernelReportSide({ moment, since, before, order, asked }: {
       emptyText={`No Kernel-WHEA report returned ${earlier ? 'before' : 'at or after'} this moment in the queried channel window`} />
     {stale ? <p className={`${styles.nearbyReach} readout`} role="status">Showing the reading taken at {clock.format(new Date(shown.asked_at))}; {taken.state === 'taking' ? 'another take is in progress.' : 'the last completed take did not observe the machine.'}</p> : null}
     {answered && bounds ? <p className={`${styles.nearbyReach} readout`}>{reachText} · queried {bounds}{futureEnd ? ' · requested end is after the machine’s query time' : ''}</p> : null}
-    {shown && observed(shown) ? <AddToStack item={{ kind: 'reading', envelope: shown, title: `Kernel-WHEA reports ${earlier ? 'before' : 'at or after'} ${moment}` }} label={stale ? 'Stack this held reading' : 'Stack this reading'} /> : null}
+    {shown && observed(shown) ? <AddEvidence item={{ kind: 'reading', envelope: shown, title: `Kernel-WHEA reports ${earlier ? 'before' : 'at or after'} ${moment}` }} label={stale ? 'Stack this held reading' : 'Stack this reading'} /> : null}
     {shown && observed(shown) && reports.length ? <KernelReports
       reading={shown} reports={reports} range={null} source={collection ?? null} reach={reach}
       inspect={(report) => <ReportDetail report={report} showMomentLink={false} />}
@@ -525,7 +525,7 @@ function Inspect({ record, reading }: { record: EventRecord; reading: Reading<Ev
       </details>
       <div className={styles.actions}>
         <button className={styles.action} onClick={() => setBefore((v) => !v)} aria-expanded={before}>{before ? 'Hide the record before this' : 'The record before this'}</button>
-        <AddToStack item={{ kind: 'selection', envelope: reading, ids: [record.RecordId] }} label="Stack this record" />
+        <AddEvidence item={{ kind: 'selection', envelope: reading, ids: [record.RecordId] }} label="Stack this record" />
       </div>
       {before ? <Before moment={record.TimeCreated} /> : null}
     </div>

@@ -5,6 +5,8 @@ export function NavIcon({ name }: { name: ViewId | 'device' }) {
   const shared = { fill: 'none', stroke: 'currentColor', strokeWidth: 1.5, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const };
   return (
     <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true" focusable="false" {...shared}>
+      {name === 'home' && <><path d="M3.5 9 10 3.5 16.5 9v7.5h-13z" /><path d="M8 16.5v-4h4v4" /></>}
+      {name === 'case' && <><path d="M2.5 5.5h5l1.5 2h8.5v9h-15z" /><path d="M6 11h8M6 13.5h5" /></>}
       {name === 'record' && <><path d="M3 4.5h14M3 8h9M3 11.5h14M3 15h7" /><circle cx="15" cy="15" r="1" fill="currentColor" stroke="none" /></>}
       {name === 'errors' && <><path d="M6 3.5h8l2.5 2.5v8L14 16.5H6L3.5 14V6z" /><path d="M7 10h2l1-2 1.5 4 1-2H14" /></>}
       {name === 'crashes' && <><path d="M10 2.5v3M10 14.5v3M2.5 10h3M14.5 10h3" /><path d="M7 6.5 13 13.5M13 6.5 7 13.5" /></>}

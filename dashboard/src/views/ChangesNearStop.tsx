@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { AddToStack } from '../AddToStack';
+import { AddEvidence } from '../AddEvidence';
 import { Reading, observed } from '../api';
 import { OutcomeLine } from '../Outcome';
 import { duration, part, useKeepButtonInPlace } from '../Sections';
@@ -105,7 +105,7 @@ function ChangeEvidence({ before }: { before: string }) {
       })}</ol>
     </> : null}
     {reading ? <div className={styles.actions}>
-      <AddToStack item={{ kind: 'reading', envelope: reading, title: 'Changes before an estimated stop' }} label="Stack this change history" />
+      <AddEvidence item={{ kind: 'reading', envelope: reading, title: 'Changes before an estimated stop' }} label="Stack this change history" />
       <FullReading reading={reading} />
     </div> : null}
   </div>;

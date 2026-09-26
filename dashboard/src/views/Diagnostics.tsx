@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { AddToStack } from '../AddToStack';
+import { AddEvidence } from '../AddEvidence';
 import { observed, type RecordId, type Section as SectionData } from '../api';
 import { OutcomeLine, firstLine, clock } from '../Outcome';
 import { Head, RowList, Section, Tree, part } from '../Sections';
@@ -46,7 +46,7 @@ function Panel({ name, title, what }: { name: string; title: string; what: strin
       <div className={styles.panelHead}>
         <h2 className={`${styles.panelTitle} display`} id={`panel-${name}`}>{title}</h2>
         <span className={`${styles.reading} readout`}>{name}</span>
-        {taken.reading ? <AddToStack item={{ kind: 'reading', envelope: taken.reading }} label="Stack this reading" /> : null}
+        {taken.reading ? <AddEvidence item={{ kind: 'reading', envelope: taken.reading }} label="Stack this reading" /> : null}
       </div>
       <p className={styles.what}>{what}</p>
       {asked ? <OutcomeLine taken={taken} noun={nounFor(name, taken.reading?.count ?? null)} emptyText={emptyFor(name)} /> : (

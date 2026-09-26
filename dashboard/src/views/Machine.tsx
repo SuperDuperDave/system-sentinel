@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Reading, observed } from '../api';
-import { AddToStack } from '../AddToStack';
+import { AddEvidence } from '../AddEvidence';
 import { OutcomeLine } from '../Outcome';
 import { Facts, Head, RowList, Section, Tree, Value, basisOf, byDay, duration, part } from '../Sections';
 import { useReading } from '../useReading';
@@ -84,7 +84,7 @@ export function Machine() {
         <Section
           title="What the machine is doing now"
           cls="raw"
-          controls={system.reading ? <AddToStack item={{ kind: 'reading', envelope: system.reading, title: 'System snapshot' }} /> : null}
+          controls={system.reading ? <AddEvidence item={{ kind: 'reading', envelope: system.reading, title: 'System snapshot' }} /> : null}
         >
           <Facts
             rows={[
@@ -113,7 +113,7 @@ export function Machine() {
             cls="derived"
             basis={basisOf(hardware.reading, 'fingerprint')}
             note="selected parts and versions at this reading"
-            controls={hardware.reading ? <AddToStack item={{ kind: 'reading', envelope: hardware.reading, title: 'Hardware fingerprint and configuration' }} /> : null}
+            controls={hardware.reading ? <AddEvidence item={{ kind: 'reading', envelope: hardware.reading, title: 'Hardware fingerprint and configuration' }} /> : null}
           >
             {fingerprint ? (
               <Facts
@@ -171,7 +171,7 @@ export function Machine() {
             title="Most recently dated first"
             cls="raw"
             note="This is each driver's authored date, not when Windows installed it on this machine."
-            controls={drivers.reading ? <AddToStack item={{ kind: 'reading', envelope: drivers.reading, title: 'Current signed drivers' }} /> : null}
+            controls={drivers.reading ? <AddEvidence item={{ kind: 'reading', envelope: drivers.reading, title: 'Current signed drivers' }} /> : null}
           />
           {byDay(driverRows, (d) => local(d.driver_date)).map(([label, rows]) => (
             <div key={label}>
@@ -249,7 +249,7 @@ function Payload({ reading, title }: { reading: Reading | null; title: string })
           title={s.name === s.class ? undefined : s.name}
           cls={s.class}
           basis={s.basis}
-          controls={i === 0 ? <AddToStack item={{ kind: 'reading', envelope: reading, title }} /> : null}
+          controls={i === 0 ? <AddEvidence item={{ kind: 'reading', envelope: reading, title }} /> : null}
         >
           <Tree value={s.data} />
         </Section>

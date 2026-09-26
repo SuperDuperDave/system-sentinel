@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { EventRecord, Reading, type RecordId, observed } from '../api';
-import { AddToStack } from '../AddToStack';
+import { AddEvidence } from '../AddEvidence';
 import { Glyph, OutcomeLine, clock, firstLine } from '../Outcome';
 import { Facts, Head, MomentLink, RowList, Section, Segmented, Tree, Value, ago, basisOf, part, shortDay } from '../Sections';
 import { useApp } from '../store';
@@ -229,7 +229,7 @@ export function Errors() {
           title="System report traffic"
           cls="inferred"
           basis={basisOf(storms.reading, 'status')}
-          controls={storms.reading ? <AddToStack item={{ kind: 'reading', envelope: storms.reading, title: `Hardware error storms, ${windowLabel}` }} /> : null}
+          controls={storms.reading ? <AddEvidence item={{ kind: 'reading', envelope: storms.reading, title: `Hardware error storms, ${windowLabel}` }} /> : null}
         >
           <p className={styles.status}>
             <span className={`${styles.state} readout`}>{status.state}</span>
@@ -298,7 +298,7 @@ export function Errors() {
           title="Kernel-WHEA reports"
           cls="derived"
           basis={basisOf(reports.reading, 'buckets')}
-          controls={reports.reading ? <AddToStack item={{ kind: 'reading', envelope: reports.reading, title: `Kernel-WHEA reports, ${windowLabel}` }} /> : null}
+          controls={reports.reading ? <AddEvidence item={{ kind: 'reading', envelope: reports.reading, title: `Kernel-WHEA reports, ${windowLabel}` }} /> : null}
         >
           <OutcomeLine taken={reports} noun={reportCoverage?.complete ? 'Kernel-WHEA reports' : 'returned Kernel-WHEA reports'} singular={reportCoverage?.complete ? 'Kernel-WHEA report' : 'returned Kernel-WHEA report'} emptyText={emptyReportText} />
           <p className={`${styles.windowNote} readout`}>This trace places reports when Windows wrote them. A CPER PreviousError flag means the hardware condition occurred in an earlier Windows session; a cluster here does not establish when those errors occurred.</p>
@@ -329,7 +329,7 @@ export function Errors() {
         controls={
           <>
             <Segmented value={count} onChange={setCount} options={COUNTS.map((c) => ({ value: c, label: `last ${c}` }))} label="How many records" />
-            {whea.reading ? <AddToStack item={{ kind: 'reading', envelope: whea.reading, title: `Hardware error records, last ${count}` }} /> : null}
+            {whea.reading ? <AddEvidence item={{ kind: 'reading', envelope: whea.reading, title: `Hardware error records, last ${count}` }} /> : null}
           </>
         }
       >
@@ -397,7 +397,7 @@ function KernelReportExplorer({ from, to, enabled, unplaced }: { from: string; t
     {stale ? <p className={`${styles.reportListStatus} readout`} role="status">Reading this interval; the previous previews remain visible until it answers.</p> : null}
     {unplaced > 0 ? <p className={`${styles.reportListStatus} readout`}>{unplaced} report{unplaced === 1 ? '' : 's'} in the broad answer had no readable filing time. Ask the API for whea_reports with references=true to see those references.</p> : null}
     {shown && rows.length ? <>
-      {!stale ? <AddToStack item={{ kind: 'reading', envelope: shown, title: `Kernel-WHEA previews ${from} to ${to}` }} label="Stack these previews" /> : null}
+      {!stale ? <AddEvidence item={{ kind: 'reading', envelope: shown, title: `Kernel-WHEA previews ${from} to ${to}` }} label="Stack these previews" /> : null}
       <KernelReports reading={shown} reports={rows} range={null} source={source} reach={reach}
         inspect={(report) => <ReportDetail report={report} />} />
     </> : null}
@@ -769,7 +769,7 @@ function RecordDetail({ record, identity, decoded, envelope, stackTitle, showMom
       <div className={styles.rowActions}>
         {showMomentLink ? <MomentLink at={record.TimeCreated} label={record.Log === KERNEL_WHEA ? 'System log before this report' : undefined} /> : null}
         {envelope ? (
-          <AddToStack item={{ kind: 'selection', envelope, ids: [recordRef(record)], title: stackTitle ?? `${record.Log === KERNEL_WHEA ? 'Kernel-WHEA' : 'System WHEA-Logger'} record ${record.RecordId}` }} label="Add this record to the stack" />
+          <AddEvidence item={{ kind: 'selection', envelope, ids: [recordRef(record)], title: stackTitle ?? `${record.Log === KERNEL_WHEA ? 'Kernel-WHEA' : 'System WHEA-Logger'} record ${record.RecordId}` }} label="Add this record to the stack" />
         ) : null}
       </div>
     </>

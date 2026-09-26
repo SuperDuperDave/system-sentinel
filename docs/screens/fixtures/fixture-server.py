@@ -565,6 +565,12 @@ def main() -> None:
 
     state = State(bridge=FixtureBridge())
     app = create_app(state, mcp=False)
+    # Interface direction C's draft case routes (cases_draft.py); off with SENTINEL_FIXTURE_CASES=0.
+    if os.environ.get("SENTINEL_FIXTURE_CASES", "1") != "0":
+        sys.path.insert(0, str(HERE))
+        import cases_draft
+
+        cases_draft.install(app)
 
     import uvicorn
 

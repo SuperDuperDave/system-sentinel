@@ -10,6 +10,7 @@
 // Either `playwright` or `playwright-core` on the module path works; CHROMIUM names a browser
 // executable when the package's own download is missing (a cached one under ~/.cache/ms-playwright).
 // Env: WIDTHS=1440,390  SCALE=1  FULL=1  MAX_FULL=6000 (px cap on a full-page shot's height).
+//      COLOR_SCHEME=dark|light (default dark, the product's own appearance)  SUFFIX=-light (file names).
 const fs = require('fs');
 const path = require('path');
 
@@ -25,6 +26,8 @@ const scale = Number(process.env.SCALE || 1);
 const full = process.env.FULL === '1';
 const maxFull = Number(process.env.MAX_FULL || 6000);
 const HEIGHT = { 1440: 900, 390: 844 };
+const colorScheme = process.env.COLOR_SCHEME || 'dark'; // 'light' for direction C's paper appearance
+const suffix = process.env.SUFFIX || '';
 
 async function settled(page, timeout = 60000) {
   await page.waitForLoadState('networkidle', { timeout }).catch(() => {});
@@ -96,6 +99,36 @@ const SHOTS = {
       await click(page, 'button:visible', 'Sign in another device');
     },
   },
+  // Interface direction C: home, a case, a proposal accepted, and a reading used as a lens.
+  home: { reach: view('home') },
+  case: { reach: async (page) => { await page.goto(`${base}/?view=case&case=case_sep12freeze`); await settled(page); } },
+  'case-review': {
+    reach: async (page) => {
+      await page.goto(`${base}/?view=case&case=case_sep12freeze`);
+      await settled(page);
+      await click(page, 'main button', 'Check the citations against a fresh reading');
+      await page.waitForTimeout(600);
+      const proposal = page.locator('#pr_same_bugcheck');
+      if (await proposal.count()) { await proposal.scrollIntoViewIfNeeded(); await page.evaluate(() => window.scrollBy(0, -24)); }
+    },
+  },
+  'case-accepted': {
+    reach: async (page) => {
+      await page.request.post(`${base}/api/cases/_fixture/reseed`);
+      await page.goto(`${base}/?view=case&case=case_sep12freeze`);
+      await settled(page);
+      await click(page, '#pr_same_bugcheck button', 'Accept into evidence');
+      await page.waitForTimeout(500);
+      await page.request.post(`${base}/api/cases/_fixture/reseed`);
+    },
+  },
+  'crashes-lens': {
+    reach: async (page) => {
+      await page.goto(`${base}/?view=crashes&case=case_sep12freeze`);
+      await settled(page);
+      if (await click(page, 'main button', 'Inspect exact stop')) await page.evaluate(() => window.scrollBy(0, 240));
+    },
+  },
   'space-lab': { reach: async (page) => { await page.goto(`${base}/space-atlas-lab/index.html`); await settled(page); } },
 };
 
@@ -122,8 +155,8 @@ async function signIn(context) {
   try {
     for (const width of widths) {
       const viewport = { width, height: HEIGHT[width] || 900 };
-      const signedOut = await browser.newContext({ viewport, deviceScaleFactor: scale, reducedMotion: 'reduce' });
-      const signedIn = await browser.newContext({ viewport, deviceScaleFactor: scale, reducedMotion: 'reduce' });
+      const signedOut = await browser.newContext({ viewport, deviceScaleFactor: scale, reducedMotion: 'reduce', colorScheme });
+      const signedIn = await browser.newContext({ viewport, deviceScaleFactor: scale, reducedMotion: 'reduce', colorScheme });
       let page = null;
       for (const name of names) {
         const shot = SHOTS[name];
@@ -131,12 +164,12 @@ async function signIn(context) {
         await shot.reach(tab);
         const sw = await tab.evaluate(() => document.documentElement.scrollWidth);
         const sh = await tab.evaluate(() => document.documentElement.scrollHeight);
-        const file = path.join(out, `${name}-${width}.png`);
+        const file = path.join(out, `${name}${suffix}-${width}.png`);
         await tab.screenshot({ path: file });
         let note = '';
         if (full) {
           const height = Math.min(sh, maxFull);
-          await tab.screenshot({ path: path.join(out, `${name}-${width}-full.png`), fullPage: true, clip: height === sh ? undefined : { x: 0, y: 0, width, height } });
+          await tab.screenshot({ path: path.join(out, `${name}${suffix}-${width}-full.png`), fullPage: true, clip: height === sh ? undefined : { x: 0, y: 0, width, height } });
           note = height < sh ? ` (full shot cut at ${height}px)` : '';
         }
         console.log(`${name} @${width}: scrollWidth=${sw} ${sw === width ? 'OK' : '!! OVERFLOW'} page height=${sh}${note}`);

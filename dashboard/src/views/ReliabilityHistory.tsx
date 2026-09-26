@@ -1,5 +1,5 @@
 import { observed } from '../api';
-import { AddToStack } from '../AddToStack';
+import { AddEvidence } from '../AddEvidence';
 import { OutcomeLine } from '../Outcome';
 import { Section, basisOf, part } from '../Sections';
 import { useReading } from '../useReading';
@@ -98,7 +98,7 @@ export function ReliabilityHistory() {
       cls="derived"
       basis={basisOf(taken.reading, 'days')}
       note="Last 30 days requested · UTC days · this is Windows' own account"
-      controls={taken.reading ? <AddToStack item={{ kind: 'reading', envelope: taken.reading, title: 'Windows reliability record, last 30 days' }} /> : null}
+      controls={taken.reading ? <AddEvidence item={{ kind: 'reading', envelope: taken.reading, title: 'Windows reliability record, last 30 days' }} /> : null}
     >
       <p className={styles.intro}>Windows keeps both fault reports and informational events here, including successful updates. The bars count all returned events; the selected day names each type. Its index is Windows' measure, not a cause finding.</p>
       <OutcomeLine taken={taken} noun={taken.reading?.count === null ? 'reliability history' : 'reliability events'} singular="reliability event" emptyText="Windows returned no reliability history for this window" />

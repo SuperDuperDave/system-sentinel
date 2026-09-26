@@ -194,3 +194,58 @@ def test_screen_fixture_answers_the_machine_and_process_readings_with_synthetic_
     bridge = fixture.FixtureBridge()
     for name in ("system", "hardware", "hardware.cpu", "hardware.gpu", "hardware.board", "hardware.storage", "hardware.network", "processes"):
         assert asyncio.run(take(name, bridge, {})).outcome == "ok", name
+
+
+def test_draft_case_routes_keep_proposals_out_of_evidence_until_accepted(tmp_path, monkeypatch):
+    """Interface direction C's draft case routes: auth applies, routes are recorded, a proposal
+    enters the evidence only when accepted, and a decline keeps its reason."""
+    from fastapi.testclient import TestClient
+
+    from sentinel.app import State, create_app
+
+    monkeypatch.setenv("SYSTEM_SENTINEL_HOME", str(tmp_path))
+    fixtures = Path(__file__).parents[1] / "docs" / "screens" / "fixtures"
+    spec = importlib.util.spec_from_file_location("sentinel_cases_draft", fixtures / "cases_draft.py")
+    assert spec and spec.loader
+    cases_draft = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cases_draft)
+    state = State(bridge=None)
+    app = create_app(state, mcp=False)
+    cases_draft.install(app)
+    client = TestClient(app)
+    agent = {"Authorization": f"Bearer {state.token}"}
+
+    assert client.get("/api/cases").status_code == 401
+    listed = client.get("/api/cases", headers=agent).json()["cases"]
+    assert [c["state"] for c in listed] == ["open", "closed"]
+    froze = client.get("/api/cases/case_sep12freeze", headers=agent).json()
+    before = len(froze["evidence"])
+
+    proposal = client.post("/api/cases/case_sep12freeze/proposals", headers=agent, json={
+        "claim": "A synthetic claim.", "cites": [{"label": "stop", "reading": "crash", "params": {"count": 5}, "ids": [1301], "moment": "2026-09-12T06:11:02.000Z"}],
+        "read": [{"reading": "crash", "params": {"count": 5}, "asked_at": "2026-09-26T00:00:00Z", "outcome": "ok"}],
+    })
+    assert proposal.status_code == 201 and proposal.json()["route"] == "api" and proposal.json()["state"] == "pending"
+    assert len(client.get("/api/cases/case_sep12freeze", headers=agent).json()["evidence"]) == before
+    assert client.post("/api/cases/case_sep12freeze/proposals", headers=agent, json={"claim": "uncited", "cites": []}).status_code == 422
+
+    session = TestClient(app)
+    assert session.post("/api/session", json={"token": state.token}).status_code == 200
+    accepted = session.post(f"/api/cases/case_sep12freeze/proposals/{proposal.json()['id']}/accept").json()
+    exhibit = accepted["evidence"][-1]
+    assert len(accepted["evidence"]) == before + 1
+    assert exhibit["classes"] == ["inferred"] and exhibit["kind"] == "claim" and exhibit["route"] == "dashboard"
+    assert exhibit["accepted_from"] == proposal.json()["id"] and exhibit["moment"] == "2026-09-12T06:11:02.000Z"
+    assert session.post(f"/api/cases/case_sep12freeze/proposals/{proposal.json()['id']}/decline").status_code == 409
+
+    pending = next(p for p in accepted["proposals"] if p["state"] == "pending")
+    declined = session.post(f"/api/cases/case_sep12freeze/proposals/{pending['id']}/decline", json={"reason": "not established"}).json()
+    assert next(p for p in declined["proposals"] if p["id"] == pending["id"])["decline_reason"] == "not established"
+    assert len(declined["evidence"]) == before + 1
+    assert declined["record"][-1] == {"at": declined["record"][-1]["at"], "route": "dashboard", "what": "Declined a proposal", "ref": pending["id"]}
+
+    item = {"kind": "selection", "title": "x", "reading": "crash", "params": {"count": 5}, "asked_at": "2026-09-26T00:00:00Z", "ids": [1295]}
+    assert session.post("/api/cases/case_sep12freeze/evidence", json=item).status_code == 201
+    assert session.post("/api/cases/case_sep12freeze/evidence", json=item).status_code == 409
+    assert "Declined" in session.get("/api/cases/case_sep12freeze/composed").json()["text"]
+    cases_draft.seed()

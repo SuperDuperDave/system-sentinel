@@ -138,14 +138,14 @@ export function SectionHead({
         {title ? <h2 className={styles.sectionTitle}>{title}</h2> : null}
         <details className={styles.classHelp}>
           <summary className={styles.classSummary}>
-            <span className={`${styles.cls} label`}>{cls}</span>
-            <span className={`${styles.classDescriptor} readout`}>{' · '}{CLASS_MEANING[cls].short}</span>
+            <span className="cls" data-cls={cls}>{cls}</span>
+            <span className={styles.classDescriptor}>{' · '}{CLASS_MEANING[cls].short}</span>
           </summary>
           <p className={styles.classDetail}>{CLASS_MEANING[cls].detail}</p>
         </details>
         {children ? <div className={styles.sectionControls}>{children}</div> : null}
       </div>
-      {note ? <p className={`${styles.note} readout`}>{note}</p> : null}
+      {note ? <p className={styles.note}>{note}</p> : null}
       {basis ? <Basis text={basis} /> : null}
     </div>
   );

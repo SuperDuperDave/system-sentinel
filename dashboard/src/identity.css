@@ -1,7 +1,11 @@
 /*
- * The identity, direction A, Instrument. Values are owned by
- * docs/design/IDENTITY-DIRECTIONS-2026-09-20.md; change them there first.
- * The phosphor is light only: the trace, the glow, one lit word. Text stays ink.
+ * The identity, interface direction C: the case file. Editorial rather than instrumental.
+ * Newsreader for what a person titles (cases, pages), DM Sans for prose and controls, mono only
+ * for citations and exact values. Two appearances: paper, and the dark green instrument field.
+ *
+ * The instrument's values are owned by docs/design/IDENTITY-DIRECTIONS-2026-09-20.md; the paper
+ * and the semantic tokens below are this direction's proposal (docs/design/2026-09-26-directions/C/).
+ * The phosphor stays light only: live, focus, and the one settle when evidence is accepted.
  */
 
 @font-face {
@@ -25,7 +29,16 @@
   font-display: swap;
   src: url(/fonts/dm-sans-latin.woff2) format('woff2');
 }
+/* Newsreader with its optical-size axis, so a 44 px case title is drawn as a display face. */
+@font-face {
+  font-family: 'Newsreader';
+  font-style: normal;
+  font-weight: 200 800;
+  font-display: swap;
+  src: url(/fonts/newsreader-latin.woff2) format('woff2-variations'), url(/fonts/newsreader-latin.woff2) format('woff2');
+}
 
+/* Dark: the instrument field, kept. */
 :root {
   --field: #0b1a16;
   --lit: #163429;
@@ -42,15 +55,51 @@
   --phosphor-deep: #1e8f5e;
   --graticule: #9cffc4;
 
+  /* The case file's surfaces: a sheet an exhibit sits on, and the margin proposals wait in. */
+  --sheet: #10231c;
+  --margin: #0e1f19;
+  --proposal-edge: rgba(234, 243, 238, 0.32);
+  --tag: #1a3128;
+  /* Semantic channel. Never hue alone: each travels with a word and a shape. */
+  --stop: #ff8f7a;
+  --attention: #ffb454;
+  --unobserved: rgba(234, 243, 238, 0.22);
+  --settle: rgba(111, 240, 168, 0.22);
+  --shadow: 0 1px 0 rgba(0, 0, 0, 0.25), 0 8px 24px -12px rgba(0, 0, 0, 0.6);
+
+  --font-title: 'Newsreader', 'Iowan Old Style', Georgia, Cambria, serif;
   --font-display: 'Azeret Mono', Menlo, Consolas, monospace;
   --font-readout: 'JetBrains Mono', Menlo, Consolas, monospace;
   --font-text: 'DM Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
 
   --gutter: 16px;
-  --rail: 208px;
-  --measure: 1120px;
+  --rail: 232px;
+  --measure: 1160px;
 
   color-scheme: dark;
+}
+
+/* Paper: warm, ruled only where a rule means something. Written twice because a CSS variable
+   block cannot be shared between a media query and an attribute selector. */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme='dark']) {
+    --field: #f3f0e7; --lit: #fbf9f3; --deep: #e9e4d6; --surface-raised: #fffdf8; --inspection-well: #ece7da;
+    --ink: #16201b; --body: #2c3731; --muted: #59655e; --rule: rgba(22, 32, 27, 0.16); --rule-soft: rgba(22, 32, 27, 0.08);
+    --phosphor-core: #0c5a36; --phosphor: #177a4b; --phosphor-deep: #177a4b; --graticule: #2b8a5c;
+    --sheet: #fffdf8; --margin: #ebe5d5; --proposal-edge: rgba(22, 32, 27, 0.38); --tag: #e6e0cf;
+    --stop: #b3261e; --attention: #8a5300; --unobserved: rgba(22, 32, 27, 0.2); --settle: rgba(23, 122, 75, 0.16);
+    --shadow: 0 1px 0 rgba(22, 32, 27, 0.06), 0 10px 24px -14px rgba(22, 32, 27, 0.35);
+    color-scheme: light;
+  }
+}
+:root[data-theme='light'] {
+  --field: #f3f0e7; --lit: #fbf9f3; --deep: #e9e4d6; --surface-raised: #fffdf8; --inspection-well: #ece7da;
+  --ink: #16201b; --body: #2c3731; --muted: #59655e; --rule: rgba(22, 32, 27, 0.16); --rule-soft: rgba(22, 32, 27, 0.08);
+  --phosphor-core: #0c5a36; --phosphor: #177a4b; --phosphor-deep: #177a4b; --graticule: #2b8a5c;
+  --sheet: #fffdf8; --margin: #ebe5d5; --proposal-edge: rgba(22, 32, 27, 0.38); --tag: #e6e0cf;
+  --stop: #b3261e; --attention: #8a5300; --unobserved: rgba(22, 32, 27, 0.2); --settle: rgba(23, 122, 75, 0.16);
+  --shadow: 0 1px 0 rgba(22, 32, 27, 0.06), 0 10px 24px -14px rgba(22, 32, 27, 0.35);
+  color-scheme: light;
 }
 
 * { box-sizing: border-box; }
@@ -60,7 +109,7 @@ html, body { margin: 0; min-height: 100%; }
 body {
   background: var(--field);
   color: var(--body);
-  font: 400 16px/1.5 var(--font-text);
+  font: 400 16px/1.55 var(--font-text);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
   overflow-x: hidden;
@@ -85,7 +134,7 @@ select:focus-visible, summary:focus-visible, [tabindex]:focus-visible {
   outline-offset: 2px;
 }
 
-/* Readouts: times, IDs, counts, providers. */
+/* Readouts: times, IDs, counts, providers. Exact values only. */
 .readout {
   font-family: var(--font-readout);
   font-size: 13px;
@@ -93,21 +142,50 @@ select:focus-visible, summary:focus-visible, [tabindex]:focus-visible {
   font-variant-numeric: tabular-nums;
 }
 
-/* A label above a group: muted, small, tracked. */
+/* A label above a group: sans, small, quiet. The case file speaks, it does not stamp. */
 .label {
-  font-family: var(--font-readout);
-  font-size: 12px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  font-family: var(--font-text);
+  font-size: 12.5px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
   color: var(--muted);
 }
 
-/* The display face for titles. */
+/* Titles a person reads first: the editorial face. */
 .display {
-  font-family: var(--font-display);
-  font-weight: 300;
-  letter-spacing: -0.02em;
+  font-family: var(--font-title);
+  font-weight: 420;
+  font-optical-sizing: auto;
+  letter-spacing: -0.012em;
   color: var(--ink);
+}
+
+/* A class mark: one quiet encoding of what kind of evidence this is, word and shape together. */
+.cls {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--font-text);
+  font-size: 12.5px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.cls::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1.5px solid currentColor;
+  flex: none;
+}
+.cls[data-cls='raw']::before { background: currentColor; }
+.cls[data-cls='derived']::before { background: linear-gradient(90deg, currentColor 50%, transparent 50%); }
+.cls[data-cls='inferred']::before { border-style: dashed; }
+.cls[data-cls='invariant']::before { border-radius: 1px; transform: rotate(45deg); width: 7px; height: 7px; background: currentColor; }
+
+/* Not observed is its own state, drawn as a hatch so it can never read as zero or as an answer. */
+.unobserved {
+  background-image: repeating-linear-gradient(135deg, var(--unobserved) 0 1.5px, transparent 1.5px 6px);
 }
 
 @media (prefers-reduced-motion: reduce) {

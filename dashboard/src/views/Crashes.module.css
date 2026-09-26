@@ -1,31 +1,36 @@
 /* The stop sequence is a reading path over returned evidence, not a scaled time axis. */
 
-.sequence { margin: 18px 0 28px; border: 1px solid var(--rule); background: var(--deep); }
-.sequenceHead { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 24px; padding: 18px 20px; border-bottom: 1px solid var(--rule); }
-.sequenceHead p { margin: 0; color: var(--muted); line-height: 1.5; }
-.sequenceHead > p { max-width: 59ch; font-size: 13px; }
-.sequenceHead h3 { margin: 5px 0 0; color: var(--ink); font-size: clamp(18px, 2vw, 23px); font-weight: 400; }
-.sequenceList { list-style: none; margin: 0; padding: 0; }
-.sequenceList li + li { border-top: 1px solid var(--rule-soft); }
-.sequenceButton { display: block; width: 100%; min-width: 0; padding: 14px 20px 16px; text-align: left; color: var(--body); }
-.sequenceButton:hover, .sequenceButton:focus-visible, .sequenceSelected { background: var(--lit); }
-.sequenceLabel { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 4px 12px; color: var(--muted); font-size: 11px; }
-.sequenceLabel span:last-child { color: var(--ink); }
-.sequencePhases { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: 13px; }
-.phase { display: flex; flex-direction: column; min-width: 0; gap: 4px; padding-right: 15px; }
-.phase + .phase { padding-left: 16px; border-left: 1px solid var(--rule); }
-.phaseLabel { color: var(--muted); font-size: 10px; line-height: 1.4; }
+.sequence { margin: 14px 0 32px; }
+.sequenceHead { display: flex; flex-direction: column; gap: 4px; margin-bottom: 14px; }
+.sequenceHead p { margin: 0; color: var(--muted); line-height: 1.5; font-size: 14px; max-width: 72ch; }
+.sequenceHead h3 { margin: 0; color: var(--ink); font: 500 21px/1.25 var(--font-title); }
+.sequenceList { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+/* Each stop is a sheet, marked by the stop's diamond; the open one keeps its detail on the same sheet. */
+.sequenceList > li { border-radius: 12px; background: var(--sheet); box-shadow: var(--shadow); overflow: hidden; }
+.sequenceButton { display: block; width: 100%; min-width: 0; padding: 16px 20px 18px; text-align: left; color: var(--body); }
+.sequenceButton:hover { background: color-mix(in srgb, var(--ink) 4%, transparent); }
+.sequenceSelected { background: color-mix(in srgb, var(--ink) 4%, transparent); }
+.sequenceLabel { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 4px 12px; color: var(--muted); font-size: 13px; }
+.sequenceLabel span:last-child { color: var(--body); text-decoration: underline; text-decoration-color: var(--rule); text-underline-offset: 4px; }
+.sequenceWhen { display: inline-flex; align-items: center; gap: 9px; color: var(--ink); font-weight: 600; }
+.stopMark { width: 10px; height: 10px; background: var(--stop); transform: rotate(45deg); border-radius: 1px; flex: none; }
+.inCase { display: inline-flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 13.5px; color: var(--body); }
+.inCase::before { content: ''; width: 14px; height: 9px; border-radius: 2px 5px 5px 2px; background: var(--tag); box-shadow: inset 0 0 0 1px var(--rule); }
+.inCase b { font: 450 15px var(--font-title); color: var(--ink); }
+.sequencePhases { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 24px; margin-top: 14px; }
+.phase { display: flex; flex-direction: column; min-width: 0; gap: 3px; }
+.phaseLabel { color: var(--muted); font-size: 13px; line-height: 1.35; }
 .phase strong { color: var(--ink); font-size: 14px; font-weight: 500; overflow-wrap: anywhere; }
-.phaseNote, .phaseRelation { color: var(--muted); font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
+.phaseNote, .phaseRelation { color: var(--muted); font-size: 13px; line-height: 1.4; overflow-wrap: anywhere; }
 .phaseRelation { color: var(--body); }
-.reported { display: block; margin-top: 12px; color: var(--muted); font-size: 11px; }
+.reported { display: block; margin-top: 12px; color: var(--muted); font-size: 12.5px; }
 .reportOnly { display: block; margin-top: 12px; }
 .reportMain { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 3px 16px; }
-.reportMain > span { color: var(--muted); font-size: 10px; }
+.reportMain > span { color: var(--muted); font-size: 13px; }
 .reportMain strong { color: var(--ink); font-size: 15px; font-weight: 500; }
 .reportFacts { display: flex; flex-wrap: wrap; gap: 6px 28px; margin-top: 10px; }
 .reportFacts > span { display: flex; flex-wrap: wrap; align-items: baseline; min-width: 0; gap: 2px 8px; }
-.reportFacts > span > span { color: var(--muted); font-size: 10px; }
+.reportFacts > span > span { color: var(--muted); font-size: 13px; }
 .reportFacts strong { min-width: 0; color: var(--body); font-size: 12px; font-weight: 500; overflow-wrap: anywhere; }
 .reportLimits { display: block; margin-top: 10px; color: var(--muted); font-size: 11px; line-height: 1.45; }
 
@@ -74,17 +79,16 @@
 }
 
 .sequenceFinding { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; margin-top: 10px; color: var(--body); overflow-wrap: anywhere; }
-.sequenceFinding strong { color: var(--ink); font-size: 14px; font-weight: 500; }
-.sequenceFinding > span { font-size: 12px; }
-.sequenceDetail { padding: 8px 20px 20px; background: var(--inspection-well); }
+.sequenceFinding strong { color: var(--ink); font-size: 15px; font-weight: 500; }
+.sequenceFinding > span { font-size: 12.5px; }
+.sequenceDetail { padding: 8px 20px 22px; box-shadow: 0 -1px 0 var(--rule-soft); }
 
 @media (max-width: 700px) {
-  .sequenceHead { padding: 16px; }
   .sequenceButton { padding: 14px 16px; }
   .sequenceDetail { padding-left: 16px; padding-right: 16px; }
   .sequencePhases { grid-template-columns: minmax(0, 1fr); gap: 0; }
   .phase { padding: 9px 0; }
-  .phase + .phase { padding-left: 0; border-left: 0; border-top: 1px solid var(--rule-soft); }
+  .phase + .phase { box-shadow: 0 -1px 0 var(--rule-soft); }
 }
 
 /* A moment on the left, what happened beside it, and the file or code that belongs to it. */
@@ -187,3 +191,6 @@
   }
   .fileWhen { text-align: right; }
 }
+
+.lede { margin: 4px 0 14px; max-width: 64ch; font-size: 17px; line-height: 1.55; color: var(--body); }
+.lede strong { color: var(--ink); font-weight: 600; }

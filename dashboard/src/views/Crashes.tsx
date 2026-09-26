@@ -1,11 +1,13 @@
 import { ReactNode, useLayoutEffect, useRef, useState } from 'react';
-import { AddToStack } from '../AddToStack';
+import { AddEvidence } from '../AddEvidence';
 import { CitedRecord, eventRef } from '../CitedRecord';
 import { EventRecord, Reading, type RecordId, observed } from '../api';
 import { OutcomeLine, clock } from '../Outcome';
 import { Basis, Facts, Head, MomentLink, RowList, Section, Segmented, Value, ago, basisOf, byDay, duration, part, size, useKeepButtonInPlace } from '../Sections';
 import { canRestoreCrashView, useReading } from '../useReading';
 import { useApp } from '../store';
+import { caseForStop, stopExhibit, when } from '../exhibits';
+import { useCaseList } from '../useCases';
 import { ChangesNearStop } from './ChangesNearStop';
 import { ReliabilityHistory } from './ReliabilityHistory';
 import styles from './Crashes.module.css';
@@ -226,13 +228,14 @@ export function Crashes() {
     <section>
       <Head title="Crashes">
         <Segmented value={stopCount} onChange={(count) => setCrashesView({ stopCount: count })} options={STOP_COUNTS.map((c) => ({ value: c, label: `last ${c}` }))} label="How many stops" />
-        {crash.reading ? <AddToStack item={{ kind: 'reading', envelope: crash.reading, title: `Unplanned stops, last ${shownStopCount}` }} label="Stack this reading" /> : null}
+        {crash.reading ? <AddEvidence item={{ kind: 'reading', envelope: crash.reading, title: `Unplanned stops, last ${shownStopCount}` }} label="Stack this reading" /> : null}
       </Head>
+      <p className={styles.lede}><strong>Did the machine stop without shutting down?</strong> Each stop below is composed from Windows’ own records. Open one for what was recorded just before it, the dump Windows wrote and what changed. Nothing here names a cause.</p>
       <OutcomeLine taken={crash} noun="stops" singular="stop" emptyText="No stop established from the returned records" />
       {observed(crash.reading) && stopId && selectedStop === null ? <p ref={missingStopRef} className={`${styles.selectionMissing} readout`} role="status" tabIndex={-1}>The previously selected stop is not in this returned reading.</p> : null}
 
       {observed(crash.reading) && stops.length > 0 ? (
-        <Section title="Stops" cls="derived" basis={basisOf(crash.reading, 'stops')} note="newest first">
+        <Section title="Stops" cls="derived" basis={basisOf(crash.reading, 'stops')}>
           <StopSequence
             stops={stops}
             selected={selectedStop}
@@ -252,7 +255,7 @@ export function Crashes() {
         controls={
           <>
             <Segmented value={faultCount} onChange={(count) => setCrashesView({ faultCount: count })} options={FAULT_COUNTS.map((c) => ({ value: c, label: `last ${c}` }))} label="How many records" />
-            {faults.reading ? <AddToStack item={{ kind: 'reading', envelope: faults.reading, title: `Faults, last ${shownFaultCount}` }} /> : null}
+            {faults.reading ? <AddEvidence item={{ kind: 'reading', envelope: faults.reading, title: `Faults, last ${shownFaultCount}` }} /> : null}
           </>
         }
       >
@@ -289,7 +292,7 @@ export function Crashes() {
         title="Dump files"
         cls="raw"
         note={files.length ? `newest first · ${size(files.reduce((n, f) => n + f.bytes, 0))} on disk` : undefined}
-        controls={dumps.reading ? <AddToStack item={{ kind: 'reading', envelope: dumps.reading, title: 'Crash dump inventory' }} /> : null}
+        controls={dumps.reading ? <AddEvidence item={{ kind: 'reading', envelope: dumps.reading, title: 'Crash dump inventory' }} /> : null}
       >
         <OutcomeLine taken={dumps} noun="dump files" singular="dump file" emptyText="No dump files found in the checked locations" />
         <DumpCoverage reading={dumps.reading} />
@@ -412,17 +415,20 @@ function StopSequence({ stops, selected, envelope, onInspect, registerButton }: 
   registerButton: (index: number, node: HTMLButtonElement | null) => void;
 }) {
   const keepButtonInPlace = useKeepButtonInPlace();
+  const cases = useCaseList();
+  const known = cases.state === 'ok' ? cases.value : [];
   return (
     <section className={styles.sequence} aria-labelledby="stop-sequence-title">
       <div className={styles.sequenceHead}>
-        <div><p className="label">Returned stops · crash reading</p><h3 id="stop-sequence-title" className="display">Evidence around each stop</h3></div>
-        <p>Separate evidence points in your browser’s local time. The last System record before restart can be later than Windows’ stop estimate; these times do not establish a cause. A report without a returned session shows its report evidence.</p>
+        <p id="stop-sequence-title">Newest first. Three separate evidence points per stop, in your browser’s local time. The last System record before restart can be later than Windows’ stop estimate; these times do not establish a cause.</p>
       </div>
       <ol className={styles.sequenceList}>
         {stops.map((stop, index) => {
           const last = stop.last_record_before;
           const relation = recordToEstimate(last?.TimeCreated, stop.stopped_at);
           const reportOnly = Boolean(stop.reported_at && !last && !stop.stopped_at && !stop.started_at && !stop.announced_at);
+          const inCase = caseForStop(known, stop);
+          const moment = stop.stopped_at ?? stop.started_at ?? stop.announced_at ?? stop.reported_at;
           return <li key={stopIdentity(stop)}>
             <button
               ref={(node) => registerButton(index, node)}
@@ -432,7 +438,7 @@ function StopSequence({ stops, selected, envelope, onInspect, registerButton }: 
               aria-expanded={selected === index}
               aria-controls={`stop-detail-${index}`}
             >
-              <span className={styles.sequenceLabel}><span className="readout">{String(index + 1).padStart(2, '0')} / returned stop</span><span className="readout">{selected === index ? 'Hide exact stop' : 'Inspect exact stop'}</span></span>
+              <span className={styles.sequenceLabel}><span className={styles.sequenceWhen}><span className={styles.stopMark} aria-hidden="true" />{moment ? when(moment) : 'Time not recorded'}</span><span>{selected === index ? 'Hide exact stop' : 'Inspect exact stop'}</span></span>
               {!reportOnly ? <span className={styles.sequenceFinding}>
                 <strong>{[stop.bugcheck?.name, stop.bugcheck?.code].filter(Boolean).join(' · ') || (stop.no_bugcheck_recorded === null ? 'Bug check status unknown' : stop.no_bugcheck_recorded ? 'No bug check recorded' : 'No bug check named')}</strong>
                 {stop.records.eventlog_6008 != null && stop.records.power_41 == null ? <span className="readout">No Kernel-Power 41 returned</span> : null}
@@ -465,6 +471,7 @@ function StopSequence({ stops, selected, envelope, onInspect, registerButton }: 
                 </span>
               </span>
               {stop.reported_at ? <span className={`${styles.reported} readout`}>Report filed {stamp(stop.reported_at)}{!stop.started_at && !stop.stopped_at ? ' · only report timing is available' : ''}</span> : null}</>}
+              {inCase ? <span className={styles.inCase}>In the case <b>{inCase.title}</b></span> : null}
             </button>
             <div id={`stop-detail-${index}`} className={selected === index ? styles.sequenceDetail : undefined}>
               {selected === index ? <StopDetail stop={stop} envelope={envelope} /> : null}
@@ -503,6 +510,12 @@ function lastRecordStatus(stop: Stop): string {
   if (outcome === 'not_returned') return 'Lookup unavailable';
   if (outcome === 'not_requested') return 'Not requested';
   return 'No record returned';
+}
+
+/** A stop handed to a case: its own title, moment and facts, and a reference that finds it again. */
+function stopEvidence(stop: Stop, envelope: Reading) {
+  const exhibit = stopExhibit(stop, envelope);
+  return { title: exhibit.title, moment: exhibit.moment, facts: exhibit.facts ?? undefined, stop: exhibit.stop ?? undefined, classes: exhibit.classes };
 }
 
 function StopDetail({ stop, envelope }: { stop: Stop; envelope: Reading | null }) {
@@ -561,7 +574,7 @@ function StopDetail({ stop, envelope }: { stop: Stop; envelope: Reading | null }
       <div className={styles.actions}>
         <MomentLink at={moment} sourceKey={`stop:${stopIdentity(stop)}:${moment}`} />
         {envelope && ids.length ? (
-          <AddToStack item={{ kind: 'selection', envelope, ids, title: `Stop at ${moment ?? stop.stopped_at ?? 'an unknown time'}` }} label="Stack this stop" />
+          <AddEvidence item={{ kind: 'selection', envelope, ids, ...stopEvidence(stop, envelope) }} label="Stack this stop" />
         ) : null}
       </div>
     </>
@@ -666,7 +679,7 @@ function DumpHeaderDetail({ path, fileRef, refreshInventory }: { path: string; f
           {rawOpen ? <pre>{JSON.stringify(raw, null, 2)}</pre> : null}
         </details>
       ) : null}
-      {taken.reading ? <div className={styles.actions}><AddToStack item={{ kind: 'reading', envelope: taken.reading, title: 'Dump inspection', verbosity: 'summary' }} label="Stack this dump inspection" /></div> : null}
+      {taken.reading ? <div className={styles.actions}><AddEvidence item={{ kind: 'reading', envelope: taken.reading, title: 'Dump inspection', verbosity: 'summary' }} label="Stack this dump inspection" /></div> : null}
     </>
   );
 }
@@ -785,7 +798,7 @@ export function FaultDetail({ fault, at: moment, envelope, rawRecords, showMomen
       <div className={styles.actions}>
         {showMomentLink ? <MomentLink at={moment} sourceKey={`fault:${faultIdentity(fault)}:${moment}`} /> : null}
         {envelope ? (
-          <AddToStack
+          <AddEvidence
             item={{ kind: 'selection', envelope, ids: rawIds.map((id) => `${log}:${id}`), title: `${KIND_WORD[fault.kind] ?? fault.kind} at ${moment ?? 'an unknown time'}` }}
             label="Stack this record"
           />

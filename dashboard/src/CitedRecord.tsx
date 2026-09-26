@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { AddToStack } from './AddToStack';
+import { AddEvidence } from './AddEvidence';
 import { EventRecord, Reading, RecordId, observed, section } from './api';
 import { useReading } from './useReading';
 import styles from './CitedRecord.module.css';
@@ -105,7 +105,7 @@ export function CitedRecord({ citation, held, heldAt, heldKind = 'raw' }: { cita
       <p className={`${styles.note} readout`}>Exact lookup taken {reading?.asked_at}. This is a new observation; the fields below have default redaction.</p>
       <pre className="readout">{JSON.stringify(record, null, 2)}</pre>
     </details> : null}
-    {current && reading && observed(reading) && reference ? <AddToStack item={{ kind: 'reading', envelope: reading, title: `${ROLE[citation.role] ?? citation.role} · ${citation.params.log} record ${citation.params.record_id}` }} label={previous ? 'Stack previous exact check' : 'Stack this exact check'} /> : null}
+    {current && reading && observed(reading) && reference ? <AddEvidence item={{ kind: 'reading', envelope: reading, title: `${ROLE[citation.role] ?? citation.role} · ${citation.params.log} record ${citation.params.record_id}` }} label={previous ? 'Stack previous exact check' : 'Stack this exact check'} /> : null}
     {!citation && held ? <p className={`${styles.note} readout`}>No usable exact record reference is available for a current-log check.</p> : null}
   </div>;
 }

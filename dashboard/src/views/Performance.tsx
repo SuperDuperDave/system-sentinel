@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { AddToStack } from '../AddToStack';
+import { AddEvidence } from '../AddEvidence';
 import { PerformanceCollection, Unauthorized, clearPerformanceHistory, observed, performanceCollection, setPerformanceCollection } from '../api';
 import { OutcomeLine } from '../Outcome';
 import { Facts, Head, MomentLink, Section, Segmented, Tree, part, size } from '../Sections';
@@ -111,7 +111,7 @@ export function Performance() {
 
   return (
     <section>
-      <Head title="Performance">{history.reading ? <AddToStack item={{ kind: 'reading', envelope: history.reading }} label="Stack this history" /> : null}</Head>
+      <Head title="Performance">{history.reading ? <AddEvidence item={{ kind: 'reading', envelope: history.reading }} label="Stack this history" /> : null}</Head>
       <p className={styles.lede}>Fresh process use and numeric history collected locally every minute by default. A gap in the history means no sample was kept.</p>
 
       <ProcessPressure />
@@ -188,7 +188,7 @@ export function Performance() {
       <section className={styles.now}>
         <div><h2>Fresh snapshot</h2><p>Ask Windows for aggregate counters right now, without waiting for the next stored sample.</p></div>
         {!takeNow ? <button onClick={() => setTakeNow(true)}>Take a fresh snapshot</button> : null}
-        {takeNow ? <><OutcomeLine taken={live} noun="snapshots" singular="snapshot" emptyText="No numeric counter answered" />{observed(live.reading) && part<Sample>(live.reading, 'snapshot') ? <Tree value={part<Sample>(live.reading, 'snapshot')} /> : null}{live.reading ? <AddToStack item={{ kind: 'reading', envelope: live.reading }} label="Stack this snapshot" /> : null}</> : null}
+        {takeNow ? <><OutcomeLine taken={live} noun="snapshots" singular="snapshot" emptyText="No numeric counter answered" />{observed(live.reading) && part<Sample>(live.reading, 'snapshot') ? <Tree value={part<Sample>(live.reading, 'snapshot')} /> : null}{live.reading ? <AddEvidence item={{ kind: 'reading', envelope: live.reading }} label="Stack this snapshot" /> : null}</> : null}
       </section>
     </section>
   );

@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef } from 'react';
-import { AddToStack } from '../AddToStack';
+import { AddEvidence } from '../AddEvidence';
 import { CitedRecord, eventRefGroups, evidenceWithoutRefRows } from '../CitedRecord';
 import { Reading, observed, section } from '../api';
 import { OutcomeLine } from '../Outcome';
@@ -93,7 +93,7 @@ export function Signals() {
 
   return (
     <section>
-      <Head title="Signals">{taken.reading ? <AddToStack item={{ kind: 'reading', envelope: taken.reading }} label="Stack this reading" /> : null}</Head>
+      <Head title="Signals">{taken.reading ? <AddEvidence item={{ kind: 'reading', envelope: taken.reading }} label="Stack this reading" /> : null}</Head>
       <p className={styles.lede}>
         Patterns the tool noticed across several readings at once. Each one is a lead to follow, never a finding about what is wrong; the rule that
         produced it and the evidence under it are both here.
@@ -141,7 +141,7 @@ function Group({ cls, signals, reading, openId, onOpenChange }: { cls: string; s
             <Citations evidence={s.evidence} />
             <Jumps evidence={s.evidence} sourceKey={`signal:${s.id}`} />
             <p className={`${styles.from} readout`}>{s.id === 'gap:inputs' ? 'input status checked for' : 'read from'} {s.readings.join(', ')} · {s.id}</p>
-            <div className={styles.stackLead}><AddToStack item={{ kind: 'selection', envelope: reading, ids: [s.id], title: s.title }} label="Stack this lead" /></div>
+            <div className={styles.stackLead}><AddEvidence item={{ kind: 'selection', envelope: reading, ids: [s.id], title: s.title }} label="Stack this lead" /></div>
           </div>
         )}
       />
