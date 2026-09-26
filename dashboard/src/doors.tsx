@@ -5,7 +5,7 @@
  */
 import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { Unauthorized } from './api';
-import { knownOf } from './Marks';
+import { heldOver, knownOf, knownOfReading, knownWord } from './Marks';
 import { DOORS, DoorFact, DoorId, agentFact, doorForView, factFor } from './situations';
 import { getStack, StackState } from './stack';
 import { useApp } from './store';
@@ -15,15 +15,20 @@ const SEEN_KEY = 'sentinel.doors.seen.v1';
 
 /**
  * When this person last opened each door, as the newest record it pointed at then. A per-browser
- * convenience, like a remembered filter: storage can be missing or blocked, and then every door
- * with a record simply stays marked.
+ * convenience, like a remembered filter. When storage is missing or blocked the acknowledgement
+ * lasts only as long as this page, and every door with a record is marked again after a reload.
  */
 function readSeen(): Partial<Record<DoorId, string>> {
-  try { return JSON.parse(localStorage.getItem(SEEN_KEY) ?? '{}') as Partial<Record<DoorId, string>>; } catch { return {}; }
+  try {
+    const stored: unknown = JSON.parse(localStorage.getItem(SEEN_KEY) ?? '{}');
+    if (!stored || typeof stored !== 'object' || Array.isArray(stored)) return {};
+    return Object.fromEntries(Object.entries(stored).filter(([, at]) => typeof at === 'string' && Number.isFinite(Date.parse(at)))) as Partial<Record<DoorId, string>>;
+  } catch { return {}; }
 }
 function writeSeen(seen: Partial<Record<DoorId, string>>) {
-  try { localStorage.setItem(SEEN_KEY, JSON.stringify(seen)); } catch { /* the mark stays; nothing else depends on it */ }
+  try { localStorage.setItem(SEEN_KEY, JSON.stringify(seen)); } catch { /* acknowledged for this page only */ }
 }
+const CLOCK = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', hour12: false });
 const newer = (at: string, seen: string | undefined) => !seen || Date.parse(at) > Date.parse(seen);
 
 
@@ -56,6 +61,13 @@ export function DoorsProvider({ children }: { children: ReactNode }) {
   const [stack, setStack] = useState<StackState | null>(null);
   const [stackProblem, setStackProblem] = useState<string | null>(null);
 
+  // Another tab acknowledged a door: take its record rather than overwrite it with a stale copy.
+  useEffect(() => {
+    const onStorage = (event: StorageEvent) => { if (event.key === SEEN_KEY) setSeen(readSeen()); };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, []);
+
   // The handoff is local state, not a machine reading: cheap to ask whenever the person moves.
   useEffect(() => {
     let active = true;
@@ -76,7 +88,12 @@ export function DoorsProvider({ children }: { children: ReactNode }) {
     const ids: DoorId[] = ['stopped', 'programs', 'slow', 'disk', 'hardware'];
     const facts = Object.fromEntries(ids.map((id, index) => {
       const t = all[index];
-      return [id, factFor(id, t.reading, knownOf(t))];
+      const known = knownOf(t);
+      if (!heldOver(t)) return [id, factFor(id, t.reading, known)];
+      // The latest take was a hole: keep the earlier evidence visible, say it is held, and let the
+      // outcome be the hole's, so a failed retake never reads as a current observation.
+      const held = factFor(id, t.reading, knownOfReading(t.reading));
+      return [id, { ...held, known, exact: `Latest take: ${knownWord(known).toLowerCase()}. Showing what was read at ${CLOCK.format(Date.parse(t.reading!.asked_at))}.` }];
     })) as Record<DoorId, DoorFact>;
     facts.agent = agentFact(stack, stackProblem);
     return facts;
@@ -92,7 +109,7 @@ export function DoorsProvider({ children }: { children: ReactNode }) {
     const id = open.id;
     setSeenOnArrival((before) => (id in before ? before : { ...before, [id]: seen[id] ?? null }));
     if (!newer(newestHere, seen[id])) return;
-    const next = { ...seen, [id]: newestHere };
+    const next = { ...readSeen(), ...seen, [id]: newestHere };
     writeSeen(next);
     setSeen(next);
   }, [open, newestHere, seen]);

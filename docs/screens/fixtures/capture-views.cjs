@@ -64,7 +64,8 @@ const SHOTS = {
   'stopped-older': {
     reach: async (page) => {
       await view('stopped')(page);
-      await click(page, 'main nav button', 'MEMORY_MANAGEMENT');
+      await click(page, 'main section[aria-label^="Unplanned stops"] button', 'MEMORY_MANAGEMENT');
+      await page.evaluate(() => window.scrollTo(0, 0));
     },
   },
   programs: { reach: view('programs') },

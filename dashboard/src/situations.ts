@@ -161,6 +161,11 @@ export function stopMoment(stop: StopLike): string | null {
   return stop.stopped_at ?? stop.started_at ?? stop.announced_at ?? stop.reported_at;
 }
 
+/** Which of the stop's evidence times stopMoment chose, in words. */
+export function stopMomentRole(stop: StopLike): string {
+  return stop.stopped_at ? 'Windows’ estimate' : stop.started_at ? 'its next start' : stop.announced_at ? 'the start’s announcement' : 'its error report';
+}
+
 export function stoppedFact(reading: Reading | null, known: Known): DoorFact {
   if (known !== 'observed' && known !== 'zero') return unobserved(known, reading, 'crash');
   const stops = sectionOf<StopLike[]>(reading, 'stops') ?? [];
@@ -177,7 +182,7 @@ export function stoppedFact(reading: Reading | null, known: Known): DoorFact {
     known: 'observed',
     figure: age?.figure ?? null,
     unit: age?.unit ?? null,
-    caption: age ? (newest.stopped_at ? 'since the last unplanned stop, by Windows’ estimate' : 'since the last unplanned stop, by its next start') : 'Unplanned stop, time not recorded',
+    caption: age ? `since the last unplanned stop, by ${stopMomentRole(newest)}` : 'Unplanned stop, time not recorded',
     exact: [stamp(at), named].filter(Boolean).join(' · '),
     scope: `crash · ${stops.length} ${stops.length === 1 ? 'stop' : 'stops'} returned · ${taken(reading!)}`,
     attention: at ? 'stop' : null,
@@ -212,7 +217,7 @@ export function programsFact(reading: Reading | null, known: Known): DoorFact {
     unit: age?.unit ?? null,
     caption: `since the last ${FAULT_WORD[newest.fault.kind] ?? newest.fault.kind}`,
     exact: [subject, newest.at ? stamp(newest.at) : null].filter(Boolean).join(' · '),
-    scope: `faults · ${Object.values(byKind).reduce((a, b) => a + b, 0) || decoded.length} reports in ${records.length} records`,
+    scope: `faults · ${Object.values(byKind).reduce((a, b) => a + b, 0) || decoded.length} reports in ${records.length} records · ${taken(reading!)}`,
     attention: newest.at ? 'report' : null,
     newest: newest.at,
     mini: age?.mini ?? 'report',
@@ -221,18 +226,23 @@ export function programsFact(reading: Reading | null, known: Known): DoorFact {
 
 interface Snapshot { processor_load_percent?: number | null; memory_total_kb?: number | null; memory_free_kb?: number | null; uptime_seconds?: number | null }
 
+/**
+ * Slow carries no big number: load at the moment of reading includes the dashboard itself, and
+ * Sentinel has no normal range to set it against. It says what was read, at the size of a sentence.
+ */
 export function slowFact(reading: Reading | null, known: Known): DoorFact {
   if (known !== 'observed' && known !== 'zero') return unobserved(known, reading, 'system');
   const snap = sectionOf<Snapshot>(reading, 'snapshot') ?? {};
   const load = snap.processor_load_percent;
   const used = snap.memory_total_kb && snap.memory_free_kb != null ? Math.round((1 - snap.memory_free_kb / snap.memory_total_kb) * 100) : null;
   const up = snap.uptime_seconds != null ? upFor(snap.uptime_seconds) : null;
+  const parts = [load == null ? 'processor load not reported' : `processor ${load}%`, used == null ? 'memory not reported' : `memory ${used}% in use`];
   return {
-    known: load == null ? 'zero' : 'observed',
-    figure: load == null ? null : String(load),
-    unit: load == null ? null : '%',
-    caption: load == null ? 'Processor load not reported' : 'processor load when read',
-    exact: [used == null ? null : `memory ${used}% in use`, up ? `up ${up}` : null].filter(Boolean).join(' · ') || null,
+    known,
+    figure: null,
+    unit: null,
+    caption: `${parts.join(', ')} when read`,
+    exact: [up ? `up ${up}` : null, 'includes this dashboard; no normal range is known'].filter(Boolean).join(' · '),
     scope: `system · ${taken(reading!)}`,
     attention: null, newest: null,
     mini: load == null ? '—' : `${load}%`,
@@ -264,7 +274,8 @@ export function diskFact(reading: Reading | null, known: Known): DoorFact {
     figure,
     unit: 'GB free',
     caption: volumes.length > 1 ? `on ${letter}, the fullest of ${volumes.length} volumes` : `on ${letter}`,
-    exact: fullest.used_percent != null ? `${fullest.used_percent}% used` : null,
+    exact: fullest.used_percent != null && fullest.used_percent < 100
+      ? `${fullest.used_percent}% used of about ${Math.round(free / (1 - fullest.used_percent / 100))} GB` : fullest.used_percent != null ? `${fullest.used_percent}% used` : null,
     scope: `hardware.storage · ${taken(reading!)}`,
     attention: null, newest: null,
     mini: `${figure} GB`,
@@ -277,14 +288,18 @@ export function hardwareFact(reading: Reading | null, known: Known): DoorFact {
   if (known !== 'observed' && known !== 'zero') return unobserved(known, reading, 'whea');
   const records = sectionOf<EventRecord[]>(reading, 'records') ?? [];
   const sources = Object.values(sectionOf<WheaCoverage>(reading, 'coverage')?.sources ?? {});
-  const unanswered = sources.filter((s) => s.answered === false).length;
-  const gap = unanswered ? ` · ${unanswered} of ${sources.length} logs not read` : '';
+  const answered = sources.filter((s) => s.answered !== false);
+  const unanswered = sources.length - answered.length;
+  const logName = (s: { log?: string }) => (s.log === 'System' ? 'System' : 'Kernel-WHEA');
+  const gap = unanswered ? ` · ${sources.filter((s) => s.answered === false).map(logName).join(', ')} not read` : '';
   if (!records.length) {
-    return { known: 'zero', figure: null, unit: null, caption: 'No hardware error report returned', exact: `from either log's retained record${gap}`, scope: `whea · ${taken(reading!)}`, attention: null, newest: null, mini: 'none' };
+    // Two logs, and an empty answer from one does not speak for the other.
+    if (unanswered) return { known: 'unreached', figure: null, unit: null, caption: 'Not reached: one of the two logs did not answer', exact: `none returned from ${answered.map(logName).join(', ') || 'either log'}${gap}`, scope: `whea · ${taken(reading!)}`, attention: null, newest: null, mini: 'partly read' };
+    return { known: 'zero', figure: null, unit: null, caption: 'No hardware error report returned', exact: 'from either log\u2019s retained record', scope: `whea · ${taken(reading!)}`, attention: null, newest: null, mini: 'none' };
   }
   const newest = records.reduce((a, b) => Date.parse(b.TimeCreated) > Date.parse(a.TimeCreated) ? b : a);
   const age = ageParts(newest.TimeCreated);
-  const perLog = sources.map((s) => `${s.log === 'System' ? 'System' : 'Kernel-WHEA'} ${s.shown ?? 0}`).join(', ');
+  const perLog = answered.map((s) => `${logName(s)} ${s.shown ?? 0}`).join(', ');
   return {
     known: 'observed',
     figure: age?.figure ?? null,

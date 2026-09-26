@@ -16,6 +16,7 @@
   color: var(--muted);
   font-size: 12.5px;
 }
+.footerHole { flex-basis: 100%; color: var(--ink); font-size: 13px; order: -1; margin-bottom: 4px; }
 .footerFacts { margin-right: 6px; font-family: var(--font-readout); font-size: 12px; }
 .footer :global(.button) { min-height: 36px; font-size: 13px; }
 @media (pointer: coarse) { .footer :global(.button) { min-height: 44px; } }

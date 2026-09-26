@@ -9,7 +9,7 @@
 import { ReactNode, useRef, useState } from 'react';
 import { Cls, Reading } from './api';
 import { CopyButton } from './Copy';
-import { Known, OutcomeMark, Provenance, isHole } from './Marks';
+import { Known, OutcomeMark, Provenance, heldOver, isHole, knownOf, knownWord } from './Marks';
 import { RecipeStep, recipeText } from './situations';
 import { Taken } from './useReading';
 import styles from './Situation.module.css';
@@ -33,7 +33,8 @@ export function ReadingFooter({ taken, label = 'Take again' }: { taken: Taken<un
   const r = taken.reading;
   return (
     <div className={styles.footer}>
-      {r ? <span className={styles.footerFacts}>taken {CLOCK.format(Date.parse(r.asked_at))} · {r.took_ms < 1000 ? `${r.took_ms} ms` : `${(r.took_ms / 1000).toFixed(1)} s`}{taken.held ? ' · held from earlier' : ''}</span> : null}
+      {r ? <span className={styles.footerFacts}>taken {CLOCK.format(Date.parse(r.asked_at))} · {r.took_ms < 1000 ? `${r.took_ms} ms` : `${(r.took_ms / 1000).toFixed(1)} s`}</span> : null}
+      {heldOver(taken) ? <span className={styles.footerHole} role="status">Latest take: {knownWord(knownOf(taken)).toLowerCase()}{taken.latestFailure?.error?.detail ? ` (${taken.latestFailure.error.detail.split('\n')[0]})` : taken.problem ? ` (${taken.problem.split('\n')[0]})` : ''}. What is shown was read earlier.</span> : null}
       <button className="button quiet" onClick={() => { if (taken.state !== 'taking') taken.retake(); }} aria-disabled={taken.state === 'taking'}>
         {taken.state === 'taking' ? 'Taking…' : label}
       </button>

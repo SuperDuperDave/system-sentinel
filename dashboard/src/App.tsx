@@ -7,7 +7,7 @@ import { Live } from './Live';
 import { clearHeldReadings, hasHeldReading } from './useReading';
 import { useApp, VIEWS, ViewId } from './store';
 import { DoorsProvider, useDoors } from './doors';
-import { AttentionGlyph, OutcomeGlyph } from './Marks';
+import { AttentionGlyph, OutcomeGlyph, isHole, knownWord } from './Marks';
 import { doorForView } from './situations';
 import { Home } from './views/Home';
 import { Stopped } from './views/Stopped';
@@ -233,7 +233,7 @@ function NavChoices({ view, onChoose, onDevices }: { view: ViewId; onChoose: (ne
             <span className={styles.navState}>{fact.attention ? <AttentionGlyph kind={fact.attention} /> : <OutcomeGlyph known={fact.known} />}</span>
             <span className={styles.navLabel}>{entry.label}</span>
             <span className={`${styles.navFact} readout`}>
-              <span className="srOnly">: </span>{fact.mini}{fact.attention ? <span className="srOnly">, {fact.attention === 'stop' ? 'a stop' : 'reports'} in the last 30 days</span> : null}
+              <span className="srOnly">: </span>{fact.mini}{fact.attention ? <span className="srOnly">, {fact.attention === 'stop' ? 'a stop' : 'reports'} newer than your last visit to this door</span> : isHole(fact.known) ? <span className="srOnly">, {knownWord(fact.known).toLowerCase()}</span> : null}
             </span>
           </button>
         );

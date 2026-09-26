@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useDoors } from '../doors';
-import { AttentionMark, OutcomeGlyph, isHole, type Known as KnownState } from '../Marks';
+import { AttentionMark, OutcomeGlyph, isHole, knownWord, type Known as KnownState } from '../Marks';
 import { DOORS, Door, DoorFact } from '../situations';
 import { useApp } from '../store';
 import styles from './Home.module.css';
@@ -16,6 +16,7 @@ export function Home() {
   const { facts, readAt, busy, retakeAll } = useDoors();
   const setView = useApp((s) => s.setView);
   const marked = DOORS.filter((door) => facts[door.id].attention);
+  const holes = DOORS.filter((door) => isHole(facts[door.id].known));
 
   return (
     <section className={styles.home} aria-labelledby="home-title">
@@ -27,7 +28,8 @@ export function Home() {
       <p className={styles.summary} role="status">
         {marked.length
           ? <>{marked.length === 1 ? 'One door holds' : `${marked.length} doors hold`} a record you have not opened on this browser: {marked.map((door, index) => <span key={door.id}>{index ? ', ' : ''}<strong>{door.question.toLowerCase()}</strong></span>)}.</>
-          : busy ? 'Reading the doors…' : 'Nothing new since you last opened each door on this browser. The facts below still stand.'}
+          : busy ? 'Reading the doors…' : holes.length ? null : 'Nothing new since you last opened each door on this browser. The facts below still stand.'}
+        {holes.length ? <> {holes.length === 1 ? 'One door' : `${holes.length} doors`} could not be read this time: {holes.map((door, index) => <span key={door.id}>{index ? ', ' : ''}<strong>{door.question.toLowerCase()}</strong></span>)}. What they would have shown is unknown, not zero.</> : null}
       </p>
 
       <ol className={styles.doors}>
@@ -82,11 +84,12 @@ export function DoorCard({ door, fact, onOpen }: { door: Door; fact: DoorFact; o
     <button
       className={`${styles.door} ${handoff ? styles.handoff : ''} ${fact.attention ? styles[fact.attention] : ''} ${isHole(fact.known) ? styles.hole : styles[fact.known] ?? ''} ${changed ? styles.changed : ''}`}
       onClick={onOpen}
-      aria-describedby={`door-${door.id}-fact`}
+      aria-labelledby={`door-${door.id}-question`}
+      aria-describedby={`door-${door.id}-mark door-${door.id}-fact door-${door.id}-source`}
     >
       <span className={styles.doorTop}>
-        <span className={styles.question}>{door.question}</span>
-        {fact.attention ? <AttentionMark kind={fact.attention}>{fact.attention === 'stop' ? 'New stop' : 'New reports'}</AttentionMark> : null}
+        <span id={`door-${door.id}-question`} className={styles.question}>{door.question}</span>
+        <span id={`door-${door.id}-mark`}>{fact.attention ? <AttentionMark kind={fact.attention}>{fact.attention === 'stop' ? 'New stop' : 'New reports'}</AttentionMark> : null}</span>
       </span>
       <span id={`door-${door.id}-fact`} className={styles.fact}>
         {fact.figure ? (
@@ -98,8 +101,9 @@ export function DoorCard({ door, fact, onOpen }: { door: Door; fact: DoorFact; o
         <span className={fact.figure ? styles.caption : styles.answer}>{fact.caption}</span>
         {fact.exact ? <span className={`${styles.exact} readout`}>{fact.exact}</span> : null}
       </span>
-      <span className={styles.source}>
+      <span id={`door-${door.id}-source`} className={styles.source}>
         <OutcomeGlyph known={fact.known} />
+        <span className="srOnly">{knownWord(fact.known)}: </span>
         <span className={styles.sourceText} title={fact.scope}>{fact.scope}</span>
         <span className={styles.open} aria-hidden="true">→</span>
       </span>

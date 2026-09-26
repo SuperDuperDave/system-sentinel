@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { AddToStack } from '../AddToStack';
 import { EventRecord, observed } from '../api';
 import { useDoors } from '../doors';
-import { OutcomeMark, knownOf, whyNot } from '../Marks';
+import { OutcomeMark, heldOver, knownOf, whyNot } from '../Marks';
 import { RowList, basisOf, part } from '../Sections';
 import { AgentRecipe, ReadingFooter, SituationHead, Step } from '../Situation';
 import { doorOf } from '../situations';
@@ -46,10 +46,12 @@ export function Programs() {
       >
         <p className={styles.headFinding}>
           <OutcomeMark known={known}>
-            {known === 'observed' ? `${decoded.length} ${decoded.length === 1 ? 'report' : 'reports'} decoded from ${records.length} Application-log records`
+            {known === 'observed' || (heldOver(faults) && decoded.length) ? `${decoded.length} ${decoded.length === 1 ? 'report' : 'reports'} decoded from ${records.length} Application-log records`
               : known === 'zero' ? 'No crash, hang or live kernel report in the Application log'
                 : known === 'taking' ? 'Reading the reports…' : whyNot(reading, faults.problem)}
           </OutcomeMark>
+          {heldOver(faults) ? <span className={styles.reach}>The latest take was not observed; the reports below were read earlier.</span> : null}
+          {reading?.warnings.map((warning, index) => <span key={index} className={styles.reach}>{warning.split('\n')[0]}</span>)}
         </p>
         <ReadingFooter taken={faults} />
       </SituationHead>

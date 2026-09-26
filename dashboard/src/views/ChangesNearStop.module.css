@@ -1,8 +1,4 @@
-.region { margin: 16px 0; border-top: 1px solid var(--rule-soft); border-bottom: 1px solid var(--rule-soft); }
-.trigger { display: flex; align-items: center; justify-content: space-between; gap: 10px 20px; flex-wrap: wrap; width: 100%; min-height: 48px; padding: 10px 0; text-align: left; color: var(--ink); }
-.trigger:hover, .trigger:focus-visible { color: var(--body); }
-.action, .boundary, .listLabel, .itemTop time, .extra, .issue, .sources, .list summary { font: 12px/1.5 var(--font-readout); }
-.action { color: var(--body); }
+.boundary, .listLabel, .itemTop time, .extra, .issue, .sources, .list summary { font: 12px/1.5 var(--font-readout); }
 .body { padding: 0 0 16px; }
 .scope { max-width: 76ch; margin: 0 0 6px; color: var(--body); font-size: 13px; line-height: 1.5; }
 .boundary { margin: 0 0 12px; color: var(--muted); overflow-wrap: anywhere; }

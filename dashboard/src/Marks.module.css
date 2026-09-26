@@ -29,12 +29,8 @@
 .glyph.stop { color: var(--attention-stop); }
 .glyph.report { color: var(--attention-report); }
 
-/* Windows' event levels: shape and word only. Hue is attention, and a level is Windows' label,
-   not a record this person has yet to see. */
-.glyph.critical { color: var(--ink); }
-.glyph.error { color: var(--ink); }
-.glyph.warning { color: var(--body); }
-.glyph.info { color: var(--muted); }
+/* Windows' event levels: shape and word only. Hue is attention, and a level is Windows' label. */
+.glyph.level { color: var(--ink); }
 
 .provenance {
   display: flex;

@@ -6,6 +6,8 @@ import { duration, part } from '../Sections';
 import { Taken, useReading } from '../useReading';
 import styles from './ChangesNearStop.module.css';
 
+const BOUNDARY = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
 interface Change {
   at: string | null;
   source: string;
@@ -56,7 +58,7 @@ export function ChangeEvidence({ before, taken: given }: { before: string; taken
 
   return <div className={styles.body}>
     <p className={styles.scope}>Windows Update, device configuration and MSI results in the seven days before Windows’ estimated stop time. A nearby change is a lead to inspect, not proof of a cause.</p>
-    <p className={styles.boundary}>Window ends before <time dateTime={before}>{before}</time></p>
+    <p className={styles.boundary}>Window ends before <time dateTime={before} title={before}>{BOUNDARY.format(new Date(before))}</time></p>
     {given ? null : <OutcomeLine taken={taken} noun="change results" singular="change result" emptyText="No matching change result returned in this requested window" />}
     {collection ? <ul className={styles.sources} aria-label="Change source coverage">
       {SOURCES.map(([key, label]) => {

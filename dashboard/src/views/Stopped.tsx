@@ -3,7 +3,7 @@ import { AddToStack } from '../AddToStack';
 import { CitedRecord, eventRef } from '../CitedRecord';
 import { EventRecord, Reading, observed } from '../api';
 import { useDoors } from '../doors';
-import { AttentionGlyph, Known, LevelGlyph, OutcomeMark, isHole, knownOf, whyNot } from '../Marks';
+import { Known, LevelGlyph, OutcomeMark, heldOver, isHole, knownOf, whyNot } from '../Marks';
 import { MomentLink, basisOf, part } from '../Sections';
 import { AgentRecipe, ReadingFooter, SituationHead, Step } from '../Situation';
 import { RecipeStep, ageParts, doorOf, stopMoment } from '../situations';
@@ -18,6 +18,13 @@ const DAY = new Intl.DateTimeFormat(undefined, { weekday: 'short', month: 'short
 const CLOCK = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
 const SHORT = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', hour12: false });
 const HOUR = 3_600_000;
+/** Enough for a storm of corrected errors to leave room for the report filed at the next start. */
+const WHEA_CAP = 250;
+
+/** The anchor the record before a stop is read up to, named for what it is. */
+function anchorRole(stop: Stop): string {
+  return stop.started_at ? 'the next start' : stop.announced_at ? 'the start’s announcement' : 'the error report';
+}
 
 /**
  * "It stopped or restarted by itself." Windows does not write down a freeze; the start after it
@@ -43,6 +50,17 @@ export function Stopped() {
   const stop = chosen >= 0 ? stops[chosen] : null;
   const known = knownOf(crash);
   const coverage = part<{ system?: { retained_from?: string | null }; reports?: { retained_from?: string | null } }>(reading, 'coverage');
+  // Choosing a stop changes the composition, not the page. Where the composition sits below the
+  // list rather than beside it, the reader is taken to it and told what it now shows.
+  function choose(item: Stop) {
+    setCrashesView({ stopId: stopIdentity(item), focus: 'stop', changesStopId: null, changesBefore: null });
+    requestAnimationFrame(() => {
+      const title = document.getElementById('composition-title');
+      if (!title) return;
+      title.focus({ preventScroll: true });
+      if (window.matchMedia('(max-width: 1099px)').matches) title.scrollIntoView({ block: 'start', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+    });
+  }
 
   return (
     <section className={styles.situation}>
@@ -52,10 +70,12 @@ export function Stopped() {
       >
         <p className={styles.headFinding}>
           <OutcomeMark known={known}>
-            {known === 'observed' ? `${stops.length} unplanned ${stops.length === 1 ? 'stop' : 'stops'} returned, newest first`
+            {known === 'observed' || (heldOver(crash) && stops.length) ? `${stops.length} unplanned ${stops.length === 1 ? 'stop' : 'stops'} returned, newest first`
               : known === 'zero' ? 'No unplanned stop in the records Windows keeps'
                 : known === 'taking' ? 'Reading the stops…' : whyNot(reading, crash.problem)}
           </OutcomeMark>
+          {heldOver(crash) ? <span className={styles.reach}>The latest take was not observed; the stops below are from the reading taken at {CLOCK.format(Date.parse(reading!.asked_at))}.</span> : null}
+          {reading?.warnings.map((warning, index) => <span key={index} className={styles.reach}>{warning.split('\n')[0]}</span>)}
           {coverage?.system?.retained_from ? <span className={styles.reach}>The System log reaches back to {DAY.format(Date.parse(coverage.system.retained_from))}; an older stop cannot appear here.</span> : null}
         </p>
         <ReadingFooter taken={crash} />
@@ -63,7 +83,7 @@ export function Stopped() {
 
       {stops.length ? (
         <div className={styles.layout}>
-          <nav className={styles.stopList} aria-label="Unplanned stops">
+          <section className={styles.stopList} aria-label="Unplanned stops; choosing one shows its evidence beside the list">
             <ol>
               {stops.map((item, index) => {
                 const at = stopMoment(item);
@@ -75,9 +95,9 @@ export function Stopped() {
                 return (
                   <li key={stopIdentity(item)}>
                     <button className={`${styles.stopButton} ${selected ? styles.stopSelected : ''}`} aria-pressed={selected}
-                      onClick={() => setCrashesView({ stopId: stopIdentity(item), focus: 'stop', changesStopId: null, changesBefore: null })}>
+                      onClick={() => choose(item)}>
                       <span className={styles.stopWhen}>
-                        {recent ? <AttentionGlyph kind="stop" /> : <span className={styles.stopDot} aria-hidden="true" />}
+                        <span className={styles.stopDot} aria-hidden="true" />
 
                         <span className="readout">{at ? `${DAY.format(Date.parse(at))} · ${SHORT.format(Date.parse(at))}` : 'time not recorded'}</span>
                         <span className={styles.stopAge}>{recent ? <span className={styles.newWord}>New · </span> : null}{age ? `${age.figure} ${age.unit}` : null}</span>
@@ -92,10 +112,10 @@ export function Stopped() {
             <button className={`button quiet ${styles.more}`} onClick={() => setCrashesView({ stopCount: stopCount === 5 ? 20 : 5, stopId: null })}>
               {stopCount === 5 ? 'Read the newest 20 stops' : 'Back to the newest 5'}
             </button>
-          </nav>
+          </section>
 
           <div className={styles.composition}>
-            {stop ? <Composition key={stopIdentity(stop)} stop={stop} envelope={reading} />
+            {stop ? <Composition key={stopIdentity(stop)} stop={stop} envelope={reading} count={stopCount} />
               : <p className={styles.missing} role="status">The stop you chose is not in this reading. Choose one from the list; nothing was chosen for you.</p>}
           </div>
         </div>
@@ -119,32 +139,35 @@ function bugcheckName(stop: Stop): string {
 }
 
 /** The fixed order behind the door, for one stop. Every parameter comes from the stop itself. */
-function stopRecipe(stop: Stop): { steps: RecipeStep[]; anchor: string | null; window: { since: string; before: string } | null } {
+function stopRecipe(stop: Stop, count: number): { steps: RecipeStep[]; anchor: string | null; window: { since: string; before: string } | null } {
   const anchor = stop.started_at ?? stop.announced_at ?? stop.reported_at;
-  const first = stop.stopped_at ?? stop.started_at;
-  const last = stop.started_at ?? stop.stopped_at;
+  // The window is centred only on the stop's own times. A report is filed after the fact, so its
+  // filing time is not a place to look for errors around the stop.
+  const boot = stop.started_at ?? stop.announced_at;
+  const first = stop.stopped_at ?? boot;
+  const last = boot ?? stop.stopped_at;
   const window = first && last ? { since: new Date(Date.parse(first) - HOUR).toISOString(), before: new Date(Date.parse(last) + HOUR).toISOString() } : null;
   const steps: RecipeStep[] = [
-    { reading: 'crash', params: { count: 5 }, answers: 'the unplanned stops; this is the one chosen here' },
+    { reading: 'crash', params: { count }, answers: 'the unplanned stops; this is the one chosen here' },
   ];
-  if (anchor) steps.push({ reading: 'record', params: { before: anchor, count: 25 }, answers: 'what the System log held before the next start' });
+  if (anchor) steps.push({ reading: 'record', params: { before: anchor, count: 25 }, answers: `what the System log held before ${anchorRole(stop)}` });
   if (stop.stopped_at) steps.push({ reading: 'changes', params: { before: stop.stopped_at, hours: 168, count: 100 }, answers: 'updates, drivers and installs in the week before Windows’ stop estimate' });
   if (window) {
-    steps.push({ reading: 'whea_window', params: { source: 'system', ...window, order: 'oldest', count: 50 }, answers: 'System hardware error reports from an hour before the stop to an hour after the start' });
-    steps.push({ reading: 'whea_window', params: { source: 'kernel_whea', ...window, order: 'oldest', count: 50 }, answers: 'the same window in the separate Kernel-WHEA channel' });
+    steps.push({ reading: 'whea_window', params: { source: 'system', ...window, order: 'oldest', count: WHEA_CAP }, answers: 'System hardware error reports from an hour before the stop to an hour after the start' });
+    steps.push({ reading: 'whea_window', params: { source: 'kernel_whea', ...window, order: 'oldest', count: WHEA_CAP }, answers: 'the same window in the separate Kernel-WHEA channel' });
   }
   return { steps, anchor, window };
 }
 
-function Composition({ stop, envelope }: { stop: Stop; envelope: Reading | null }) {
-  const { steps, anchor, window } = stopRecipe(stop);
+function Composition({ stop, envelope, count }: { stop: Stop; envelope: Reading | null; count: number }) {
+  const { steps, anchor, window } = stopRecipe(stop, count);
   const at = stopMoment(stop);
   const ids = recordIds(stop);
   const reportOnly = !stop.started_at && !stop.stopped_at && !stop.announced_at;
 
   return (
     <>
-      <h2 className={styles.compositionTitle}>
+      <h2 id="composition-title" tabIndex={-1} className={styles.compositionTitle} aria-live="polite">
         <span className={styles.compositionEyebrow}>The stop and what surrounded it</span>
         {at ? `${DAY.format(Date.parse(at))}, ${CLOCK.format(Date.parse(at))}` : 'A stop without a recorded time'}
       </h2>
@@ -179,7 +202,7 @@ function Composition({ stop, envelope }: { stop: Stop; envelope: Reading | null 
         )}
 
         {window ? <HardwareAround window={window} /> : (
-          <Step n={4} question="Hardware error reports around it" known="notasked" finding="This stop has no time to centre a window on" reading="whea_window" />
+          <Step n={4} question="Hardware error reports around it" known="notasked" finding="No stop or start time was returned; a report's filing time is not the stop's, so no window is placed" reading="whea_window" />
         )}
 
         <li className={styles.furtherStep}>
@@ -245,17 +268,19 @@ function RecordBefore({ anchor, stop }: { anchor: string; stop: Stop }) {
   const known = knownOf(taken);
   const shown = rows.slice(-8);
   const oldest = rows[0]?.TimeCreated;
-  const retained = part<{ log_oldest?: string | null }>(taken.reading, 'collection')?.log_oldest;
+  const collection = part<{ log_oldest?: string | null; truncated?: boolean | null }>(taken.reading, 'collection');
+  const retained = collection?.log_oldest;
+  const truncated = collection?.truncated !== false;
   return (
     <Step n={2} id="step-record" question="What the System log held before it" known={known} reading="record" cls="raw"
-      finding={known === 'observed' ? `${rows.length} records before the next start at ${CLOCK.format(Date.parse(anchor))}${oldest ? `, from ${SHORT.format(Date.parse(oldest))}` : ''}`
+      finding={known === 'observed' ? `${truncated ? `The newest ${rows.length}` : `All ${rows.length}`} retained records before ${anchorRole(stop)} at ${CLOCK.format(Date.parse(anchor))}${oldest ? `, back to ${SHORT.format(Date.parse(oldest))}` : ''}${truncated ? '; earlier ones remain in the log' : ''}`
         : known === 'zero' ? (retained && Date.parse(retained) >= Date.parse(anchor)
           ? `No record returned: the System log’s oldest retained record is from ${DAY.format(Date.parse(retained))}, after this stop. This is the log’s reach, not a quiet machine.`
           : 'No retained System record returned before this moment')
           : known === 'taking' ? 'Reading…' : whyNot(taken.reading, taken.problem)}>
       {shown.length ? (
         <>
-          <ol className={styles.logRows} aria-label={`The last ${shown.length} records before the next start`}>
+          <ol className={styles.logRows} aria-label={`The last ${shown.length} records before ${anchorRole(stop)}`}>
             {rows.length > shown.length ? <li className={styles.logEarlier}>{rows.length - shown.length} earlier records in this reading</li> : null}
             {shown.map((row) => (
               <li key={`${row.RecordId}`} className={styles.logRow}>
@@ -266,11 +291,11 @@ function RecordBefore({ anchor, stop }: { anchor: string; stop: Stop }) {
               </li>
             ))}
             <li className={styles.logMarker}>
-              <span className="readout">{stop.stopped_at ? `stop estimate ${CLOCK.format(Date.parse(stop.stopped_at))} · ` : ''}next start {CLOCK.format(Date.parse(anchor))}</span>
+              <span className="readout">{stop.stopped_at ? `stop estimate ${CLOCK.format(Date.parse(stop.stopped_at))} · ` : ''}{anchorRole(stop).replace(/^the /, '')} {CLOCK.format(Date.parse(anchor))}</span>
             </li>
           </ol>
           <div className={styles.stepActions}>
-            <MomentLink at={anchor} label="Open the whole frame in the System log" sourceKey={`stop:${stopIdentity(stop)}:${anchor}`} />
+             <MomentLink at={anchor} label="Open the whole frame in the System log" sourceKey={`stop:${stopIdentity(stop)}:${anchor}`} />
           </div>
         </>
       ) : null}
@@ -301,30 +326,52 @@ function Changes({ stop, before }: { stop: Stop; before: string }) {
 
 interface WheaPreview { RecordId: number | string; Log?: string; Id: number; Level: number; TimeCreated: string; Message: string | null }
 
+interface WindowReach { complete?: boolean | null; covered_from?: string | null; covered_until?: string | null }
+interface WindowSource { truncated?: boolean | null; stopped?: unknown }
+
+/** What one log's answer can support: a count only as far as its reach and its cap allow. */
+function sideReach(reading: Reading | null): { complete: boolean; capped: boolean; words: string } {
+  const reach = part<WindowReach>(reading, 'coverage');
+  const source = part<{ source?: WindowSource } & WindowSource>(reading, 'collection');
+  const capped = (source?.source?.truncated ?? source?.truncated) === true || (source?.source?.stopped ?? source?.stopped) != null;
+  const complete = reach?.complete === true && !capped;
+  const words = capped ? `the ${WHEA_CAP}-report cap or a stopped query was reached; later reports in the window were not read`
+    : reach?.complete === true ? 'window covered'
+      : reach?.covered_from ? `covered only from ${SHORT.format(Date.parse(reach.covered_from))}`
+        : 'coverage of this window could not be established';
+  return { complete, capped, words };
+}
+
 function HardwareAround({ window }: { window: { since: string; before: string } }) {
-  const system = useReading('whea_window', { source: 'system', ...window, order: 'oldest', count: 50 }, true, { hold: 'same-params' });
-  const channel = useReading('whea_window', { source: 'kernel_whea', ...window, order: 'oldest', count: 50 }, true, { hold: 'same-params' });
+  const system = useReading('whea_window', { source: 'system', ...window, order: 'oldest', count: WHEA_CAP }, true, { hold: 'same-params' });
+  const channel = useReading('whea_window', { source: 'kernel_whea', ...window, order: 'oldest', count: WHEA_CAP }, true, { hold: 'same-params' });
   const sides: [string, Taken<unknown>][] = [['System log', system], ['Kernel-WHEA channel', channel]];
   const knowns = sides.map(([, t]) => knownOf(t));
-  // The step reports what was found; a log that was not read is named beside it, never folded into a zero.
+  const reaches = sides.map(([, t]) => sideReach(t.reading));
+  // The step reports what was found; a log that was not read is named beside it, never folded
+  // into a zero, and an empty window only counts as quiet as far as its coverage reaches.
   const known: Known = knowns.includes('taking') ? 'taking' : knowns.includes('observed') ? 'observed'
     : knowns.includes('zero') ? 'zero' : knowns[0];
   const count = sides.reduce((n, [, t]) => n + (observed(t.reading) ? (part<WheaPreview[]>(t.reading, 'records') ?? []).length : 0), 0);
-  const partial = knowns.some(isHole) && !isHole(known);
+  const holes = sides.filter((_, i) => isHole(knowns[i])).map(([label]) => label);
+  const uncovered = sides.filter((_, i) => !isHole(knowns[i]) && knowns[i] !== 'taking' && !reaches[i].complete).map(([label]) => label);
+  const span = `${SHORT.format(Date.parse(window.since))} to ${SHORT.format(Date.parse(window.before))}`;
+  const limits = [holes.length ? `${holes.join(' and ')} not read` : null, uncovered.length ? `${uncovered.join(' and ')} not fully covered` : null].filter(Boolean).join('; ');
   return (
     <Step n={4} id="step-hardware" question="Hardware error reports around it" known={known} reading="whea_window" cls="raw"
       finding={known === 'taking' ? 'Reading both logs…'
-        : known === 'observed' ? `${count} ${count === 1 ? 'report' : 'reports'} filed from ${SHORT.format(Date.parse(window.since))} to ${SHORT.format(Date.parse(window.before))}${partial ? '; one log was not read' : ''}`
-          : known === 'zero' ? `No report filed from ${SHORT.format(Date.parse(window.since))} to ${SHORT.format(Date.parse(window.before))} in either log${partial ? '; one log was not read' : ''}`
+        : known === 'observed' ? `${reaches.some((r) => r.capped) ? 'At least ' : ''}${count} ${count === 1 ? 'report' : 'reports'} filed from ${span}${limits ? `; ${limits}` : ''}`
+          : known === 'zero' ? `No report returned from ${span}${limits ? `; ${limits}, so this is not a quiet window` : ' in either log'}`
             : 'Neither log was read'}>
       <p className={styles.caveat}>Report times say when Windows filed each report. A report filed at the next start may describe an error from before the stop.</p>
       <div className={styles.sides}>
-        {sides.map(([label, t]) => {
+        {sides.map(([label, t], index) => {
           const rows = observed(t.reading) ? part<WheaPreview[]>(t.reading, 'records') ?? [] : [];
-          const k = knownOf(t);
+          const k = knowns[index];
           return (
             <div key={label} className={styles.side}>
-              <p className={styles.sideHead}><OutcomeMark known={k}>{label} · {k === 'observed' ? `${rows.length} filed` : k === 'zero' ? 'none filed in this window' : k === 'taking' ? 'reading…' : whyNot(t.reading, t.problem)}</OutcomeMark></p>
+              <p className={styles.sideHead}><OutcomeMark known={k}>{label} · {k === 'observed' ? `${rows.length} filed` : k === 'zero' ? 'none returned' : k === 'taking' ? 'reading…' : whyNot(t.reading, t.problem)}</OutcomeMark></p>
+              {!isHole(k) && k !== 'taking' ? <p className={styles.sideReach}>{reaches[index].words}</p> : null}
               {rows.length ? (
                 <ol className={styles.sideRows}>
                   {rows.slice(0, 6).map((row) => (
