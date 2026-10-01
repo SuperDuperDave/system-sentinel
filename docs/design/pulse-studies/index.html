@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>System Pulse — concept studies</title>
+<style>
+html{color-scheme:light dark}body{margin:0;padding:24px;background:light-dark(#dddeda,#080f16);font:14px/1.5 system-ui,sans-serif;color:light-dark(#23313d,#e6e9e5)}
+.study-shell{max-width:1200px;margin:auto}.study-review{display:flex;flex-wrap:wrap;gap:12px;justify-content:space-between;align-items:center;padding:0 0 18px}.study-review span{font-size:12px;opacity:.8}.study-choices{display:flex;gap:6px;flex-wrap:wrap}.study-choices button{font:inherit;border:0;border-radius:6px;padding:9px 13px;background:light-dark(#f6f4ed,#192836);color:inherit;cursor:pointer}.study-choices button[aria-pressed=true]{background:light-dark(#bc9b70,#e9ba7e);color:#18222b}.study-choices button:focus-visible{outline:3px solid #c28f4e;outline-offset:3px}@media(max-width:600px){body{padding:10px}}
+</style></head><body><div class="study-shell"><div class="study-review"><span>CONCEPT STUDIES · SYNTHETIC EVIDENCE</span><nav class="study-choices" aria-label="Design concepts"></nav></div>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,400;9..144,500&family=IBM+Plex+Mono:wght@400;500&display=swap');
+#pulse-studies { width:100%; }
+#pulse-studies * { box-sizing:border-box; }
+#pulse-studies .sp-window {
+  --sp-bg:light-dark(#f4f1eb,#101b27); --sp-surface:light-dark(#fffdf7,#172534);
+  --sp-ink:light-dark(#1d2b37,#f0ede5); --sp-muted:light-dark(#58616b,#b3beca);
+  --sp-line:light-dark(#c8c9c5,#3a4c5d); --sp-accent:light-dark(#85521b,#f2ba73);
+  --sp-soft:light-dark(#e9d8bf,#2d3540); --sp-mark:light-dark(#9b421d,#f2ad8c);
+  --sp-paper:light-dark(#fffdf7,#192735); --sp-grid:light-dark(#deded5,#2c3c4b);
+  color-scheme:light dark; color:var(--sp-ink); background:var(--sp-bg);
+  font:15px/1.5 'DM Sans',sans-serif; border-radius:14px; overflow:hidden;
+  min-height:875px; position:relative; isolation:isolate;
+}
+#pulse-studies .sp-window[data-theme="dark"] { color-scheme:dark; }
+#pulse-studies .sp-window[data-theme="light"] { color-scheme:light; }
+#pulse-studies .sp-window button { font:inherit; color:inherit; }
+#pulse-studies .sp-window h1, #pulse-studies .sp-window h2, #pulse-studies .sp-window h3,
+#pulse-studies .sp-window p { margin:0; }
+#pulse-studies .sp-window h1 { font-size:clamp(35px,5vw,57px); line-height:1.04; font-weight:500; letter-spacing:-.065em; }
+#pulse-studies .sp-window h2 { font-size:25px; line-height:1.2; font-weight:500; letter-spacing:-.035em; }
+#pulse-studies .sp-window h3 { font-size:17px; font-weight:500; }
+#pulse-studies .sp-window button, #pulse-studies .sp-window summary { cursor:var(--cursor-interaction,pointer); }
+#pulse-studies .sp-window button:focus-visible, #pulse-studies .sp-window summary:focus-visible { outline:3px solid var(--sp-accent); outline-offset:4px; }
+#pulse-studies .sp-window .sp-kicker { font:11px/1.4 'IBM Plex Mono',monospace; letter-spacing:.13em; text-transform:uppercase; color:var(--sp-muted); }
+#pulse-studies .sp-window .sp-mono { font-family:'IBM Plex Mono',monospace; font-size:12px; font-variant-numeric:tabular-nums; }
+#pulse-studies .sp-window .sp-muted { color:var(--sp-muted); }
+#pulse-studies .sp-window .sp-small { font-size:12px; }
+#pulse-studies .sp-window .sp-header { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:22px 30px; }
+#pulse-studies .sp-window .sp-brand { display:flex; align-items:center; gap:11px; font-size:17px; font-weight:500; letter-spacing:-.035em; }
+#pulse-studies .sp-window .sp-logo { width:27px; height:27px; border:1.5px solid var(--sp-accent); border-radius:50%; position:relative; display:inline-block; flex-shrink:0; }
+#pulse-studies .sp-window .sp-logo:before { content:''; position:absolute; inset:6px; border:1px solid var(--sp-accent); border-radius:50%; }
+#pulse-studies .sp-window .sp-logo:after { content:''; width:5px; height:5px; background:var(--sp-accent); position:absolute; top:9.5px; left:9.5px; border-radius:50%; }
+#pulse-studies .sp-window .sp-header-end { display:flex; align-items:center; gap:14px; }
+#pulse-studies .sp-window .sp-theme { border:0; background:transparent; padding:8px; font-size:12px; color:var(--sp-muted); }
+#pulse-studies .sp-window .sp-button { border:1px solid var(--sp-line); background:var(--sp-surface); border-radius:7px; padding:10px 15px; display:inline-flex; align-items:center; justify-content:center; gap:10px; font-size:13px; font-weight:500; min-height:42px; }
+#pulse-studies .sp-window .sp-button.sp-primary { background:var(--sp-accent); border-color:var(--sp-accent); color:light-dark(#fffaf0,#18232c); }
+#pulse-studies .sp-window .sp-button:disabled { opacity:.65; cursor:wait; }
+#pulse-studies .sp-window .sp-arrow { font-size:18px; line-height:1; }
+#pulse-studies .sp-window .sp-tabs { display:flex; flex-wrap:wrap; gap:7px; }
+#pulse-studies .sp-window .sp-tab { padding:9px 13px; background:transparent; border:0; border-radius:6px; color:var(--sp-muted); font-size:13px; min-height:40px; }
+#pulse-studies .sp-window .sp-tab[aria-pressed="true"] { color:var(--sp-ink); background:var(--sp-soft); }
+#pulse-studies .sp-window .sp-body { padding:18px 38px 30px; }
+#pulse-studies .sp-window .sp-heading { display:flex; justify-content:space-between; align-items:center; gap:16px; margin-bottom:26px; }
+#pulse-studies .sp-window .sp-title-block { display:grid; gap:14px; }
+#pulse-studies .sp-window .sp-title-block > p { max-width:350px; font-size:15px; color:var(--sp-muted); }
+#pulse-studies .sp-window .sp-pill { display:inline-flex; align-items:center; gap:7px; font:11px/1.4 'IBM Plex Mono',monospace; color:var(--sp-muted); }
+#pulse-studies .sp-window .sp-dot { width:6px; height:6px; border-radius:50%; background:var(--sp-muted); display:inline-block; flex-shrink:0; }
+#pulse-studies .sp-window .sp-collected { color:var(--sp-accent); }
+#pulse-studies .sp-window .sp-collected .sp-dot { background:var(--sp-accent); }
+#pulse-studies .sp-window .sp-footer { display:flex; gap:16px; flex-wrap:wrap; justify-content:space-between; padding:18px 30px; color:var(--sp-muted); font:11px/1.4 'IBM Plex Mono',monospace; border-top:1px solid var(--sp-line); }
+#pulse-studies .sp-window .sp-footer button { font:inherit; color:inherit; border:0; padding:0; background:transparent; text-decoration:underline; text-underline-offset:4px; }
+#pulse-studies .sp-window .sp-fixture { display:flex; flex-wrap:wrap; align-items:center; gap:5px 14px; margin-top:22px; }
+#pulse-studies .sp-window .sp-fixture button { background:transparent; border:0; padding:5px 0; color:var(--sp-muted); font-size:11px; }
+#pulse-studies .sp-window .sp-fixture button[aria-pressed="true"] { color:var(--sp-accent); text-decoration:underline; text-underline-offset:5px; }
+#pulse-studies .sp-window .sp-reading-list { display:grid; gap:3px; }
+#pulse-studies .sp-window .sp-reading { display:flex; align-items:center; justify-content:space-between; gap:18px; padding:14px 0; border:0; border-bottom:1px solid var(--sp-line); background:transparent; text-align:left; width:100%; }
+#pulse-studies .sp-window .sp-reading > span:first-child { display:grid; gap:3px; }
+#pulse-studies .sp-window .sp-reading strong { font-weight:500; font-size:14px; }
+#pulse-studies .sp-window .sp-reading .sp-small { color:var(--sp-muted); }
+#pulse-studies .sp-window .sp-reading[aria-pressed="true"] strong { color:var(--sp-accent); }
+#pulse-studies .sp-window .sp-reading-mark { font:12px 'IBM Plex Mono',monospace; color:var(--sp-accent); flex-shrink:0; }
+#pulse-studies .sp-window .sp-gap { padding:14px 17px; background:repeating-linear-gradient(135deg,transparent,transparent 5px,color-mix(in srgb,var(--sp-muted) 7%,transparent) 5px,color-mix(in srgb,var(--sp-muted) 7%,transparent) 6px); border-left:2px solid var(--sp-muted); margin-top:17px; font-size:13px; }
+#pulse-studies .sp-window .sp-gap p { color:var(--sp-muted); font-size:12px; margin-top:4px; }
+#pulse-studies .sp-window .sp-inspector { padding:19px 0 0; }
+#pulse-studies .sp-window .sp-inspector-head { display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:8px; }
+#pulse-studies .sp-window .sp-inspector-head button { padding:5px; background:transparent; border:0; color:var(--sp-muted); font-size:12px; }
+#pulse-studies .sp-window .sp-inspector > p { font-size:14px; margin-bottom:12px; color:var(--sp-muted); }
+#pulse-studies .sp-window details { border-top:1px solid var(--sp-line); padding:12px 0; font-size:13px; }
+#pulse-studies .sp-window summary { color:var(--sp-ink); }
+#pulse-studies .sp-window .sp-record { padding:14px 0 4px; }
+#pulse-studies .sp-window .sp-record pre { font:11px/1.7 'IBM Plex Mono',monospace; white-space:pre-wrap; overflow-wrap:anywhere; background:var(--sp-surface); padding:14px; border-radius:5px; margin:10px 0; }
+#pulse-studies .sp-window .sp-record p { font-size:12px; color:var(--sp-muted); }
+#pulse-studies .sp-window .sp-incident { display:grid; gap:17px; }
+#pulse-studies .sp-window .sp-incident .sp-incident-lead { font-size:18px; color:var(--sp-ink); letter-spacing:-.02em; }
+#pulse-studies .sp-window .sp-time-row { display:grid; grid-template-columns:70px 1fr; gap:12px; padding:13px 0; border-bottom:1px solid var(--sp-line); }
+#pulse-studies .sp-window .sp-time-row > div { display:grid; gap:3px; }
+#pulse-studies .sp-window .sp-time-row strong { font-weight:500; font-size:13px; }
+#pulse-studies .sp-window .sp-time-row p { font-size:12px; color:var(--sp-muted); }
+#pulse-studies .sp-window .sp-actions { display:flex; flex-wrap:wrap; gap:9px; margin-top:19px; }
+#pulse-studies .sp-window .sp-report { position:relative; margin:24px 0 0; padding:27px; background:var(--sp-paper); border-radius:5px; box-shadow:0 8px 30px color-mix(in srgb,var(--sp-ink) 6%,transparent); }
+#pulse-studies .sp-window .sp-report:before { content:''; position:absolute; top:0; left:0; width:58px; height:2px; background:var(--sp-accent); }
+#pulse-studies .sp-window .sp-report h3 { font-family:'Fraunces',Georgia,serif; font-size:25px; margin:10px 0 14px; }
+#pulse-studies .sp-window .sp-report p { font-size:13px; color:var(--sp-muted); }
+#pulse-studies .sp-window .sp-report dl { display:grid; grid-template-columns:105px 1fr; gap:9px 12px; font-size:12px; margin:17px 0; }
+#pulse-studies .sp-window .sp-report dt { color:var(--sp-muted); }
+#pulse-studies .sp-window .sp-report dd { margin:0; }
+#pulse-studies .sp-window .sp-report .sp-report-close { position:absolute; top:20px; right:20px; padding:5px; background:transparent; border:0; font-size:12px; color:var(--sp-muted); }
+#pulse-studies .sp-window .sp-volume { display:grid; gap:9px; padding:17px 0; }
+#pulse-studies .sp-window .sp-volume-bar { height:8px; background:var(--sp-line); border-radius:2px; overflow:hidden; }
+#pulse-studies .sp-window .sp-volume-bar span { display:block; height:100%; background:var(--sp-accent); }
+#pulse-studies .sp-window .sp-volume-label { display:flex; justify-content:space-between; gap:12px; font-size:12px; }
+
+/* Luminous instrument: the machine provides spatial orientation. */
+#pulse-studies .sp-luminous { --sp-bg:light-dark(#f0f1ed,#0c1723); --sp-surface:light-dark(#fafaf5,#16283a); background:radial-gradient(ellipse at 76% 35%,color-mix(in srgb,var(--sp-accent) 8%,var(--sp-bg)),var(--sp-bg) 57%); }
+#pulse-studies .sp-luminous .sp-header { padding-bottom:15px; }
+#pulse-studies .sp-luminous .sp-main-grid { display:grid; grid-template-columns:minmax(0,.94fr) minmax(0,1.2fr); gap:36px; margin-top:29px; }
+#pulse-studies .sp-luminous .sp-reading-list { margin-top:30px; }
+#pulse-studies .sp-luminous .sp-map { position:relative; padding-top:6px; }
+#pulse-studies .sp-luminous .sp-map-caption { display:flex; justify-content:space-between; gap:12px; margin-bottom:15px; }
+#pulse-studies .sp-luminous .sp-map-stage { position:relative; min-height:426px; }
+#pulse-studies .sp-luminous .sp-plane-button { position:absolute; left:0; right:0; display:flex; align-items:center; gap:0; padding:0; border:0; background:transparent; text-align:left; height:136px; }
+#pulse-studies .sp-luminous .sp-plane-art { width:74%; flex-shrink:0; overflow:visible; transition:transform 250ms ease; }
+#pulse-studies .sp-luminous .sp-plane-button[aria-pressed="true"] .sp-plane-art { transform:translate(-9px,-9px); }
+#pulse-studies .sp-luminous .sp-plane-face { fill:var(--sp-surface); stroke:var(--sp-line); stroke-width:1; }
+#pulse-studies .sp-luminous .sp-plane-button[aria-pressed="true"] .sp-plane-face { fill:color-mix(in srgb,var(--sp-accent) 9%,var(--sp-surface)); stroke:var(--sp-accent); }
+#pulse-studies .sp-luminous .sp-plane-under { fill:color-mix(in srgb,var(--sp-ink) 8%,var(--sp-bg)); stroke:var(--sp-line); stroke-width:.6; }
+#pulse-studies .sp-luminous .sp-plane-grid { stroke:var(--sp-grid); stroke-width:.6; fill:none; opacity:var(--sp-detail,.7); }
+#pulse-studies .sp-luminous .sp-plane-label { margin-left:-15px; position:relative; z-index:2; display:grid; gap:4px; font-size:12px; }
+#pulse-studies .sp-luminous .sp-plane-label small { color:var(--sp-muted); font-size:11px; }
+#pulse-studies .sp-luminous .sp-plane-mark { fill:var(--sp-accent); }
+#pulse-studies .sp-luminous .sp-map-explain { color:var(--sp-muted); font-size:11px; max-width:320px; margin-top:13px; }
+#pulse-studies .sp-luminous .sp-selected { background:var(--sp-surface); padding:17px 19px; border-radius:6px; }
+#pulse-studies .sp-luminous .sp-selected > p { font-size:13px; color:var(--sp-muted); margin-top:5px; }
+
+/* Tactile instrument: a question opens a measured work surface. */
+#pulse-studies .sp-tactile { --sp-bg:light-dark(#e9e4d8,#20282d); --sp-surface:light-dark(#f7f3e8,#2d373d); --sp-paper:light-dark(#fffcf2,#303a3e); --sp-soft:light-dark(#ded0b8,#41443e); --sp-accent:light-dark(#745025,#e6bd81); }
+#pulse-studies .sp-tactile .sp-header { padding-bottom:22px; border-bottom:1px solid var(--sp-line); }
+#pulse-studies .sp-tactile .sp-brand { font-family:'Fraunces',Georgia,serif; font-size:22px; letter-spacing:-.04em; }
+#pulse-studies .sp-tactile .sp-body { padding-top:25px; }
+#pulse-studies .sp-tactile h1 { font-family:'Fraunces',Georgia,serif; letter-spacing:-.06em; font-size:clamp(38px,5vw,60px); }
+#pulse-studies .sp-tactile .sp-main-grid { display:grid; grid-template-columns:minmax(0,1.17fr) minmax(0,.83fr); gap:34px; margin-top:31px; }
+#pulse-studies .sp-tactile .sp-work-surface { background:var(--sp-surface); border-radius:7px; padding:25px; box-shadow:0 2px 0 color-mix(in srgb,var(--sp-ink) 15%,transparent),0 12px 25px color-mix(in srgb,var(--sp-ink) 4%,transparent); }
+#pulse-studies .sp-tactile .sp-work-surface > .sp-kicker { margin-bottom:15px; }
+#pulse-studies .sp-tactile .sp-work-title { margin-top:9px; padding-bottom:21px; }
+#pulse-studies .sp-tactile .sp-tool-strip { display:grid; grid-template-columns:repeat(5,1fr); gap:9px; margin-bottom:23px; }
+#pulse-studies .sp-tactile .sp-tool { border:0; padding:7px 0 8px; background:transparent; color:var(--sp-muted); display:grid; gap:8px; justify-items:center; font-size:11px; }
+#pulse-studies .sp-tactile .sp-tool[aria-pressed="true"] { color:var(--sp-accent); }
+#pulse-studies .sp-tactile .sp-tool-object { width:37px; height:34px; border:1px solid var(--sp-line); border-radius:5px; position:relative; background:var(--sp-bg); }
+#pulse-studies .sp-tactile .sp-tool[aria-pressed="true"] .sp-tool-object { border-color:var(--sp-accent); box-shadow:inset 0 -3px var(--sp-accent); }
+#pulse-studies .sp-tactile .sp-tool-object:after { content:''; position:absolute; inset:8px; border:1px solid var(--sp-muted); }
+#pulse-studies .sp-tactile .sp-tool[data-area="applications"] .sp-tool-object:after { border-radius:2px; box-shadow:3px -3px 0 var(--sp-bg),4px -4px 0 var(--sp-muted); }
+#pulse-studies .sp-tactile .sp-tool[data-area="system"] .sp-tool-object:after { inset:7px 13px; border-width:0 1px; transform:skew(-15deg); }
+#pulse-studies .sp-tactile .sp-tool[data-area="changes"] .sp-tool-object:after { border-width:0 0 1px; transform:rotate(-35deg); }
+#pulse-studies .sp-tactile .sp-tool[data-area="storage"] .sp-tool-object:after { border-radius:50%; inset:9px 6px; }
+#pulse-studies .sp-tactile .sp-tool[data-area="hardware"] .sp-tool-object:after { inset:7px 9px; box-shadow:0 3px 0 var(--sp-bg),0 4px 0 var(--sp-muted); }
+#pulse-studies .sp-tactile .sp-side-note { padding-top:10px; }
+#pulse-studies .sp-tactile .sp-side-note h2 { font-family:'Fraunces',Georgia,serif; font-size:30px; }
+#pulse-studies .sp-tactile .sp-note-rule { width:40px; height:2px; background:var(--sp-accent); margin:16px 0; }
+#pulse-studies .sp-tactile .sp-side-note > p { font-size:14px; color:var(--sp-muted); }
+#pulse-studies .sp-tactile .sp-note-lead { padding:22px 0 7px; }
+#pulse-studies .sp-tactile .sp-note-lead > p { margin-top:8px; color:var(--sp-muted); font-size:13px; }
+
+/* Pulse journal: retained observations create a navigable account. */
+#pulse-studies .sp-journal { --sp-bg:light-dark(#f6f5ee,#151f27); --sp-surface:light-dark(#eaece6,#25323a); --sp-accent:light-dark(#45624c,#b3c9b4); --sp-soft:light-dark(#e0e7dc,#31433b); }
+#pulse-studies .sp-journal .sp-header { padding-top:26px; padding-bottom:26px; }
+#pulse-studies .sp-journal .sp-brand { font-family:'Fraunces',Georgia,serif; font-size:23px; }
+#pulse-studies .sp-journal .sp-logo { width:23px; height:23px; }
+#pulse-studies .sp-journal .sp-logo:after { left:7.5px; top:7.5px; }
+#pulse-studies .sp-journal .sp-body { padding-top:5px; }
+#pulse-studies .sp-journal .sp-editorial { display:grid; grid-template-columns:1fr auto; gap:20px; border-bottom:1px solid var(--sp-line); padding:13px 0 24px; align-items:end; }
+#pulse-studies .sp-journal h1 { font-family:'Fraunces',Georgia,serif; font-size:clamp(42px,5.7vw,65px); letter-spacing:-.055em; }
+#pulse-studies .sp-journal .sp-editorial p { max-width:480px; margin-top:14px; color:var(--sp-muted); font-size:14px; }
+#pulse-studies .sp-journal .sp-journal-grid { display:grid; grid-template-columns:150px minmax(0,1fr); gap:38px; padding-top:25px; }
+#pulse-studies .sp-journal .sp-journal-nav { display:grid; align-content:start; gap:6px; }
+#pulse-studies .sp-journal .sp-journal-nav button { padding:12px 0; background:transparent; border:0; text-align:left; color:var(--sp-muted); font-size:13px; }
+#pulse-studies .sp-journal .sp-journal-nav button[aria-pressed="true"] { color:var(--sp-accent); }
+#pulse-studies .sp-journal .sp-journal-nav .sp-journal-nr { font:11px 'IBM Plex Mono',monospace; margin-right:13px; color:var(--sp-muted); }
+#pulse-studies .sp-journal .sp-entry { display:grid; grid-template-columns:75px minmax(0,1fr); gap:20px; padding:18px 0 25px; }
+#pulse-studies .sp-journal .sp-entry-marker { padding-top:5px; font:12px 'IBM Plex Mono',monospace; color:var(--sp-muted); }
+#pulse-studies .sp-journal .sp-entry-marker span { display:block; margin-top:8px; width:25px; height:2px; background:var(--sp-accent); }
+#pulse-studies .sp-journal .sp-entry-title { font-family:'Fraunces',Georgia,serif; font-size:32px; line-height:1.15; margin:10px 0 13px; }
+#pulse-studies .sp-journal .sp-entry-content > p { color:var(--sp-muted); font-size:14px; }
+#pulse-studies .sp-journal .sp-inline-link { padding:0; border:0; background:transparent; text-align:left; text-decoration:underline; text-underline-offset:5px; color:var(--sp-accent); font-size:13px; }
+#pulse-studies .sp-journal .sp-summary-band { display:flex; gap:18px; flex-wrap:wrap; padding:13px 0; border-top:1px solid var(--sp-line); border-bottom:1px solid var(--sp-line); margin-top:18px; font-size:12px; color:var(--sp-muted); }
+#pulse-studies .sp-journal .sp-entry .sp-gap { margin-top:18px; }
+#pulse-studies .sp-window .sp-hidden { display:none; }
+#pulse-studies .sp-window .sp-live-message { margin-top:10px; font-size:12px; color:var(--sp-muted); }
+#pulse-studies .sp-window .sp-busy .sp-logo { animation:sp-collect 750ms ease-in-out 1; }
+@keyframes sp-collect { 50% { box-shadow:0 0 0 8px color-mix(in srgb,var(--sp-accent) 18%,transparent); } }
+@media (prefers-reduced-motion:reduce) { #pulse-studies .sp-window * { animation:none!important; transition:none!important; } }
+@media (max-width:760px) {
+  #pulse-studies .sp-window { min-height:1010px; }
+  #pulse-studies .sp-window .sp-header { padding:19px 21px; }
+  #pulse-studies .sp-window .sp-header-end { gap:3px; }
+  #pulse-studies .sp-window .sp-body { padding:15px 24px 25px; }
+  #pulse-studies .sp-luminous .sp-main-grid, #pulse-studies .sp-tactile .sp-main-grid { gap:24px; grid-template-columns:1fr; }
+  #pulse-studies .sp-luminous .sp-map { max-width:500px; width:100%; margin:auto; }
+  #pulse-studies .sp-luminous .sp-map-stage { min-height:442px; }
+  #pulse-studies .sp-luminous .sp-plane-art { width:68%; }
+  #pulse-studies .sp-luminous .sp-plane-label { margin-left:-10px; }
+  #pulse-studies .sp-tactile .sp-side-note { padding-top:0; }
+  #pulse-studies .sp-journal .sp-journal-grid { grid-template-columns:1fr; gap:14px; }
+  #pulse-studies .sp-journal .sp-journal-nav { display:flex; flex-wrap:wrap; gap:4px 14px; }
+  #pulse-studies .sp-journal .sp-journal-nav .sp-journal-nr { display:none; }
+  #pulse-studies .sp-journal .sp-editorial { grid-template-columns:1fr; gap:15px; }
+  #pulse-studies .sp-journal .sp-entry { grid-template-columns:55px minmax(0,1fr); gap:12px; }
+}
+@media (max-width:420px) {
+  #pulse-studies .sp-window .sp-header { align-items:start; }
+  #pulse-studies .sp-window .sp-header-end { flex-direction:column; align-items:end; }
+  #pulse-studies .sp-window .sp-header-end .sp-button { padding:9px 10px; font-size:12px; }
+  #pulse-studies .sp-window .sp-brand { font-size:16px; }
+  #pulse-studies .sp-tactile .sp-brand, #pulse-studies .sp-journal .sp-brand { font-size:20px; }
+  #pulse-studies .sp-window .sp-body { padding-left:20px; padding-right:20px; }
+  #pulse-studies .sp-window .sp-heading { flex-direction:column; align-items:start; gap:12px; }
+  #pulse-studies .sp-window .sp-footer { padding:17px 20px; }
+  #pulse-studies .sp-window .sp-report { padding:24px 18px; }
+  #pulse-studies .sp-window .sp-report dl { grid-template-columns:1fr; gap:4px; }
+  #pulse-studies .sp-window .sp-report dd { margin-bottom:9px; }
+  #pulse-studies .sp-luminous .sp-plane-art { width:65%; }
+  #pulse-studies .sp-luminous .sp-plane-label { margin-left:0; }
+  #pulse-studies .sp-tactile .sp-work-surface { padding:18px; }
+  #pulse-studies .sp-tactile .sp-tool-strip { gap:10px; grid-template-columns:repeat(3,minmax(0,1fr)); }
+  #pulse-studies .sp-tactile .sp-tool { font-size:11px; }
+  #pulse-studies .sp-journal .sp-entry { grid-template-columns:1fr; gap:7px; }
+  #pulse-studies .sp-journal .sp-entry-marker { display:flex; gap:12px; align-items:center; }
+  #pulse-studies .sp-journal .sp-entry-marker span { margin-top:0; }
+}
+</style>
+<div id="pulse-studies">
+  <div class="viz-carousel" aria-label="System Pulse design directions">
+    <section data-variant="Luminous instrument" aria-label="Luminous instrument concept">
+      <div id="pulse-luminous" class="sp-window sp-luminous" aria-label="Luminous instrument" data-theme="system"></div>
+    </section>
+    <section data-variant="Tactile instrument" aria-label="Tactile instrument concept" hidden>
+      <div id="pulse-tactile" class="sp-window sp-tactile" aria-label="Tactile instrument" data-theme="system"></div>
+    </section>
+    <section data-variant="Pulse journal" aria-label="Pulse journal concept" hidden>
+      <div id="pulse-journal" class="sp-window sp-journal" aria-label="Pulse journal" data-theme="system"></div>
+    </section>
+  </div>
+</div>
+<script>
+(() => {
+  const root = document.getElementById('pulse-studies');
+  // Synthetic records only. Every displayed quantity derives from these rows.
+  const sample = {
+    id:'sample-pulse', collected:'10:00', collectedAt:'2026-10-01T10:00:00Z', span:'09:59–10:00 UTC', window:'Past 24 hours',
+    stoppedEstimate:'09:42', started:'09:46',
+    records:[
+      {source:'System / EventLog',eventId:6008,recordId:1201,time:'09:46:03',estimatedStop:'09:42:00',meaning:'Windows reported an unexpected shutdown.'},
+      {source:'System / Kernel-Power',eventId:41,recordId:1200,time:'09:46:01',bugcheckCode:292,meaning:'The next start reported an incomplete shutdown.'},
+      {source:'System / BugCheck',eventId:1001,recordId:1202,time:'09:46:07',bugcheckCode:'0x124',meaning:'A matching bug-check code was recorded; this does not establish cause.'}
+    ],
+    stops:[{id:'sample-stop',estimate:'09:42',start:'09:46',refs:[1201,1200,1202]}],
+    updates:[{source:'Windows update record',time:'2026-09-30T16:20:00Z',name:'Windows quality update',relationship:'Earlier than the selected incident; not established as its cause.'}],
+    volumes:[{name:'System volume',totalGiB:512,freeGiB:132}],
+    applicationReports:[], hardware:{source:'Kernel-WHEA / Errors',outcome:'denied',rows:null}
+  };
+  const areas=[
+    {id:'applications',name:'Applications',label:'No matching reports',method:'Application fault reports',desc:'No matching application fault reports were returned in the selected period. This does not certify that applications are healthy.'},
+    {id:'system',name:'Windows',label:'Recorded restart',method:'Composed unexpected-stop evidence',desc:'Windows recorded an unexpected restart. The stop estimate and next-start time are separate; the records do not establish the cause.'},
+    {id:'changes',name:'Changes',label:'Earlier update',method:'Windows update record',desc:'An earlier Windows update is present in the returned change record. Being nearby in time does not establish that it caused the restart.'},
+    {id:'storage',name:'Storage',label:'Current reading',method:'Windows volume snapshot',desc:'The current snapshot reports capacity and free space. It cannot establish what filled the disk or what grew before collection.'},
+    {id:'hardware',name:'Hardware',label:'Source not read',method:'Kernel-WHEA / Errors',desc:'Windows denied access to this source. Its hardware-error content is unknown; the other returned readings remain available.'}
+  ];
+  const kinds=['luminous','tactile','journal'];
+  const saved=window.openai?.widgetState?.privateContent;
+  const common={theme:saved?.theme||'system',fixture:saved?.fixture||'incident'};
+  const states=Object.fromEntries(kinds.map(k=>[k,{view:saved?.[k]?.view||'overview',area:saved?.[k]?.area||'system',inspect:false,report:false,busy:false,message:''}]));
+  const safe=x=>String(x).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const hasStop=()=>common.fixture!=='empty';
+  const sourceGap=()=>common.fixture!=='empty';
+  const offline=()=>common.fixture==='offline';
+  function remember(){
+    const summary=Object.fromEntries(kinds.map(k=>[k,{view:states[k].view,area:states[k].area}]));
+    if(window.openai?.setWidgetState) window.openai.setWidgetState({modelContent:{concepts:'Luminous instrument, Tactile instrument, Pulse journal',example:common.fixture},privateContent:{...summary,theme:common.theme,fixture:common.fixture}}).catch(()=>{});
+  }
+  const btn=(text,action,extra='')=>`<button type="button" class="sp-button cursor-interaction ${extra}" data-action="${action}">${text}</button>`;
+  function header(k,s){return `<header class="sp-header ${s.busy?'sp-busy':''}"><div class="sp-brand"><span class="sp-logo" aria-hidden="true"></span>System Pulse</div><div class="sp-header-end"><button type="button" class="sp-theme cursor-interaction" data-action="theme">${common.theme==='light'?'Light':common.theme==='dark'?'Dark':'Appearance'}</button><button type="button" class="sp-button sp-primary cursor-interaction" data-action="take" ${s.busy?'disabled':''}>${s.busy?'Taking sample…':'Take a pulse'}<span class="sp-arrow" aria-hidden="true">↗</span></button></div></header>`;}
+  function tabs(s){return `<nav class="sp-tabs" aria-label="Current pulse"><button type="button" class="sp-tab cursor-interaction" data-view="overview" aria-pressed="${s.view==='overview'}">This pulse</button><button type="button" class="sp-tab cursor-interaction" data-view="incident" aria-pressed="${s.view==='incident'}">${hasStop()?'Recorded incident':'The record'}</button></nav>`;}
+  function contact(){return `<span class="sp-pill ${offline()?'':'sp-collected'}"><span class="sp-dot" aria-hidden="true"></span>${offline()?'Collector not responding':'Collector available'}</span>`;}
+  function footer(){return `<footer class="sp-footer"><span>ILLUSTRATIVE RECORDS · NO PC IS CONNECTED</span><span>Collection ${sample.span}</span></footer>`;}
+  function examples(){return `<div class="sp-fixture" aria-label="Illustrative collection states"><span class="sp-kicker">Example</span>${[['incident','Restart + gap'],['empty','No matches'],['partial','Partial reading'],['offline','Collector unavailable']].map(([v,t])=>`<button type="button" class="cursor-interaction" data-fixture="${v}" aria-pressed="${common.fixture===v}">${t}</button>`).join('')}</div>`;}
+  function gap(){return offline()?`<div class="sp-gap"><strong>No pulse detected from the collector.</strong><p>Last contact: ${sample.collected} UTC. The saved reading is still available. We cannot establish why contact was lost.</p></div>`:sourceGap()?`<div class="sp-gap"><strong>One source could not be read.</strong><p>${common.fixture==='partial'?'Hardware-error access was denied. The stop record also has unknown retained reach before the restart.':'Windows denied the hardware-error source. Its content is unknown.'}</p></div>`:'';}
+  function headline(){return offline()?'Your last pulse<br>is still here.':hasStop()?'Your PC,<br>in focus.':'A moment<br>to look closer.';}
+  function areaLabel(a){if(a.id==='system'&&!hasStop())return 'No matching stops';if(a.id==='hardware'&&!sourceGap())return offline()?'Last reading retained':'No matching reports';return a.label;}
+  function rows(s){return `<div class="sp-reading-list">${[
+    {area:'system',title:hasStop()?`${sample.stops.length} unexpected restart`:'No matching stop records',text:hasStop()?`${sample.stoppedEstimate} · Windows’ stop estimate`:'Within the selected period',mark:hasStop()?'↗':'—'},
+    {area:'changes',title:'An earlier update',text:'Yesterday, 16:20 UTC',mark:'↗'},
+    {area:'storage',title:`${sample.volumes[0].freeGiB} GiB free`,text:sample.volumes[0].name,mark:'↗'}
+  ].map(r=>`<button type="button" class="sp-reading cursor-interaction" data-area="${r.area}" aria-pressed="${s.area===r.area}"><span><strong>${r.title}</strong><span class="sp-small">${r.text}</span></span><span class="sp-reading-mark" aria-hidden="true">${r.mark}</span></button>`).join('')}</div>`;}
+  function areaDetail(s){
+    const a=areas.find(a=>a.id===s.area);
+    const d=a.id==='system'&&!hasStop()?'No matching unexpected-stop records were returned in the selected period. This is not a health assessment.':a.id==='hardware'&&!sourceGap()?'The sample source returned no matching hardware-error reports in the selected period. That does not establish the absence of a hardware fault.':a.desc;
+    const volume=sample.volumes[0];
+    return `<div class="sp-selected"><div class="sp-kicker">${safe(a.method)}</div><h3>${safe(areaLabel(a))}</h3><p>${safe(d)}</p>${a.id==='storage'?`<div class="sp-volume"><div class="sp-volume-label"><span>${volume.totalGiB-volume.freeGiB} GiB used</span><span>${volume.freeGiB} GiB free</span></div><div class="sp-volume-bar" role="img" aria-label="${volume.totalGiB-volume.freeGiB} GiB used of ${volume.totalGiB} GiB total"><span style="width:${(volume.totalGiB-volume.freeGiB)/volume.totalGiB*100}%"></span></div></div>`:''}<div class="sp-actions">${a.id==='system'&&hasStop()?btn('Open incident <span aria-hidden="true">→</span>','incident'):btn('Inspect reading','inspect')}</div></div>`;
+  }
+  function recordDetail(s){
+    const a=areas.find(a=>a.id===s.area);
+    let records;
+    if(a.id==='system')records=hasStop()?sample.records:[];
+    else if(a.id==='changes')records=sample.updates;
+    else if(a.id==='storage')records=sample.volumes;
+    else if(a.id==='hardware')records=sourceGap()?sample.hardware:{source:sample.hardware.source,outcome:'empty',rows:[]};
+    else records=sample.applicationReports;
+    return `<div class="sp-inspector"><div class="sp-inspector-head"><h3>Reading · ${a.name}</h3><button type="button" class="cursor-interaction" data-action="close-inspect">Close</button></div><p>${a.method} · ${sample.window} · collected ${sample.collected} UTC</p><details open><summary>Source records</summary><div class="sp-record"><pre>${safe(JSON.stringify(records,null,2))}</pre><p>These are synthetic source rows for comparing designs. Findings are limited to this reading’s scope.</p></div></details></div>`;
+  }
+  function incident(s){
+    if(!hasStop())return `<div class="sp-incident"><div class="sp-kicker">${sample.window}</div><h2>No matching stop records.</h2><p class="sp-muted">The returned record does not establish a restart in this period. An absent match is not a whole-machine verdict.</p>${btn('Inspect returned reading','inspect')}</div>`;
+    return `<div class="sp-incident"><div class="sp-kicker">Incident · sample-stop</div><h2>Windows recorded<br>an unexpected restart.</h2><p class="sp-muted sp-small">A stop code was recorded. Its cause is not established.</p><div><div class="sp-time-row"><span class="sp-mono">${sample.stoppedEstimate}</span><div><strong>Estimated stop</strong><p>Windows’ shutdown estimate · Event ${sample.records[0].eventId}</p></div></div><div class="sp-time-row"><span class="sp-mono">${sample.started}</span><div><strong>The next start reported it</strong><p>Separate filing time · Event ${sample.records[1].eventId}</p></div></div><div class="sp-time-row"><span class="sp-mono">0x124</span><div><strong>Bug-check code recorded</strong><p>A failure category, not a diagnosed component</p></div></div></div><div class="sp-actions">${btn('Inspect the records','inspect')}${btn('Prepare report <span aria-hidden="true">↗</span>','report','sp-primary')}</div></div>`;
+  }
+  function report(){return `<section class="sp-report" aria-label="Pulse report preview"><button type="button" class="sp-report-close cursor-interaction" data-action="close-report">Close</button><div class="sp-kicker">System Pulse · report preview</div><h3>For the person helping.</h3><p>${hasStop()?'Windows recorded an unexpected restart. The reported bug-check code is 0x124. These records do not establish its cause.':'No matching stop records were returned in the selected period. This report makes no machine-health claim.'}</p><dl><dt>Observation</dt><dd>2026-10-01 · ${sample.span} · illustrative sample</dd><dt>Selected period</dt><dd>${sample.window}</dd><dt>References</dt><dd>${hasStop()?sample.records.map(r=>`Event ${r.eventId} / record ${r.recordId}`).join(' · '):'Empty matching stop record'}</dd><dt>Not established</dt><dd>Root cause${sourceGap()?', hardware-error source content':''}${common.fixture==='partial'?', complete retained reach':''}</dd></dl><p>This preview contains deterministic facts from the sample and makes no repairs.</p></section>`;}
+  function map(s){return `<div class="sp-map"><div class="sp-map-caption"><span class="sp-kicker">Observation areas</span><span class="sp-kicker">Select to inspect</span></div><div class="sp-map-stage">${areas.map((a,i)=>{
+    const marks=a.id==='system'&&hasStop()?'<circle class="sp-plane-mark" cx="180" cy="108" r="4"/><circle cx="180" cy="108" r="10" fill="none" stroke="var(--sp-accent)" stroke-width=".8"/>':a.id==='changes'?'<path d="M160 77h14m-7-7v14" stroke="var(--sp-muted)" stroke-width="1.5"/>':a.id==='hardware'&&sourceGap()?'<path d="M136 60l44 18m-58-11l45 18m-58-10l46 18" stroke="var(--sp-muted)" stroke-width="1.2"/>':'';
+    return `<button type="button" class="sp-plane-button cursor-interaction" data-area="${a.id}" aria-pressed="${s.area===a.id}" aria-label="${a.name}: ${areaLabel(a)}" style="top:${i*70}px;z-index:${5-i}"><svg class="sp-plane-art" viewBox="0 0 340 155" aria-hidden="true"><path class="sp-plane-under" d="M18 77L170 136 321 77v7L170 144 18 84Z"/><path class="sp-plane-face" d="M18 77L170 14 321 77 170 136Z"/><path class="sp-plane-grid" d="M48 65l151 59M80 52l151 59M110 39l151 59M140 27l151 59M48 89l151-63M80 101l151-63M110 113l151-63M140 124l151-63"/>${marks}</svg><span class="sp-plane-label">${a.name}<small>${areaLabel(a)}</small></span></button>`;
+  }).join('')}</div><p class="sp-map-explain">An index into readings. Layer order does not represent a failure path.</p></div>`;}
+  function luminous(s){return `${header('luminous',s)}<main class="sp-body"><div class="sp-heading">${tabs(s)}${contact()}</div><div class="sp-main-grid"><div><div class="sp-title-block"><div class="sp-kicker">Latest pulse · ${sample.collected} UTC</div>${s.view==='overview'?`<h1>${headline()}</h1><p>See what was recorded.<br>Choose where to look closer.</p>`:''}</div>${s.view==='overview'?rows(s):incident(s)}${gap()}${s.inspect?recordDetail(s):''}${s.report?report():''}</div><div>${map(s)}${areaDetail(s)}</div></div>${examples()}<div class="sp-live-message" aria-live="polite">${safe(s.message)}</div></main>${footer()}`;}
+  function toolStrip(s){return `<nav class="sp-tool-strip" aria-label="Observation areas">${areas.map(a=>`<button type="button" class="sp-tool cursor-interaction" data-area="${a.id}" aria-pressed="${s.area===a.id}"><span class="sp-tool-object" aria-hidden="true"></span><span>${a.name}</span></button>`).join('')}</nav>`;}
+  function tactile(s){return `${header('tactile',s)}<main class="sp-body"><div class="sp-heading">${tabs(s)}${contact()}</div><div class="sp-title-block"><div class="sp-kicker">A moment with your machine</div><h1>${s.view==='overview'?'Take a pulse.<br>Find your bearings.':'Look closer<br>at what happened.'}</h1></div><div class="sp-main-grid"><section class="sp-work-surface" aria-label="Selected working area"><div class="sp-kicker">Collected ${sample.collected} UTC · ${sample.window}</div>${toolStrip(s)}${s.view==='incident'?incident(s):areaDetail(s)}${s.inspect?recordDetail(s):''}${s.report?report():''}</section><aside class="sp-side-note"><div class="sp-kicker">In this pulse</div><div class="sp-note-rule"></div><h2>${hasStop()?'A restart,<br>on the record.':'The returned<br>record is quiet.'}</h2><p style="margin-top:13px">${hasStop()?'The records give us a place to start. They leave the cause unanswered.':'No matching stop or application fault records were returned. The statement belongs to this period.'}</p>${rows(s)}${gap()}</aside></div>${examples()}<div class="sp-live-message" aria-live="polite">${safe(s.message)}</div></main>${footer()}`;}
+  function journal(s){return `${header('journal',s)}<main class="sp-body"><div class="sp-heading">${tabs(s)}${contact()}</div><section class="sp-editorial"><div><div class="sp-kicker">The machine’s record, kept in view</div><h1>${s.view==='overview'?'A pulse worth<br>coming back to.':'An account of<br>the interruption.'}</h1><p>${s.view==='overview'?'A clear account of what was observed, what was recorded, and what remains unanswered.':'Keep the stop estimate, the next start and the source record together.'}</p></div><span class="sp-mono">${sample.collected} UTC<br><span class="sp-muted">Latest observation</span></span></section><div class="sp-journal-grid"><nav class="sp-journal-nav" aria-label="Observation chapters">${areas.map((a,i)=>`<button type="button" class="cursor-interaction" data-area="${a.id}" aria-pressed="${s.area===a.id}"><span class="sp-journal-nr">0${i+1}</span>${a.name}</button>`).join('')}</nav><div><article class="sp-entry"><div class="sp-entry-marker">${s.area==='system'&&hasStop()?sample.stoppedEstimate:sample.collected}<span aria-hidden="true"></span></div><div class="sp-entry-content"><div class="sp-kicker">${areas.find(a=>a.id===s.area).method}</div>${s.view==='incident'?incident(s):`<div class="sp-entry-title">${s.area==='system'&&hasStop()?'An unexpected restart.':safe(areaLabel(areas.find(a=>a.id===s.area)))}</div><p>${safe(s.area==='system'&&!hasStop()?'No matching unexpected-stop records were returned in this period. This does not establish that the machine is healthy.':s.area==='hardware'&&!sourceGap()?'No matching hardware-error reports were returned in this period. This does not establish the absence of a hardware fault.':areas.find(a=>a.id===s.area).desc)}</p><div class="sp-summary-band"><span>${sample.window}</span><span>Collected ${sample.collected} UTC</span></div><div class="sp-actions">${s.area==='system'&&hasStop()?`<button type="button" class="sp-inline-link cursor-interaction" data-action="incident">Read the incident account →</button>`:btn('Inspect this reading','inspect')}</div>`}${gap()}${s.inspect?recordDetail(s):''}${s.report?report():''}</div></article>${s.view==='overview'?rows(s):''}</div></div>${examples()}<div class="sp-live-message" aria-live="polite">${safe(s.message)}</div></main>${footer()}`;}
+  const renderers={luminous,tactile,journal};
+  function render(k){const el=root.querySelector('#pulse-'+k);el.dataset.theme=common.theme;el.innerHTML=renderers[k](states[k]);}
+  function renderAll(){kinds.forEach(render);}
+  renderAll();
+  root.addEventListener('click',e=>{
+    const button=e.target.closest('button');if(!button)return;
+    const windowEl=button.closest('.sp-window');if(!windowEl)return;
+    const k=windowEl.id.replace('pulse-','');const s=states[k];
+    const action=button.dataset.action;
+    if(button.dataset.fixture){common.fixture=button.dataset.fixture;kinds.forEach(k=>{states[k].inspect=false;states[k].report=false;states[k].message='';});renderAll();remember();return;}
+    if(button.dataset.view){s.view=button.dataset.view;s.inspect=false;s.report=false;s.area='system';}
+    if(button.dataset.area){s.area=button.dataset.area;s.inspect=false;s.report=false;s.view='overview';}
+    if(action==='theme'){common.theme=common.theme==='system'?'dark':common.theme==='dark'?'light':'system';renderAll();remember();return;}
+    if(action==='incident'){s.view='incident';s.area='system';s.inspect=false;}
+    if(action==='inspect')s.inspect=true;
+    if(action==='close-inspect')s.inspect=false;
+    if(action==='report')s.report=true;
+    if(action==='close-report')s.report=false;
+    if(action==='take'){
+      if(offline()){s.message='Collector unavailable. The last saved sample is retained.';render(k);return;}
+      s.busy=true;s.message='Taking an illustrative pulse…';render(k);
+      setTimeout(()=>{s.busy=false;s.view='overview';s.area='system';s.inspect=false;s.report=false;s.message='Sample ready. These readings are illustrative.';render(k);remember();},650);return;
+    }
+    render(k);remember();
+    const target=action==='report'?'.sp-report':action==='inspect'?'.sp-inspector':null;
+    if(target){windowEl.querySelector(target+' button')?.focus({preventScroll:true});}
+    else if(button.dataset.area){windowEl.querySelector(`[data-area="${button.dataset.area}"]`)?.focus({preventScroll:true});}
+    else if(button.dataset.view){windowEl.querySelector(`[data-view="${button.dataset.view}"]`)?.focus({preventScroll:true});}
+  });
+  if(globalThis.Tweak){
+    const material={detail:.7};
+    const luminous=root.querySelector('#pulse-luminous');
+    const tweak=new Tweak({container:luminous,onChange:()=>luminous.style.setProperty('--sp-detail',material.detail)});
+    tweak.addSlider(material,'detail',{label:'Layer detail',min:0,max:1,step:.1,reference:'--sp-detail'});
+  }
+  window.addEventListener('openai:set_globals',event=>{
+    const restored=event.detail?.globals?.widgetState?.privateContent;if(!restored)return;
+    if(['system','light','dark'].includes(restored.theme))common.theme=restored.theme;
+    kinds.forEach(k=>{if(['overview','incident'].includes(restored[k]?.view))states[k].view=restored[k].view;if(areas.some(a=>a.id===restored[k]?.area))states[k].area=restored[k].area;});renderAll();
+  });
+})();
+</script>
+
+<script>
+(() => {
+ const carousel=document.querySelector('.viz-carousel');
+ const panels=[...carousel.children];
+ const controls=document.querySelector('.study-choices');
+ panels.forEach((panel,index)=>{
+  const button=document.createElement('button');button.type='button';button.textContent=panel.dataset.variant;button.setAttribute('aria-pressed',String(index===0));
+  button.addEventListener('click',()=>{panels.forEach(p=>p.hidden=p!==panel);controls.querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',String(b===button)));});
+  controls.append(button);
+ });
+})();
+</script></div></body></html>
