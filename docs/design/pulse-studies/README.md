@@ -1,5 +1,7 @@
 # System Pulse concept studies
 
+Historical exploration. The current study is [Resonance](../pulse-resonance/README.md). These earlier compositions are not the proposed visual direction.
+
 Three interactive design explorations, not a renamed or connected application. Open `index.html` directly in a browser. No build step or running service is required. Typeface requests go to Google Fonts; system fonts are the fallback. No machine reading, account or token is used.
 
 - **Luminous instrument:** the layered observation map is the navigation landmark.

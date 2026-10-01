@@ -1,0 +1,406 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>System Pulse — Resonance study</title><style>body{margin:0;padding:20px;background:#edf0eb}body:has(#pulse-resonance[data-appearance="dark"]){background:#171e20}#pulse-resonance{max-width:1024px;margin:auto}button{cursor:pointer}@media(max-width:620px){body{padding:10px}}</style></head><body>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600&family=Syne:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap');
+#pulse-resonance {
+  --pa-paper:light-dark(#e8e4de,#090d12);
+  --pa-surface:light-dark(#f5f2ec,#11171e);
+  --pa-depth:light-dark(#d6d1ca,#080d13);
+  --pa-text:light-dark(#282a2e,#f3eee5);
+  --pa-muted:light-dark(#63636a,#a8afb8);
+  --pa-line:light-dark(#b7b1a760,#ffffff1a);
+  --pa-metal:light-dark(#eee9e1,#1d252e);
+  --pa-copper:light-dark(#8f4b23,#edb775);
+  --pa-glint:light-dark(#ffffffd9,#cbdff333);
+  --pa-reflect:.65;
+  font-family:'DM Sans',sans-serif;
+  color:var(--pa-text); width:100%; isolation:isolate;
+}
+#pulse-resonance[data-appearance='dark'] {color-scheme:dark}
+#pulse-resonance[data-appearance='light'] {color-scheme:light}
+#pulse-resonance * {box-sizing:border-box}
+#pulse-resonance [hidden] {display:none !important}
+#pulse-resonance button, #pulse-resonance select {font:inherit;color:inherit}
+#pulse-resonance button {cursor:inherit}
+#pulse-resonance button:disabled {cursor:wait;opacity:.72}
+#pulse-resonance .pa-shell {position:relative;background:var(--pa-paper);overflow:clip;border-radius:18px;box-shadow:0 22px 75px #00000028,inset 0 1px 0 var(--pa-glint)}
+#pulse-resonance .pa-top {padding:24px 34px 21px;display:flex;gap:24px;align-items:center;position:relative;background:linear-gradient(115deg,var(--pa-metal),var(--pa-paper) 56%,var(--pa-surface));z-index:2}
+#pulse-resonance .pa-top::after {content:'';position:absolute;bottom:0;left:34px;right:34px;height:1px;background:linear-gradient(90deg,transparent,var(--pa-glint),var(--pa-line),transparent)}
+#pulse-resonance .pa-brand {display:flex;align-items:center;gap:12px;white-space:nowrap}
+#pulse-resonance .pa-mark {position:relative;width:31px;height:31px;border-radius:50%;background:conic-gradient(from 25deg,#dc9e51 0deg,#fce8cb 65deg,#747d88 80deg,transparent 95deg,transparent 145deg,#707d88 160deg,#dfe5e5 250deg,transparent 260deg,transparent 305deg,#dc9e51 325deg);box-shadow:0 2px 5px #0004,inset 0 1px 2px #fff8}
+#pulse-resonance .pa-mark::before {content:'';position:absolute;inset:3px;border-radius:50%;background:var(--pa-paper);box-shadow:inset 0 2px 3px #0005}
+#pulse-resonance .pa-mark::after {content:'';position:absolute;width:6px;height:6px;border-radius:50%;left:12.5px;top:12.5px;background:#e6b46e;box-shadow:0 0 9px #e6b46e70}
+#pulse-resonance .pa-wordmark {font-family:'Space Grotesk',sans-serif;font-size:21px;letter-spacing:-.7px;font-weight:400}
+#pulse-resonance .pa-wordmark strong {font-weight:600}
+#pulse-resonance .pa-nav {display:flex;align-items:center;gap:5px;margin-left:auto}
+#pulse-resonance .pa-nav button {padding:9px 16px;border:0;background:transparent;border-radius:7px;font-size:13px;color:var(--pa-muted)}
+#pulse-resonance .pa-nav button[aria-pressed='true'] {color:var(--pa-text);background:linear-gradient(180deg,var(--pa-surface),var(--pa-metal));box-shadow:inset 0 1px 0 var(--pa-glint),0 2px 4px #00000010}
+#pulse-resonance .pa-appearance {background:transparent;border:0;font-size:12px;display:flex;gap:9px;align-items:center;padding:8px;color:var(--pa-muted);white-space:nowrap}
+#pulse-resonance .pa-appearance-dot {width:14px;height:14px;border-radius:50%;background:linear-gradient(90deg,var(--pa-text) 50%,var(--pa-surface) 50%);box-shadow:0 0 0 1px var(--pa-line)}
+#pulse-resonance .pa-kicker {font:400 11px/1.5 'IBM Plex Mono',monospace;text-transform:uppercase;letter-spacing:1.7px}
+#pulse-resonance .pa-hero {min-height:450px;position:relative;background:#080b10;isolation:isolate;color:#f6eee0}
+#pulse-resonance .pa-hero-art {position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center;z-index:-2}
+#pulse-resonance .pa-hero::after {content:'';position:absolute;inset:0;z-index:-1;background:linear-gradient(90deg,#070b12c4 0%,#070b1270 31%,transparent 52%),linear-gradient(0deg,#080b1080,transparent 22%)}
+#pulse-resonance .pa-hero-copy {padding:47px 38px 105px;max-width:410px}
+#pulse-resonance .pa-hero .pa-kicker {color:#dfb482;margin-bottom:22px}
+#pulse-resonance h1 {font:500 54px/1.05 'Space Grotesk',sans-serif;letter-spacing:-2.7px;margin:0 0 21px}
+#pulse-resonance .pa-hero p {font-size:15px;line-height:1.6;color:#c1c7d0;max-width:245px;margin:0 0 27px}
+#pulse-resonance .pa-button {position:relative;min-height:39px;border-radius:7px;padding:10px 17px;border:1px solid var(--pa-line);background:linear-gradient(165deg,var(--pa-surface),var(--pa-metal));box-shadow:inset 0 1px 0 var(--pa-glint),0 3px 6px #00000013;font-size:13px;line-height:1.2;display:inline-flex;gap:18px;align-items:center;justify-content:center}
+#pulse-resonance .pa-button:hover {box-shadow:inset 0 1px 0 var(--pa-glint),0 4px 12px #00000023}
+#pulse-resonance .pa-button-primary {color:#271c14;border-color:#efbc7970;background:linear-gradient(160deg,#f4d3a3,#d8a365 58%,#c38b4c);box-shadow:inset 0 1px 0 #fff4df,0 3px 14px #0004;font-weight:600}
+#pulse-resonance .pa-hero .pa-button {min-height:44px;font-size:14px}
+#pulse-resonance .pa-hero-signature {position:absolute;right:32px;bottom:72px;font:400 11px/1.4 'IBM Plex Mono',monospace;letter-spacing:2px;color:#c9b9a1}
+#pulse-resonance .pa-contact-strip {position:relative;z-index:2;display:grid;grid-template-columns:1.3fr 1fr 1fr;margin:-51px 26px 0;border:1px solid var(--pa-line);border-radius:11px;background:linear-gradient(120deg,var(--pa-surface),var(--pa-metal));box-shadow:inset 0 1px 0 var(--pa-glint),0 9px 32px #0000002b}
+#pulse-resonance .pa-contact-strip::after {pointer-events:none;content:'';position:absolute;inset:0;border-radius:inherit;opacity:var(--pa-reflect);background:linear-gradient(112deg,transparent 8%,#ffffff14 28%,transparent 43%)}
+#pulse-resonance .pa-contact-strip > div {padding:21px 23px;min-width:0}
+#pulse-resonance .pa-contact-strip > div+div {border-left:1px solid var(--pa-line)}
+#pulse-resonance .pa-contact-strip .pa-kicker {color:var(--pa-muted);font-size:11px;letter-spacing:1.2px}
+#pulse-resonance .pa-contact-strip strong {font-size:14px;font-weight:500;display:block;margin-top:5px;line-height:1.5}
+#pulse-resonance .pa-contact-value {display:flex;align-items:center;gap:9px}
+#pulse-resonance .pa-dot {width:5px;height:5px;background:var(--pa-text);border-radius:50%}
+#pulse-resonance .pa-workspace {padding:32px 34px 29px}
+#pulse-resonance .pa-section-head {display:flex;gap:12px;align-items:center;justify-content:space-between;margin-bottom:20px}
+#pulse-resonance h2 {font:500 22px/1.3 'Space Grotesk',sans-serif;letter-spacing:-.6px;margin:0}
+#pulse-resonance .pa-small {font-size:12px;line-height:1.6;color:var(--pa-muted)}
+#pulse-resonance .pa-record-grid {display:grid;grid-template-columns:minmax(0,.9fr) minmax(0,1.35fr);gap:25px}
+#pulse-resonance .pa-source-menu {display:flex;flex-direction:column;gap:8px}
+#pulse-resonance .pa-source {display:grid;grid-template-columns:54px minmax(0,1fr) 13px;gap:15px;align-items:center;text-align:left;padding:12px 14px;border:1px solid transparent;background:transparent;border-radius:10px;position:relative;min-height:88px}
+#pulse-resonance .pa-source[aria-pressed='true'] {background:linear-gradient(130deg,var(--pa-surface),var(--pa-metal));border-color:var(--pa-line);box-shadow:inset 0 1px 0 var(--pa-glint),0 5px 15px #0000000d}
+#pulse-resonance .pa-source strong {font-weight:500;font-size:14px;display:block;margin-bottom:4px}
+#pulse-resonance .pa-source .pa-small {font-size:12px}
+#pulse-resonance .pa-source-arrow {color:var(--pa-muted);font-size:17px}
+#pulse-resonance .pa-mini {position:relative;width:54px;height:54px;border-radius:50%;background:radial-gradient(circle at 35% 22%,#3e4a59,#17202d 62%,#060c12);box-shadow:inset 0 1px 0 #b7cde645,inset 0 -1px 0 #000,0 4px 9px #0002;color:#d6ae7a;overflow:hidden}
+#pulse-resonance .pa-mini::after {content:'';position:absolute;inset:7px;border-radius:50%;background:linear-gradient(120deg,#ffffff12,transparent 60%);box-shadow:inset 0 0 0 1px #8da7c130}
+#pulse-resonance .pa-mini-record::before {content:'';position:absolute;left:17px;top:15px;width:20px;height:23px;border-radius:3px;background:linear-gradient(145deg,#6d7785,#27374c);transform:rotate(-13deg);box-shadow:3px 3px 0 #131e2c,4px 4px 0 #738191,6px 6px 0 #111d29,inset 0 1px 0 #b6c4d6}
+#pulse-resonance .pa-mini-gap::before {content:'';position:absolute;inset:17px;border:1px dashed #a2b2c4;transform:rotate(45deg);background:linear-gradient(45deg,transparent 46%,#c5d1e399 47%,#c5d1e399 53%,transparent 54%)}
+#pulse-resonance .pa-mini-storage::before {content:'';position:absolute;left:16px;top:15px;width:22px;height:25px;background:linear-gradient(90deg,#2b3d4b,#a3afb9 28%,#4b5a68 58%,#202f3e);border-radius:50% / 15%;box-shadow:inset 0 2px 0 #c6cfda,0 3px 0 #0e1823,0 4px 0 #7894ad}
+#pulse-resonance .pa-reading {position:relative;min-width:0;padding:25px 29px;border-radius:12px;background:linear-gradient(135deg,var(--pa-surface),var(--pa-paper) 60%,var(--pa-metal));border:1px solid var(--pa-line);box-shadow:inset 0 1px 0 var(--pa-glint),0 10px 23px #0000000a}
+#pulse-resonance .pa-reading::before {content:'';position:absolute;left:27px;right:27px;top:-1px;height:1px;background:linear-gradient(90deg,transparent,var(--pa-copper),transparent);opacity:.5}
+#pulse-resonance .pa-reading .pa-kicker {color:var(--pa-copper);font-size:11px;letter-spacing:1.1px}
+#pulse-resonance h3 {font:500 27px/1.2 'Space Grotesk',sans-serif;letter-spacing:-.9px;margin:16px 0 11px}
+#pulse-resonance .pa-reading p {font-size:14px;line-height:1.6;margin:0 0 15px;color:var(--pa-muted)}
+#pulse-resonance .pa-inline-meta {display:flex;flex-wrap:wrap;gap:9px 21px;font:400 11px/1.5 'IBM Plex Mono',monospace;color:var(--pa-muted);margin:17px 0 22px}
+#pulse-resonance .pa-reading-actions {display:flex;flex-wrap:wrap;gap:9px}
+#pulse-resonance .pa-link-button {padding:9px 0;border:0;background:transparent;font-size:12px;text-align:left;line-height:1.4;color:var(--pa-text)}
+#pulse-resonance .pa-volume-track {height:6px;border-radius:3px;background:var(--pa-depth);margin:23px 0 10px;overflow:hidden;box-shadow:inset 0 1px 2px #00000020}
+#pulse-resonance .pa-volume-track span {display:block;height:100%;background:var(--pa-copper);border-radius:3px}
+#pulse-resonance .pa-volume-label {display:flex;justify-content:space-between;gap:15px;font:400 11px/1.5 'IBM Plex Mono',monospace;color:var(--pa-muted)}
+#pulse-resonance .pa-source-inspector {margin-top:19px;padding-top:18px;border-top:1px solid var(--pa-line)}
+#pulse-resonance .pa-source-inspector .pa-section-head {margin-bottom:10px}
+#pulse-resonance .pa-source-inspector pre {padding:15px;border-radius:6px;background:var(--pa-depth);font:400 11px/1.6 'IBM Plex Mono',monospace;white-space:pre-wrap;overflow-wrap:anywhere;margin:0;box-shadow:inset 0 1px 3px #0002}
+#pulse-resonance .pa-footer {padding:18px 34px;display:flex;flex-wrap:wrap;gap:12px;justify-content:space-between;border-top:1px solid var(--pa-line);font:400 11px/1.5 'IBM Plex Mono',monospace;color:var(--pa-muted);letter-spacing:.4px}
+#pulse-resonance .pa-live {font:400 12px/1.6 'IBM Plex Mono',monospace;padding:0 34px 17px;color:var(--pa-copper)}
+#pulse-resonance .pa-live:empty {display:none}
+#pulse-resonance .pa-review {display:flex;gap:13px;align-items:center;flex-wrap:wrap;padding:17px 3px;color:var(--pa-text);font-size:12px}
+#pulse-resonance .pa-review select {border:1px solid var(--pa-line);padding:6px 10px;border-radius:6px;background:var(--pa-surface);font-size:12px;max-width:100%;min-height:34px}
+#pulse-resonance .pa-review label {display:flex;align-items:center;gap:9px}
+#pulse-resonance .pa-review-note {color:var(--pa-muted);font-size:11px;margin-left:auto}
+#pulse-resonance .pa-reader-banner {position:relative;min-height:205px;padding:33px 36px;color:#f5eee4;background:#0c121a;isolation:isolate;overflow:hidden}
+#pulse-resonance .pa-reader-banner .pa-hero-art {object-position:center 40%;opacity:.62}
+#pulse-resonance .pa-reader-banner::after {content:'';position:absolute;inset:0;background:linear-gradient(90deg,#08111aed 0%,#08111a8c 52%,transparent);z-index:-1}
+#pulse-resonance .pa-reader-banner .pa-kicker {color:#e3bd88}
+#pulse-resonance .pa-reader-banner h1 {font-size:39px;letter-spacing:-1.5px;margin:16px 0 11px;max-width:540px}
+#pulse-resonance .pa-reader-banner p {font-size:13px;color:#c4cad4;margin:0}
+#pulse-resonance .pa-incident-body {padding:30px 34px 32px;display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,.8fr);gap:28px}
+#pulse-resonance .pa-record-path {margin:25px 0 20px;position:relative}
+#pulse-resonance .pa-record-path::before {content:'';position:absolute;left:89px;top:12px;bottom:35px;width:1px;background:var(--pa-line)}
+#pulse-resonance .pa-record-step {display:grid;grid-template-columns:72px minmax(0,1fr);gap:36px;position:relative;margin-bottom:25px}
+#pulse-resonance .pa-record-step::before {content:'';position:absolute;left:86px;top:7px;width:7px;height:7px;border-radius:50%;background:var(--pa-copper);box-shadow:0 0 0 5px var(--pa-paper)}
+#pulse-resonance .pa-record-time {font:400 16px/1.5 'IBM Plex Mono',monospace;color:var(--pa-text)}
+#pulse-resonance .pa-record-step strong {display:block;font-size:14px;font-weight:500;line-height:1.5}
+#pulse-resonance .pa-record-step p {font-size:12px;line-height:1.6;color:var(--pa-muted);margin:7px 0 0}
+#pulse-resonance .pa-cause {border-radius:10px;background:var(--pa-depth);padding:19px 20px;font-size:13px;line-height:1.6;box-shadow:inset 0 1px 3px #00000014}
+#pulse-resonance .pa-cause strong {display:block;color:var(--pa-text);font-weight:500;margin-bottom:4px}
+#pulse-resonance .pa-cause p {color:var(--pa-muted);margin:0}
+#pulse-resonance .pa-evidence-ticket {border-radius:11px;background:linear-gradient(150deg,var(--pa-surface),var(--pa-metal));padding:24px 24px 26px;align-self:start;border:1px solid var(--pa-line);box-shadow:0 6px 25px #0001,inset 0 1px 0 var(--pa-glint);position:relative}
+#pulse-resonance .pa-evidence-ticket::before {content:'';height:3px;position:absolute;left:23px;right:23px;top:0;background:linear-gradient(90deg,transparent,var(--pa-copper),transparent);opacity:.6}
+#pulse-resonance .pa-evidence-ticket h3 {font-size:22px;margin:12px 0 19px}
+#pulse-resonance dl {margin:0}
+#pulse-resonance dt {font:400 11px/1.6 'IBM Plex Mono',monospace;color:var(--pa-muted);margin-top:15px}
+#pulse-resonance dd {font-size:13px;line-height:1.6;margin:3px 0 0;overflow-wrap:anywhere}
+#pulse-resonance .pa-evidence-ticket .pa-button {margin-top:23px;width:100%}
+#pulse-resonance .pa-report {margin:0 34px 30px;border-radius:12px;padding:28px 29px;color:var(--pa-text);background:var(--pa-surface);box-shadow:inset 0 1px 0 var(--pa-glint),0 8px 24px #0002;border:1px solid var(--pa-line)}
+#pulse-resonance .pa-report p {font-size:14px;line-height:1.7;max-width:680px;color:var(--pa-muted)}
+#pulse-resonance .pa-report h3 {margin-top:5px}
+#pulse-resonance .pa-report dl {display:grid;grid-template-columns:130px minmax(0,1fr);gap:10px 15px;margin-top:23px}
+#pulse-resonance .pa-report dt, #pulse-resonance .pa-report dd {margin:0}
+#pulse-resonance[data-busy='true'] .pa-hero-art {animation:pa-read-light .7s ease-in-out}
+@keyframes pa-read-light {0%,100%{filter:brightness(1)}50%{filter:brightness(1.22)}}
+@media (prefers-reduced-motion:reduce) {#pulse-resonance[data-busy='true'] .pa-hero-art {animation:none}}
+@media (max-width:800px) {
+  #pulse-resonance .pa-top {padding:20px 25px;gap:14px}
+  #pulse-resonance .pa-hero {min-height:445px}
+  #pulse-resonance .pa-hero-art {object-position:58% center}
+  #pulse-resonance .pa-hero-copy {padding-left:29px;max-width:350px}
+  #pulse-resonance h1 {font-size:46px;letter-spacing:-2px}
+  #pulse-resonance .pa-contact-strip {margin-left:20px;margin-right:20px}
+  #pulse-resonance .pa-contact-strip > div {padding:18px 17px}
+  #pulse-resonance .pa-workspace {padding:28px 25px}
+  #pulse-resonance .pa-record-grid {grid-template-columns:minmax(0,.85fr) minmax(0,1.2fr);gap:17px}
+  #pulse-resonance .pa-source {grid-template-columns:40px minmax(0,1fr) 11px;gap:10px;padding:10px 9px}
+  #pulse-resonance .pa-mini {width:40px;height:40px;transform:scale(.95)}
+  #pulse-resonance .pa-mini-record::before {left:11px;top:9px}
+  #pulse-resonance .pa-mini-gap::before {inset:11px}
+  #pulse-resonance .pa-mini-storage::before {left:9px;top:8px}
+  #pulse-resonance .pa-reading {padding:22px}
+  #pulse-resonance .pa-incident-body {padding:26px 25px;gap:23px}
+  #pulse-resonance .pa-evidence-ticket {padding:21px 19px}
+}
+@media (max-width:620px) {
+  #pulse-resonance .pa-shell {border-radius:12px}
+  #pulse-resonance .pa-top {padding:17px 19px;flex-wrap:wrap;gap:15px}
+  #pulse-resonance .pa-brand {gap:10px}
+  #pulse-resonance .pa-wordmark {font-size:20px}
+  #pulse-resonance .pa-appearance {margin-left:auto;padding:5px 0}
+  #pulse-resonance .pa-nav {width:100%;margin:0;gap:8px}
+  #pulse-resonance .pa-nav button {padding:8px 12px}
+  #pulse-resonance .pa-hero {min-height:540px}
+  #pulse-resonance .pa-hero-art {object-position:75% bottom;height:350px;top:auto;bottom:0;object-fit:cover}
+  #pulse-resonance .pa-hero::after {background:linear-gradient(180deg,#080b10 0%,#080b10 18%,#080b1060 43%,transparent 66%,#080b1040 100%)}
+  #pulse-resonance .pa-hero-copy {padding:25px 23px 40px;max-width:100%}
+  #pulse-resonance .pa-hero .pa-kicker {margin-bottom:15px}
+  #pulse-resonance h1 {font-size:43px;line-height:1.04;margin-bottom:15px}
+  #pulse-resonance .pa-hero p {max-width:100%;margin-bottom:20px;font-size:14px}
+  #pulse-resonance .pa-hero-signature {right:20px;bottom:63px;font-size:11px}
+  #pulse-resonance .pa-contact-strip {grid-template-columns:1fr 1fr;margin-left:14px;margin-right:14px;margin-top:-44px}
+  #pulse-resonance .pa-contact-strip > div:first-child {grid-column:1/-1;border-bottom:1px solid var(--pa-line);padding:13px 17px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  #pulse-resonance .pa-contact-strip > div:first-child strong {margin:0;font-size:13px}
+  #pulse-resonance .pa-contact-strip > div {padding:13px 17px}
+  #pulse-resonance .pa-contact-strip > div:nth-child(2) {border-left:0}
+  #pulse-resonance .pa-contact-strip .pa-kicker {font-size:11px;letter-spacing:.8px}
+  #pulse-resonance .pa-workspace {padding:27px 19px}
+  #pulse-resonance .pa-section-head {align-items:start}
+  #pulse-resonance .pa-section-head > .pa-small {max-width:125px;text-align:right;font-size:11px}
+  #pulse-resonance .pa-record-grid {grid-template-columns:1fr;gap:17px}
+  #pulse-resonance .pa-source-menu {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+  #pulse-resonance .pa-source {display:flex;flex-direction:column;align-items:start;gap:11px;padding:12px 8px;min-height:135px}
+  #pulse-resonance .pa-source strong {font-size:12px;line-height:1.4}
+  #pulse-resonance .pa-source .pa-small {font-size:11px;line-height:1.4;display:block}
+  #pulse-resonance .pa-source-arrow {display:none}
+  #pulse-resonance .pa-mini {width:40px;height:40px}
+  #pulse-resonance .pa-reading {padding:23px 20px}
+  #pulse-resonance h3 {font-size:26px}
+  #pulse-resonance .pa-footer {padding:17px 19px;gap:7px;font-size:11px}
+  #pulse-resonance .pa-reader-banner {padding:28px 22px;min-height:210px}
+  #pulse-resonance .pa-reader-banner .pa-hero-art {height:100%;top:0;object-position:66% center}
+  #pulse-resonance .pa-reader-banner h1 {font-size:31px;letter-spacing:-1px}
+  #pulse-resonance .pa-incident-body {padding:26px 21px;grid-template-columns:1fr;gap:23px}
+  #pulse-resonance .pa-report {margin:0 18px 24px;padding:23px 21px}
+  #pulse-resonance .pa-report dl {grid-template-columns:1fr;gap:3px}
+  #pulse-resonance .pa-report dd {margin-bottom:12px}
+  #pulse-resonance .pa-live {padding:0 20px 17px}
+  #pulse-resonance .pa-review {gap:10px}
+  #pulse-resonance .pa-review-note {margin-left:0}
+}
+@media (pointer:coarse) {#pulse-resonance button,#pulse-resonance select {min-height:44px}}
+/* Resonance: tactile signal forms, precise type, warm selective color. */
+#pulse-resonance {
+ --pa-paper:light-dark(#dfe5df,#222b2d);
+ --pa-surface:light-dark(#edf1e9,#2b3638);
+ --pa-depth:light-dark(#ced6cd,#1d2527);
+ --pa-text:light-dark(#26372e,#e4ebdf);
+ --pa-muted:light-dark(#526157,#acbdb2);
+ --pa-line:light-dark(#8a9a8b4a,#c6e1d021);
+ --pa-metal:light-dark(#dde4d9,#303d3c);
+ --pa-copper:light-dark(#a13e1c,#f8a077);
+ --pa-glint:light-dark(#fcfffad4,#cfe5d52b);
+ --pa-shadow:light-dark(#9eaa9c,#131a1b);
+ --pa-highlight:light-dark(#fafff9,#3b4b49);
+ --pa-rim:light-dark(#c1cbbc,#142021);
+}
+#pulse-resonance .pa-shell {border-radius:22px;box-shadow:inset 0 1px 0 var(--pa-glint),0 20px 45px #00000022;background:var(--pa-paper)}
+#pulse-resonance .pa-top {padding:24px 31px;background:var(--pa-paper)}
+#pulse-resonance .pa-top::after {display:none}
+#pulse-resonance .pa-wordmark {font-family:'Syne',sans-serif;font-size:29px;font-weight:600;letter-spacing:-1.3px}
+#pulse-resonance .pa-wordmark small {font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:1.3px;font-weight:400;display:block;margin-bottom:1px}
+#pulse-resonance .pa-mark {width:35px;height:34px;background:transparent;border-radius:0;box-shadow:none;display:flex;align-items:center;gap:3px}
+#pulse-resonance .pa-mark::before, #pulse-resonance .pa-mark::after {display:none}
+#pulse-resonance .pa-mark i {display:block;width:8px;height:18px;border-radius:5px;background:linear-gradient(120deg,#ffe5c8,#e98755 65%,#b94c27);box-shadow:inset 1px 1px 0 #fff5,2px 3px 4px #0002;transform:rotate(-12deg)}
+#pulse-resonance .pa-mark i:nth-child(2) {height:31px}
+#pulse-resonance .pa-mark i:nth-child(3) {height:23px}
+#pulse-resonance .pa-nav {background:var(--pa-paper);border-radius:12px;padding:5px;box-shadow:inset 3px 3px 6px var(--pa-shadow),inset -3px -3px 6px var(--pa-highlight);gap:5px}
+#pulse-resonance .pa-nav button {border-radius:8px;padding:9px 13px;font-size:12px}
+#pulse-resonance .pa-nav button[aria-pressed='true'] {background:linear-gradient(130deg,var(--pa-surface),var(--pa-paper));box-shadow:inset 0 1px 0 var(--pa-glint),2px 2px 4px var(--pa-shadow);color:var(--pa-text)}
+#pulse-resonance .pa-hero {min-height:0;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.12fr);align-items:center;gap:10px;padding:26px 44px 48px;background:var(--pa-paper);color:var(--pa-text)}
+#pulse-resonance .pa-hero::after {display:none}
+#pulse-resonance .pa-hero-copy {padding:4px 0 0;max-width:none}
+#pulse-resonance .pa-hero .pa-kicker {color:var(--pa-copper);letter-spacing:1.5px;margin-bottom:24px}
+#pulse-resonance h1 {font-family:'Syne',sans-serif;font-weight:600;font-size:52px;letter-spacing:-2.1px;line-height:1.07;margin-bottom:20px}
+#pulse-resonance .pa-hero p {color:var(--pa-muted);font-size:14px;line-height:1.7;max-width:250px;margin-bottom:25px}
+#pulse-resonance .pa-button {border:0;border-radius:10px;background:linear-gradient(135deg,var(--pa-surface),var(--pa-paper));box-shadow:3px 3px 7px var(--pa-shadow),-2px -2px 6px var(--pa-highlight),inset 0 1px 0 var(--pa-glint);min-height:42px;padding:11px 17px;font-size:12px}
+#pulse-resonance .pa-button:hover {box-shadow:2px 2px 4px var(--pa-shadow),-1px -1px 4px var(--pa-highlight),inset 0 1px 0 var(--pa-glint)}
+#pulse-resonance .pa-button-primary {background:linear-gradient(135deg,#f7b881,#e58b56 65%,#ce6a39);color:#2c2119;box-shadow:4px 4px 9px var(--pa-shadow),-2px -2px 6px var(--pa-highlight),inset 0 1px 0 #ffe5c8;min-height:44px;font-weight:600}
+#pulse-resonance .pa-contact-strip {margin:0 28px;box-shadow:inset 3px 3px 7px var(--pa-shadow),inset -3px -3px 7px var(--pa-highlight);border:0;background:var(--pa-paper);border-radius:13px}
+#pulse-resonance .pa-contact-strip > div {padding:17px 22px}
+#pulse-resonance .pa-workspace {padding:29px 31px 31px}
+#pulse-resonance .pa-source[aria-pressed='true'] {border-color:transparent;background:linear-gradient(130deg,var(--pa-surface),var(--pa-paper));box-shadow:4px 4px 9px var(--pa-shadow),-3px -3px 9px var(--pa-highlight),inset 0 1px 0 var(--pa-glint)}
+#pulse-resonance .pa-reading {background:linear-gradient(145deg,var(--pa-surface),var(--pa-paper));border:0;box-shadow:6px 6px 15px var(--pa-shadow),-4px -4px 12px var(--pa-highlight),inset 0 1px 0 var(--pa-glint);border-radius:15px}
+#pulse-resonance .pa-reading::before {display:none}
+#pulse-resonance .pa-mini {background:linear-gradient(140deg,var(--pa-surface),var(--pa-paper));box-shadow:3px 3px 6px var(--pa-shadow),-2px -2px 6px var(--pa-highlight),inset 0 1px 0 var(--pa-glint)}
+#pulse-resonance .pa-mini::after {box-shadow:none;background:linear-gradient(110deg,#fff2,transparent)}
+#pulse-resonance .pa-mini-record::before {background:linear-gradient(145deg,#d09a69,#a77142);box-shadow:3px 3px 0 var(--pa-paper),4px 4px 0 #83988b,6px 6px 0 var(--pa-paper),inset 0 1px 0 #f4d1a1}
+#pulse-resonance .pa-mini-gap::before {border-color:var(--pa-muted);background:linear-gradient(45deg,transparent 46%,var(--pa-muted) 47%,var(--pa-muted) 53%,transparent 54%)}
+#pulse-resonance .pa-mini-storage::before {background:linear-gradient(90deg,#506e62,#b1c4b1 28%,#819d8a 58%,#425f55);box-shadow:inset 0 2px 0 #d1e1c9,0 3px 0 var(--pa-paper),0 4px 0 #688275}
+#pulse-resonance .pa-signal-object {position:relative;justify-self:center;width:100%;max-width:370px;padding:15px 13px 0}
+#pulse-resonance .pa-plinth {position:relative;aspect-ratio:1;border-radius:50%;padding:18px;background:linear-gradient(135deg,var(--pa-surface),var(--pa-paper) 65%,var(--pa-rim));box-shadow:14px 16px 29px var(--pa-shadow),-12px -12px 28px var(--pa-highlight),inset 0 1px 0 var(--pa-glint)}
+#pulse-resonance .pa-dial-recess {width:100%;height:100%;border-radius:50%;position:relative;box-shadow:inset 5px 5px 12px var(--pa-shadow),inset -4px -4px 8px var(--pa-highlight);padding:15px}
+#pulse-resonance .pa-dial {height:100%;width:100%;position:relative;border-radius:50%;background:linear-gradient(135deg,var(--pa-surface),var(--pa-paper));box-shadow:6px 6px 9px var(--pa-shadow),-4px -4px 9px var(--pa-highlight),inset 0 1px 0 var(--pa-glint);display:grid;place-items:center}
+#pulse-resonance .pa-dial svg {position:absolute;inset:0;width:100%;height:100%;overflow:visible}
+#pulse-resonance .pa-dial-clock {position:absolute;top:5px;left:50%;transform:translateX(-50%);font:400 11px/1.4 'IBM Plex Mono',monospace;color:var(--pa-muted)}
+#pulse-resonance .pa-dial-core {width:64%;height:64%;border-radius:50%;background:linear-gradient(135deg,var(--pa-paper),var(--pa-surface));box-shadow:inset 3px 3px 7px var(--pa-shadow),inset -3px -3px 6px var(--pa-highlight);display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:11px;gap:8px}
+#pulse-resonance .pa-dial-core strong {font:600 54px/1 'Syne',sans-serif;letter-spacing:-2px;color:var(--pa-text)}
+#pulse-resonance .pa-dial-core strong.pa-word {font-size:27px;letter-spacing:-.8px}
+#pulse-resonance .pa-dial-core small {font:400 11px/1.4 'IBM Plex Mono',monospace;color:var(--pa-muted)}
+#pulse-resonance .pa-dial-core span {display:block;width:26px;height:4px;border-radius:3px;background:var(--pa-copper);box-shadow:0 1px 0 var(--pa-highlight)}
+#pulse-resonance .pa-dial-caption {display:flex;justify-content:space-between;gap:8px;align-items:center;margin-top:24px;padding:0 9px;color:var(--pa-muted);font:400 11px/1.5 'IBM Plex Mono',monospace}
+#pulse-resonance .pa-dial-caption i {display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--pa-copper);margin-right:7px}
+#pulse-resonance .pa-reader-banner {background:var(--pa-paper);color:var(--pa-text);padding:27px 34px 25px;min-height:0;overflow:visible}
+#pulse-resonance .pa-reader-banner::after {display:none}
+#pulse-resonance .pa-reader-banner .pa-kicker {color:var(--pa-copper)}
+#pulse-resonance .pa-reader-banner h1 {font-family:'Syne',sans-serif;font-size:39px;font-weight:600;margin-top:15px}
+#pulse-resonance .pa-reader-banner p {color:var(--pa-muted)}
+#pulse-resonance .pa-reader-banner .pa-stamp {display:inline-flex;gap:7px;align-items:center;font:400 11px/1.5 'IBM Plex Mono',monospace;padding:7px 10px;border-radius:8px;box-shadow:inset 2px 2px 4px var(--pa-shadow),inset -2px -2px 4px var(--pa-highlight);margin-top:20px;color:var(--pa-muted)}
+#pulse-resonance .pa-stamp .pa-mark {transform:scale(.5);width:26px;height:20px;transform-origin:center}
+#pulse-resonance .pa-incident-body {padding-top:13px}
+#pulse-resonance .pa-evidence-ticket {border:0;border-radius:14px;background:linear-gradient(135deg,var(--pa-surface),var(--pa-paper));box-shadow:5px 5px 13px var(--pa-shadow),-4px -4px 11px var(--pa-highlight),inset 0 1px 0 var(--pa-glint)}
+#pulse-resonance .pa-evidence-ticket::before {display:none}
+#pulse-resonance .pa-report {box-shadow:5px 5px 12px var(--pa-shadow),-3px -3px 10px var(--pa-highlight);border:0;background:var(--pa-surface)}
+#pulse-resonance[data-busy='true'] .pa-dial-core span {animation:pa-signal-read .7s ease-in-out}
+@keyframes pa-signal-read {50%{width:45px}}
+@media (prefers-reduced-motion:reduce) {#pulse-resonance[data-busy='true'] .pa-dial-core span {animation:none}}
+@media (max-width:800px) {
+ #pulse-resonance .pa-top {padding:23px 25px}
+ #pulse-resonance .pa-hero {padding:18px 28px 38px;gap:16px}
+ #pulse-resonance h1 {font-size:43px;letter-spacing:-1.6px}
+ #pulse-resonance .pa-dial-core strong {font-size:46px}
+ #pulse-resonance .pa-dial-core small {font-size:11px}
+ #pulse-resonance .pa-plinth {padding:13px}
+ #pulse-resonance .pa-dial-recess {padding:12px}
+ #pulse-resonance .pa-signal-object {padding:10px 4px 0}
+ #pulse-resonance .pa-contact-strip {margin:0 22px}
+}
+@media (max-width:620px) {
+ #pulse-resonance .pa-shell {border-radius:17px}
+ #pulse-resonance .pa-top {padding:20px 23px;gap:18px}
+ #pulse-resonance .pa-brand {order:1}
+ #pulse-resonance .pa-appearance {order:2}
+ #pulse-resonance .pa-nav {order:3;width:100%;margin:0;gap:5px}
+ #pulse-resonance .pa-hero {grid-template-columns:1fr;gap:23px;padding:22px 26px 30px;min-height:0}
+ #pulse-resonance .pa-hero-copy {padding:0}
+ #pulse-resonance .pa-hero .pa-kicker {margin-bottom:15px}
+ #pulse-resonance h1 {font-size:43px;max-width:310px}
+ #pulse-resonance .pa-hero p {max-width:260px;margin-bottom:20px}
+ #pulse-resonance .pa-signal-object {max-width:250px;padding:6px 8px 0}
+ #pulse-resonance .pa-dial-caption {margin-top:23px;padding:0 2px;font-size:11px}
+ #pulse-resonance .pa-contact-strip {margin:0 19px}
+ #pulse-resonance .pa-contact-strip > div {padding:13px 16px}
+ #pulse-resonance .pa-contact-strip > div:first-child {padding:14px 16px}
+ #pulse-resonance .pa-workspace {padding:27px 20px}
+ #pulse-resonance .pa-source {padding:11px 8px}
+ #pulse-resonance .pa-reader-banner {padding:22px 24px}
+ #pulse-resonance .pa-reader-banner h1 {font-size:34px}
+}
+</style>
+<div id="pulse-resonance" aria-label="System Pulse — Resonance design study" data-appearance="system">
+  <div class="pa-shell">
+    <header class="pa-top">
+      <div class="pa-brand"><span class="pa-mark" aria-hidden="true"><i></i><i></i><i></i></span><span class="pa-wordmark"><small>SYSTEM</small>pulse</span></div>
+      <nav class="pa-nav" aria-label="Pulse views">
+        <button type="button" class="cursor-interaction" data-view="home" aria-pressed="true">This pulse</button>
+        <button type="button" class="cursor-interaction" data-view="incident" aria-pressed="false">Recorded incident</button>
+      </nav>
+      <button type="button" class="pa-appearance cursor-interaction" data-action="appearance" aria-label="Change appearance"><span class="pa-appearance-dot" aria-hidden="true"></span><span>Appearance</span></button>
+    </header>
+    <div class="pa-content"></div>
+    <div class="pa-live" aria-live="polite"></div>
+    <footer class="pa-footer"><span>SYSTEM PULSE / RESONANCE</span><span>Illustrative records · No PC connected</span></footer>
+  </div>
+  <div class="pa-review">
+    <label>Example <select aria-label="Example reading"><option value="incident">Restart + access gap</option><option value="empty">No matches returned</option><option value="partial">Partial retained record</option><option value="offline">Collector unavailable</option></select></label>
+    <span class="pa-review-note">Illustrative input · source-backed marks · no PC connected.</span>
+  </div>
+</div>
+<script>
+(()=>{
+ const root=document.getElementById('pulse-resonance');
+ const content=root.querySelector('.pa-content');
+ const live=root.querySelector('.pa-live');
+ const sample={id:'sample-pulse',collected:'2026-10-01T10:00:00Z',span:['2026-10-01T09:59:00Z','2026-10-01T10:00:00Z'],windowHours:24,
+  stops:[{id:'sample-stop',estimatedStop:'2026-10-01T09:42:00Z',nextStart:'2026-10-01T09:46:00Z',bugcheck:'0x124',sourceRefs:[1201,1200,1202]}],
+  events:[{channel:'System',provider:'EventLog',eventId:6008,recordId:1201,timeCreated:'2026-10-01T09:46:03Z',shutdownEstimate:'2026-10-01T09:42:00Z'},
+   {channel:'System',provider:'Kernel-Power',eventId:41,recordId:1200,timeCreated:'2026-10-01T09:46:01Z',bugcheckDecimal:292},
+   {channel:'System',provider:'BugCheck',eventId:1001,recordId:1202,timeCreated:'2026-10-01T09:46:07Z',bugcheck:'0x124'}],
+  hardware:{source:'Kernel-WHEA/Errors',outcome:'denied',rows:null},volumes:[{source:'volume reading',name:'System volume',totalGiB:512,freeGiB:132}],applicationReports:[]};
+ const state={view:'home',area:'restart',example:'incident',appearance:'system',inspect:false,report:false,busy:false};
+ let pulseTimer;
+ function restore(s){if(!s)return;for(const [key,values] of Object.entries({view:['home','incident'],area:['restart','hardware','storage'],example:['incident','empty','partial','offline'],appearance:['system','light','dark']}))if(values.includes(s[key]))state[key]=s[key];}
+ restore(window.openai?.widgetState?.privateContent);
+ const safe=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+ const clock=iso=>new Date(iso).toISOString().slice(11,16);
+ const returnedStops=()=>state.example==='empty'?[]:sample.stops;
+ const denied=()=>state.example!=='empty';
+ const button=(text,action,primary=false)=>`<button type="button" class="pa-button ${primary?'pa-button-primary ':''}cursor-interaction" data-action="${action}" ${state.busy&&action==='take'?'disabled':''}>${text}</button>`;
+ function signalObject(){
+  const st=returnedStops()[0],v=sample.volumes[0];
+  const restart=state.area==='restart',storage=state.area==='storage';
+  const ticks=Array.from({length:sample.windowHours},(_,i)=>{const a=(i/sample.windowHours)*Math.PI*2;return `<line x1="${150+Math.sin(a)*130}" y1="${150-Math.cos(a)*130}" x2="${150+Math.sin(a)*124}" y2="${150-Math.cos(a)*124}" stroke="var(--pa-muted)" opacity=".38" stroke-width="1.3"/>`;}).join('');
+  const angle=st?((new Date(st.estimatedStop)-new Date(sample.collected))/(sample.windowHours*3600000))*Math.PI*2:0;
+  const x=150+Math.sin(angle)*116,y=150-Math.cos(angle)*116;
+  const gapLines=Array.from({length:9},(_,i)=>`<line x1="${87+i*10}" y1="38" x2="${95+i*10}" y2="51" stroke="var(--pa-muted)" stroke-width="2" opacity=".55"/>`).join('');
+  const visual=restart?`${ticks}${st?`<circle cx="${x}" cy="${y}" r="9" fill="var(--pa-paper)"/><circle cx="${x}" cy="${y}" r="5" fill="var(--pa-copper)"/>`:''}`:storage?`<circle cx="150" cy="150" r="115" fill="none" stroke="var(--pa-line)" stroke-width="9"/><circle cx="150" cy="150" r="115" fill="none" stroke="var(--pa-copper)" stroke-width="9" stroke-linecap="round" stroke-dasharray="${(v.totalGiB-v.freeGiB)/v.totalGiB*2*Math.PI*115} ${2*Math.PI*115}" transform="rotate(-90 150 150)"/>`:denied()?gapLines:`<circle cx="150" cy="34" r="4" fill="var(--pa-muted)"/>`;
+  const value=restart?returnedStops().length:storage?v.freeGiB:denied()?'Denied':'Empty';
+  const label=restart?'recorded restart'+(returnedStops().length===1?'':'s'):storage?'GiB free':'source outcome';
+  const summary=restart?`${returnedStops().length} composed restart in a ${sample.windowHours}-hour period${st?`; estimated stop ${clock(st.estimatedStop)} UTC`:''}. This is not a health score.`:storage?`${v.totalGiB-v.freeGiB} GiB used of ${v.totalGiB} GiB total; ${v.freeGiB} GiB free.`:denied()?'Hardware-error source access denied. Content unknown.':'No matching hardware-error reports returned.';
+  return `<div class="pa-signal-object"><div class="pa-plinth"><div class="pa-dial-recess"><div class="pa-dial"><svg viewBox="0 0 300 300" role="img" aria-label="${safe(summary)}">${visual}</svg>${restart?`<span class="pa-dial-clock">${clock(sample.collected)}</span>`:''}<div class="pa-dial-core"><small>${restart?'WINDOWS RECORD':storage?'SYSTEM VOLUME':'HARDWARE SOURCE'}</small><strong ${typeof value==='string'?'class="pa-word"':''}>${value}</strong><small>${label}</small><span aria-hidden="true"></span></div></div></div></div><div class="pa-dial-caption"><span><i aria-hidden="true"></i>${restart?(st?'Stop estimate · '+clock(st.estimatedStop):'No matching stops'):storage?'Used / total capacity':denied()?'Source content unknown':'No matching reports'}</span><span>${restart?sample.windowHours+'H / UTC':storage?'GiB':'RETURNED'}</span></div></div>`;
+ }
+ const scopes=()=>`<span class="pa-kicker">Selected period</span><strong>Last ${sample.windowHours} hours</strong>`;
+ function contact(){return `<div class="pa-contact-strip"><div><span class="pa-kicker">Illustrative collector</span><strong class="pa-contact-value"><span class="pa-dot" aria-hidden="true"></span>${state.example==='offline'?'Contact unavailable':'Available in this example'}</strong></div><div><span class="pa-kicker">${state.example==='offline'?'Saved reading':'Latest reading'}</span><strong>${clock(sample.collected)} UTC</strong></div><div>${scopes()}</div></div>`;}
+ function sources(){return `<nav class="pa-source-menu" aria-label="Observation areas">${[
+  ['restart','record',returnedStops().length?`${returnedStops().length} restart`:'No matches','Windows stop record'],
+  ['hardware','gap','Hardware',denied()?'Source access denied':'No matching reports'],
+  ['storage','storage','Storage',`${sample.volumes[0].freeGiB} GiB free`]
+ ].map(([id,shape,title,sub])=>`<button type="button" class="pa-source cursor-interaction" data-area="${id}" aria-pressed="${state.area===id}"><span class="pa-mini pa-mini-${shape}" aria-hidden="true"></span><span><strong>${title}</strong><span class="pa-small">${sub}</span></span><span class="pa-source-arrow" aria-hidden="true">↗</span></button>`).join('')}</nav>`;}
+ function records(){if(state.area==='storage')return sample.volumes;if(state.area==='hardware')return denied()?sample.hardware:{source:sample.hardware.source,outcome:'empty',rows:[]};return returnedStops().length?sample.events:[];}
+ function inspector(){return `<section class="pa-source-inspector" aria-label="Source inspection"><div class="pa-section-head"><span class="pa-kicker">Source records</span><button type="button" class="pa-link-button cursor-interaction" data-action="close-inspect">Close inspection</button></div><pre>${safe(JSON.stringify(records(),null,2))}</pre><p class="pa-small" style="margin:11px 0 0">Synthetic source · selected ${sample.windowHours}-hour period · collected ${clock(sample.collected)} UTC</p></section>`;}
+ function reading(){
+  const st=returnedStops()[0];const v=sample.volumes[0];
+  let body='';
+  if(state.area==='restart')body=st?`<div class="pa-kicker">Windows’ recorded account</div><h3>An unexpected<br>restart.</h3><p>Windows recorded a stop code. These records do not establish its cause.</p><div class="pa-inline-meta"><span>${clock(st.estimatedStop)} UTC · stop estimate</span><span>${st.bugcheck} · recorded code</span></div><div class="pa-reading-actions">${button('Open incident <span aria-hidden="true">↗</span>','incident')}${button('Inspect source','inspect')}</div>`:`<div class="pa-kicker">Returned record</div><h3>No matching stops.</h3><p>No matching unexpected-stop records were returned for this period. This does not establish that the machine is healthy.</p>${button('Inspect source','inspect')}`;
+  if(state.area==='hardware')body=`<div class="pa-kicker">Hardware-error source</div><h3>${denied()?'A gap in the record.':'No matching reports.'}</h3><p>${denied()?'Windows denied access to this source. Its content is unknown; we cannot establish whether it contains hardware-error reports.':'The source returned no matching hardware-error reports. This does not establish the absence of a hardware fault.'}</p><div class="pa-inline-meta"><span>${safe(sample.hardware.source)}</span><span>${denied()?'Denied':'Empty matches'}</span></div>${button('Inspect source','inspect')}`;
+  if(state.area==='storage')body=`<div class="pa-kicker">${safe(v.name)}</div><h3>${v.freeGiB} GiB available.</h3><p>Space reported by the volume reading. It does not establish historical growth or what is safe to remove.</p><div class="pa-volume-track" role="img" aria-label="${v.totalGiB-v.freeGiB} GiB used of ${v.totalGiB} GiB total"><span style="width:${(v.totalGiB-v.freeGiB)/v.totalGiB*100}%"></span></div><div class="pa-volume-label"><span>${v.totalGiB-v.freeGiB} GiB used</span><span>${v.totalGiB} GiB total</span></div><div class="pa-reading-actions" style="margin-top:24px">${button('Inspect source','inspect')}</div>`;
+  return `<section class="pa-reading" aria-label="Selected reading">${body}${state.example==='partial'?'<p class="pa-small" style="margin-top:18px">Retained reach before the restart is unknown. This example cannot establish completeness.</p>':''}${state.example==='offline'?'<p class="pa-small" style="margin-top:18px">This is the saved reading. Collector contact is unavailable; the reason is not established.</p>':''}${state.inspect?inspector():''}</section>`;
+ }
+ function home(){return `<section class="pa-hero" aria-label="Take a pulse"><div class="pa-hero-copy"><div class="pa-kicker">The attentive instrument</div><h1>A little closer.<br>A lot clearer.</h1><p>Take a pulse of your PC.<br>Explore its recorded events, returned readings, and unanswered questions.</p>${button(`${state.busy?'Taking a pulse…':'Take a pulse'} <span aria-hidden="true">↗</span>`,'take',true)}</div>${signalObject()}</section>${contact()}<main class="pa-workspace"><div class="pa-section-head"><h2>On the record.</h2><span class="pa-small">Selected ${sample.windowHours}-hour period<br>Collected ${clock(sample.collected)} UTC</span></div><div class="pa-record-grid">${sources()}${reading()}</div></main>`;}
+ function incident(){const st=returnedStops()[0];return `<section class="pa-reader-banner"><div class="pa-kicker">Recorded incident / ${st?st.id:'returned record'}</div><h1>${st?'The interruption,<br>in focus.':'No matching stop records.'}</h1><p>${st?'A stop estimate and a later filing. Keep both clocks.':'An empty match belongs to the selected period.'}</p><span class="pa-stamp"><span class="pa-mark" aria-hidden="true"><i></i><i></i><i></i></span>Selected ${sample.windowHours}H · collected ${clock(sample.collected)} UTC</span></section><main class="pa-incident-body"><div><div class="pa-section-head"><h2>${st?'Windows recorded a restart.':'What the record establishes'}</h2></div>${st?`<div class="pa-record-path"><div class="pa-record-step"><span class="pa-record-time">${clock(st.estimatedStop)}</span><div><strong>Estimated stop · UTC</strong><p>Windows’ shutdown estimate<br>Event ${sample.events[0].eventId} / record ${sample.events[0].recordId}</p></div></div><div class="pa-record-step"><span class="pa-record-time">${clock(st.nextStart)}</span><div><strong>The next start reported it · UTC</strong><p>A separate filing time<br>Events ${sample.events.slice(1).map(e=>e.eventId).join(' and ')}</p></div></div></div>`:'<p class="pa-small">No matching unexpected-stop records were returned. This does not establish that the machine is healthy.</p>'}<div class="pa-cause"><strong>${st?'The cause is not established.':'No whole-machine verdict.'}</strong><p>${st?`The recorded code ${st.bugcheck} is a lead to investigate. It does not identify the failing component.`:'This is an empty match for a bounded question.'}</p></div>${state.inspect?inspector():''}<div class="pa-reading-actions" style="margin-top:21px">${button('Inspect source','inspect')}${button('Back to this pulse','home')}</div></div><aside class="pa-evidence-ticket"><div class="pa-kicker">Evidence, kept together</div><h3>For the next look.</h3><dl><dt>Question</dt><dd>Unexpected stops / last ${sample.windowHours} hours</dd><dt>Collection</dt><dd>${clock(sample.span[0])}–${clock(sample.span[1])} UTC</dd><dt>Supporting rows</dt><dd>${st?sample.events.length:0} returned · ${st?'one composed incident':'no composed incidents'}</dd><dt>Limits</dt><dd>${denied()?'Hardware-error source denied.':'No matching hardware-error reports.'}${state.example==='partial'?' Unknown retained reach.':''}${state.example==='offline'?' Collector contact unavailable; saved reading retained.':''}</dd></dl>${button('Prepare report <span aria-hidden="true">↗</span>','report',true)}</aside></main>${state.report?report():''}`;}
+ function report(){const st=returnedStops()[0];return `<section class="pa-report" aria-label="Pulse report preview"><div class="pa-section-head"><span class="pa-kicker">System Pulse / report preview</span><button type="button" class="pa-link-button cursor-interaction" data-action="close-report">Close preview</button></div><h3>The record, ready to explain.</h3><p>${st?`Windows recorded an unexpected restart. The stop estimate is ${clock(st.estimatedStop)} UTC; the next-start report was filed after ${clock(st.nextStart)} UTC. The bug-check code is ${st.bugcheck}. These records do not establish its cause.`:'No matching stop records were returned in the selected period. This is not a machine-health assessment.'}</p><dl><dt>Observation</dt><dd>${sample.collected.slice(0,10)} · ${clock(sample.span[0])}–${clock(sample.span[1])} UTC · illustrative sample</dd><dt>Selected period</dt><dd>Last ${sample.windowHours} hours ending ${clock(sample.collected)} UTC</dd><dt>Source references</dt><dd>${st?sample.events.map(e=>`Event ${e.eventId} / record ${e.recordId}`).join(' · '):'Empty matching stop records'}</dd><dt>Not established</dt><dd>Root cause${denied()?', hardware-error source content':''}${state.example==='partial'?', complete retained reach':''}${state.example==='offline'?', why collector contact was lost':''}</dd></dl><p class="pa-small">Preview only. No report has been sent.</p></section>`;}
+ function remember(){const snapshot={view:state.view,area:state.area,example:state.example,appearance:state.appearance};window.openai?.setWidgetState?.({modelContent:{direction:'Aperture',appearance:state.appearance,view:state.view,example:state.example},privateContent:snapshot})?.catch(()=>{});}
+ function render(){root.dataset.appearance=state.appearance;root.dataset.busy=String(state.busy);root.querySelectorAll('[data-view]').forEach(b=>b.setAttribute('aria-pressed',String(state.view===b.dataset.view)));root.querySelector('.pa-review select').value=state.example;root.querySelector('.pa-appearance').setAttribute('aria-label',`Change appearance; current ${state.appearance}`);content.innerHTML=state.view==='home'?home():incident();}
+ render();
+ root.addEventListener('change',e=>{if(e.target.matches('.pa-review select')){clearTimeout(pulseTimer);state.busy=false;state.example=e.target.value;state.inspect=false;state.report=false;live.textContent='';render();remember();}});
+ root.addEventListener('click',e=>{
+  const b=e.target.closest('button');if(!b||!root.contains(b))return;const action=b.dataset.action;
+  if(b.dataset.view){state.view=b.dataset.view;state.area='restart';state.inspect=false;state.report=false;}
+  if(b.dataset.area){state.area=b.dataset.area;state.inspect=false;}
+  if(action==='appearance'){state.appearance=state.appearance==='system'?'dark':state.appearance==='dark'?'light':'system';}
+  if(action==='incident'){state.view='incident';state.area='restart';state.inspect=false;}
+  if(action==='home'){state.view='home';state.area='restart';state.inspect=false;state.report=false;}
+  if(action==='inspect')state.inspect=true;
+  if(action==='close-inspect')state.inspect=false;
+  if(action==='report')state.report=true;
+  if(action==='close-report')state.report=false;
+  if(action==='take'){
+   if(state.example==='offline'){live.textContent='Collector unavailable. The saved sample is retained; no fresh reading was taken.';return;}
+   state.busy=true;render();live.textContent='Taking an illustrative pulse…';
+   pulseTimer=setTimeout(()=>{state.busy=false;state.view='home';state.inspect=false;state.report=false;render();live.textContent='Illustrative pulse ready. No PC was queried.';remember();},700);return;
+  }
+  render();remember();
+  if(action==='report')root.querySelector('.pa-report [data-action="close-report"]')?.focus({preventScroll:true});
+  else if(action==='inspect')root.querySelector('[data-action="close-inspect"]')?.focus({preventScroll:true});
+  else if(b.dataset.area)root.querySelector(`[data-area="${state.area}"]`)?.focus({preventScroll:true});
+ });
+ window.addEventListener('openai:set_globals',e=>{restore(e.detail?.globals?.widgetState?.privateContent);render();});
+ if(globalThis.Tweak){const finish={reflection:.65};const t=new Tweak({container:root,onChange:()=>root.style.setProperty('--pa-reflect',finish.reflection)});t.addSlider(finish,'reflection',{label:'Surface reflection',min:0,max:1,step:.05,reference:'--pa-reflect'});}
+})();
+</script>
+
+</body></html>
